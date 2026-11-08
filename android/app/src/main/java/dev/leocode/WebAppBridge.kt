@@ -1,8 +1,10 @@
 package dev.leocode
 
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -47,7 +49,7 @@ import kotlin.concurrent.thread
  * [Workspace.jail]. Secrets never cross this boundary.
  */
 class WebAppBridge(
-    private val activity: Activity,
+    private val activity: MainActivity,
     private val webView: WebView,
     private val workspace: Workspace,
     private val themeManager: ThemeManager,
@@ -183,6 +185,19 @@ class WebAppBridge(
                 "fs.mkdir" -> mkdir(payload)
                 "fs.rename" -> rename(payload)
                 "fs.delete" -> delete(payload)
+                "storage.info" -> storageInfo()
+                "storage.requestPermission" -> {
+                    requestStoragePermission(proxy, id)
+                    return
+                }
+                "saf.open" -> {
+                    openSaf(proxy, id)
+                    return
+                }
+                "saf.save" -> {
+                    saveSaf(payload, proxy, id)
+                    return
+                }
                 "proc.run" -> runProcess(payload, proxy, id)
                 "proc.cancel" -> cancelProcess(payload)
                 "term.open" -> openTerminal(payload, proxy, id)
@@ -193,6 +208,7 @@ class WebAppBridge(
             }
             sendOk(proxy, id, result)
         } catch (e: BridgeError) {
+            Log.w(TAG, "$method failed with BridgeError: ${e.code}: ${e.message}")
             sendError(proxy, id, e.code, e.message)
         } catch (e: Throwable) {
             Log.w(TAG, "$method failed", e)
@@ -327,14 +343,16 @@ class WebAppBridge(
     private fun delete(payload: JsonObject): JsonObject {
         val target = resolve(payload, "path")
         if (!target.exists()) throw BridgeError("E_NOT_FOUND", "no such file")
-        if (target == workspace.defaultWorkspace.canonicalFile) {
-            throw BridgeError("E_PERMISSION", "refusing to delete the workspace root")
+        if (target == workspace.defaultWorkspace.canonicalFile ||
+            target == Environment.getExternalStorageDirectory().canonicalFile
+        ) {
+            throw BridgeError("E_PERMISSION", "refusing to delete root storage")
         }
 
-        // Move to trash so a mis-tap is recoverable, then fall back to a real delete.
+        // Move to trash inside app workspace if possible, or delete directly
         val trash = File(workspace.root, TRASH_DIR).apply { mkdirs() }
         val dest = File(trash, "${System.currentTimeMillis()}-${target.name}")
-        val moved = target.renameTo(dest)
+        val moved = runCatching { target.renameTo(dest) }.getOrDefault(false)
         if (!moved && !target.deleteRecursively()) {
             throw BridgeError("E_IO", "delete failed")
         }
@@ -530,25 +548,117 @@ class WebAppBridge(
         io.shutdownNow()
     }
 
-    private fun resolve(payload: JsonObject, key: String): File {
-        val path = payload.str(key) ?: if (key == "path" || key == "cwd") "." else
-            throw BridgeError("E_BAD_ENVELOPE", "$key is required")
-        return try {
-            workspace.jail(workspace.defaultWorkspace, path)
-        } catch (e: SecurityException) {
-            throw BridgeError("E_PATH_OUTSIDE_ROOT", "path escapes the workspace")
+    private fun storageInfo(): JsonObject {
+        val hasPerm = activity.checkStoragePermission()
+        val extStorage = Environment.getExternalStorageDirectory().absolutePath
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        val documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath
+
+        return buildJsonObject {
+            put("hasPermission", hasPerm)
+            put("internalStorage", extStorage)
+            put("downloads", downloads)
+            put("documents", documents)
+            put("workspace", workspace.defaultWorkspace.absolutePath)
         }
     }
 
+    private fun requestStoragePermission(proxy: JavaScriptReplyProxy, id: String?) {
+        activity.runOnUiThread {
+            activity.requestStoragePermission { granted ->
+                sendOk(
+                    proxy,
+                    id,
+                    buildJsonObject {
+                        put("granted", granted)
+                    }
+                )
+            }
+        }
+    }
+
+    private fun openSaf(proxy: JavaScriptReplyProxy, id: String?) {
+        activity.runOnUiThread {
+            activity.openSafDocument { uri ->
+                if (uri == null) {
+                    sendOk(proxy, id, JsonNull)
+                    return@openSafDocument
+                }
+                io.execute {
+                    val name = activity.queryUriFileName(uri)
+                    val content = activity.readUriContent(uri)
+                    sendOk(
+                        proxy,
+                        id,
+                        buildJsonObject {
+                            put("name", name)
+                            put("uri", uri.toString())
+                            put("content", content)
+                            put("size", content.toByteArray(Charsets.UTF_8).size)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun saveSaf(payload: JsonObject, proxy: JavaScriptReplyProxy, id: String?) {
+        val filename = payload.str("name") ?: "document.txt"
+        val content = payload.str("content") ?: ""
+        activity.runOnUiThread {
+            activity.saveSafDocument(filename, content) { uri ->
+                if (uri == null) {
+                    sendOk(proxy, id, JsonNull)
+                    return@saveSafDocument
+                }
+                sendOk(
+                    proxy,
+                    id,
+                    buildJsonObject {
+                        put("name", filename)
+                        put("uri", uri.toString())
+                    }
+                )
+            }
+        }
+    }
+
+    private fun resolve(payload: JsonObject, key: String): File {
+        val raw = payload.str(key) ?: if (key == "path" || key == "cwd") "." else
+            throw BridgeError("E_BAD_ENVELOPE", "$key is required")
+
+        val target = if (raw.startsWith("/")) {
+            File(raw).normalize()
+        } else {
+            File(workspace.defaultWorkspace, raw).normalize()
+        }
+
+        // Security check: Never allow escaping into other apps' private data (/data/data/<other> or /data/user/0/<other>)
+        val targetPath = target.path
+        if (targetPath.startsWith("/data/data/") || targetPath.startsWith("/data/user/")) {
+            val pkg = activity.packageName
+            val allowed1 = "/data/data/$pkg"
+            val allowed2 = "/data/user/0/$pkg"
+            if (!targetPath.startsWith(allowed1) && !targetPath.startsWith(allowed2) &&
+                !targetPath.startsWith(workspace.root.canonicalPath) &&
+                !targetPath.startsWith(workspace.root.path)
+            ) {
+                throw BridgeError("E_PERMISSION", "Access to other application private storage is restricted")
+            }
+        }
+
+        return target
+    }
+
     private fun rel(file: File): String {
-        val root = workspace.defaultWorkspace.canonicalFile
-        val target = file.canonicalFile
+        val root = workspace.defaultWorkspace.normalize()
+        val target = file.normalize()
         if (target == root) return "."
         val prefix = root.path + File.separator
         return if (target.path.startsWith(prefix)) {
             target.path.substring(prefix.length).replace(File.separatorChar, '/')
         } else {
-            target.name
+            target.absolutePath
         }
     }
 

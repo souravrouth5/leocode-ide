@@ -59,6 +59,21 @@ export interface TerminalHandle {
   close: () => void
 }
 
+export interface StorageInfo {
+  hasPermission: boolean
+  internalStorage: string
+  downloads: string
+  documents: string
+  workspace: string
+}
+
+export interface SafDocument {
+  name: string
+  uri: string
+  content: string
+  size: number
+}
+
 /**
  * v1 bridge surface. Only methods listed here may cross the WebView boundary.
  * The Android implementation mirrors docs/bridge-contract.md; keep them in sync.
@@ -83,6 +98,11 @@ export interface Bridge {
   onThemeChanged(listener: (state: ThemeState) => void): () => void
   /** Real PTY. Returns null when the bridge has no terminal (browser mock). */
   openTerminal(options: TerminalOptions): Promise<TerminalHandle | null>
+  /** Device Storage & SAF capabilities */
+  getStorageInfo?(): Promise<StorageInfo>
+  requestStoragePermission?(): Promise<boolean>
+  openSafDocument?(): Promise<SafDocument | null>
+  saveSafDocument?(filename: string, content: string): Promise<{ name: string; uri: string } | null>
 }
 
 export class BridgeError extends Error {

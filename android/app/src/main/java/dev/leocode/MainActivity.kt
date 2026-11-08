@@ -3,11 +3,14 @@ package dev.leocode
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
@@ -44,6 +47,116 @@ class MainActivity : Activity() {
         private const val START_URL = "$ORIGIN/assets/web/index.html"
         const val DEV_URL_DEFAULT = "http://localhost:5173"
         const val DEV_URL_LOOPBACK = "http://127.0.0.1:5173"
+        const val PERMISSION_REQUEST_STORAGE = 1001
+        const val REQUEST_CODE_SAF_OPEN = 2001
+        const val REQUEST_CODE_SAF_SAVE = 2002
+    }
+
+    private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
+    private var pendingSafOpenCallback: ((Uri?) -> Unit)? = null
+    private var pendingSafSaveCallback: ((Uri?) -> Unit)? = null
+    private var pendingSafSaveContent: String? = null
+
+    fun checkStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                    PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    fun requestStoragePermission(callback: (Boolean) -> Unit) {
+        if (checkStoragePermission()) {
+            callback(true)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            pendingPermissionCallback = callback
+            requestPermissions(
+                arrayOf(
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ),
+                PERMISSION_REQUEST_STORAGE
+            )
+        } else {
+            callback(true)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_STORAGE) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingPermissionCallback?.invoke(granted)
+            pendingPermissionCallback = null
+        }
+    }
+
+    fun openSafDocument(callback: (Uri?) -> Unit) {
+        pendingSafOpenCallback = callback
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, REQUEST_CODE_SAF_OPEN)
+    }
+
+    fun saveSafDocument(filename: String, content: String, callback: (Uri?) -> Unit) {
+        pendingSafSaveCallback = callback
+        pendingSafSaveContent = content
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, filename)
+        }
+        startActivityForResult(intent, REQUEST_CODE_SAF_SAVE)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_SAF_OPEN) {
+            val uri = if (resultCode == RESULT_OK) data?.data else null
+            pendingSafOpenCallback?.invoke(uri)
+            pendingSafOpenCallback = null
+        } else if (requestCode == REQUEST_CODE_SAF_SAVE) {
+            val uri = if (resultCode == RESULT_OK) data?.data else null
+            if (uri != null && pendingSafSaveContent != null) {
+                runCatching {
+                    contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(pendingSafSaveContent!!.toByteArray(Charsets.UTF_8))
+                        stream.flush()
+                    }
+                }
+            }
+            pendingSafSaveContent = null
+            pendingSafSaveCallback?.invoke(uri)
+            pendingSafSaveCallback = null
+        }
+    }
+
+    fun queryUriFileName(uri: Uri): String {
+        var name = "document.txt"
+        runCatching {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    name = cursor.getString(nameIndex) ?: name
+                }
+            }
+        }
+        return name
+    }
+
+    fun readUriContent(uri: Uri): String {
+        return contentResolver.openInputStream(uri)?.use { stream ->
+            stream.bufferedReader(Charsets.UTF_8).readText()
+        } ?: ""
     }
 
     private lateinit var themeManager: ThemeManager
@@ -173,6 +286,7 @@ class MainActivity : Activity() {
 
         setContentView(
             FrameLayout(this).apply {
+                fitsSystemWindows = true
                 setBackgroundColor(themeManager.background())
                 addView(
                     webView,

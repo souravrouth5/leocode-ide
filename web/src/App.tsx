@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { createBridge, type AppInfo, type Bridge, type FileEntry, type ProcessEvent, type RunHandle, type ThemeState } from "./bridge"
+import { createBridge, type AppInfo, type Bridge, type FileEntry, type ProcessEvent, type RunHandle, type StorageInfo, type ThemeState } from "./bridge"
+import { EditMenu, FileMenu, OverflowMenu } from "./components/EditorMenus"
 import { FileTree } from "./components/FileTree"
 import {
   CodeIcon,
@@ -161,6 +162,14 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
   const [entries, setEntries] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState<OpenDoc[]>([])
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
+
+  useEffect(() => {
+    if (bridge.getStorageInfo) {
+      void bridge.getStorageInfo().then(setStorageInfo).catch(() => {})
+    }
+  }, [bridge])
+
   const [activePath, setActivePath] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [terminalMounted, setTerminalMounted] = useState(false)
@@ -223,12 +232,121 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         setDocs((current) => [...current, { path, content, saved: content }])
         setActivePath(path)
         setView("editor")
+        // Update recent files
+        const recents = [path, ...(settings.recentFiles || []).filter((p) => p !== path)].slice(0, 20)
+        updateSettings({ recentFiles: recents })
       } catch (e) {
         setError((e as Error).message)
       }
     },
-    [bridge, docs]
+    [bridge, docs, settings.recentFiles, updateSettings]
   )
+
+  const handleOpenSaf = useCallback(async () => {
+    if (!bridge.openSafDocument) return
+    try {
+      const doc = await bridge.openSafDocument()
+      if (!doc) return
+      const safPath = `saf://${doc.name}`
+      setDocs((current) => {
+        const exists = current.find((d) => d.path === safPath)
+        if (exists) return current
+        return [...current, { path: safPath, content: doc.content, saved: doc.content }]
+      })
+      setActivePath(safPath)
+      setView("editor")
+      flash(`Opened ${doc.name}`)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [bridge, flash])
+
+  const handleSaveAs = useCallback(() => {
+    if (!activeDoc) return
+    setPrompt({
+      title: "Save As",
+      label: "Save file as (filename or full path):",
+      initial: activeDoc.path.startsWith("saf://") ? activeDoc.path.slice(6) : activeDoc.path,
+      kind: "file"
+    })
+  }, [activeDoc])
+
+  const closeAllDocs = useCallback(() => {
+    if (docs.some(isDirty)) {
+      if (!window.confirm("You have unsaved changes. Discard and close all tabs?")) return
+    }
+    setDocs([])
+    setActivePath(null)
+  }, [docs])
+
+  const handleAddBookmark = useCallback(
+    (path: string) => {
+      const current = settings.bookmarks || []
+      if (!current.includes(path)) {
+        updateSettings({ bookmarks: [...current, path] })
+        flash("Bookmark added")
+      }
+    },
+    [settings.bookmarks, updateSettings, flash]
+  )
+
+  const handleRemoveBookmark = useCallback(
+    (path: string) => {
+      const current = settings.bookmarks || []
+      updateSettings({ bookmarks: current.filter((b) => b !== path) })
+      flash("Bookmark removed")
+    },
+    [settings.bookmarks, updateSettings, flash]
+  )
+
+  // Session restoration
+  const SESSION_KEY = "leocode.open-session"
+
+  useEffect(() => {
+    if (!settings.resumeSession) return
+    try {
+      const raw = localStorage.getItem(SESSION_KEY)
+      if (!raw) return
+      const session = JSON.parse(raw) as { paths: string[]; active: string | null }
+      if (session.paths && session.paths.length > 0) {
+        void Promise.all(
+          session.paths.map(async (p) => {
+            try {
+              const content = await bridge.read(p)
+              return { path: p, content, saved: content }
+            } catch {
+              return null
+            }
+          })
+        ).then((loaded) => {
+          const valid = loaded.filter((d): d is OpenDoc => d !== null)
+          if (valid.length > 0) {
+            setDocs(valid)
+            setActivePath(
+              session.active && valid.some((d) => d.path === session.active)
+                ? session.active
+                : valid[0].path
+            )
+          }
+        })
+      }
+    } catch {
+      // ignore corrupted session
+    }
+  }, [bridge, settings.resumeSession])
+
+  useEffect(() => {
+    if (!settings.resumeSession) return
+    try {
+      const session = {
+        paths: docs.map((d) => d.path).filter((p) => !p.startsWith("saf://")),
+        active: activePath
+      }
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+    } catch {
+      // quota
+    }
+  }, [docs, activePath, settings.resumeSession])
 
   const save = useCallback(
     async (path = activePath): Promise<boolean> => {
@@ -554,6 +672,67 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
           <span className="brand-name">LeoCode</span>
         </div>
         <div className="app-bar-actions">
+          <FileMenu
+            onNew={() =>
+              setPrompt({
+                kind: "file",
+                title: "New File",
+                label: "File name",
+                initial: ""
+              })
+            }
+            onOpenExplorer={() => setSidebarOpen(true)}
+            onOpenSaf={handleOpenSaf}
+            onSave={() => void save()}
+            onSaveAs={handleSaveAs}
+            onReload={() => void reloadFile()}
+            onCloseTab={() => activePath && closeDoc(activePath)}
+            onCloseAllTabs={closeAllDocs}
+            hasActiveDoc={activeDoc !== null}
+            isDirty={activeDirty}
+          />
+
+          <EditMenu
+            onUndo={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "undo" } })
+              )
+            }
+            onRedo={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "redo" } })
+              )
+            }
+            onSelectAll={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "selectAll" } })
+              )
+            }
+            onFormat={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "format" } })
+              )
+            }
+            onInsertDateTime={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", {
+                  detail: { action: "insert", value: new Date().toLocaleString() }
+                })
+              )
+            }
+            onIndent={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "indent" } })
+              )
+            }
+            onUnindent={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "unindent" } })
+              )
+            }
+            hasActiveDoc={activeDoc !== null}
+          />
+
           {activeDoc && (
             <button
               className="icon-btn run"
@@ -565,42 +744,41 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
               <PlayIcon size={19} />
             </button>
           )}
-          {activeDoc && (
-            <button
-              className={"icon-btn save" + (activeDirty ? " armed" : "")}
-              onClick={() => void save()}
-              disabled={!activeDirty}
-              aria-label={activeDirty ? "Save file" : "No unsaved changes"}
-              title={activeDirty ? "Save" : "Saved"}
-            >
-              <SaveIcon size={19} />
-            </button>
-          )}
-          {activeDoc && (
-            <button
-              className="icon-btn"
-              onClick={() => void reloadFile()}
-              aria-label={`Reload ${baseName(activeDoc.path)} from disk`}
-              title="Reload from disk"
-            >
-              <RefreshIcon size={19} />
-            </button>
-          )}
-          <button
-            className="icon-btn"
-            onClick={cycleTheme}
-            aria-label={`Theme: ${themeLabel}`}
-            title={`Theme: ${themeLabel}`}
-          >
-            <ThemeIcon size={19} />
-          </button>
-          <button
-            className="icon-btn"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Settings"
-          >
-            <SettingsIcon size={19} />
-          </button>
+
+          <OverflowMenu
+            onSearch={() =>
+              window.dispatchEvent(
+                new CustomEvent("leocode:editor-command", { detail: { action: "search" } })
+              )
+            }
+            onGotoLine={() => {
+              const line = window.prompt("Goto line number:")
+              if (line) {
+                window.dispatchEvent(
+                  new CustomEvent("leocode:editor-command", {
+                    detail: { action: "gotoLine", value: line }
+                  })
+                )
+              }
+            }}
+            onSelectSyntax={() => setSettingsOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            wordWrap={settings.wordWrap}
+            onToggleWordWrap={() => updateSettings({ wordWrap: !settings.wordWrap })}
+            lineNumbers={settings.lineNumbers}
+            onToggleLineNumbers={() => updateSettings({ lineNumbers: !settings.lineNumbers })}
+            onShowStatistics={() => {
+              if (!activeDoc) return
+              const lines = activeDoc.content.split("\n").length
+              const words = activeDoc.content.trim()
+                ? activeDoc.content.trim().split(/\s+/).length
+                : 0
+              const chars = activeDoc.content.length
+              flash(
+                `${lines} lines, ${words} words, ${chars} chars (${(chars / 1024).toFixed(1)} KB)`
+              )
+            }}
+          />
         </div>
       </header>
 
@@ -804,6 +982,9 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         loading={loading}
         docs={docs}
         activePath={activePath}
+        storageInfo={storageInfo}
+        bookmarks={settings.bookmarks || []}
+        recentFiles={settings.recentFiles || []}
         onOpenDoc={(path) => void openFile(path)}
         onCloseDoc={closeDoc}
         onNavigate={setCwd}
@@ -826,6 +1007,16 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
           })
         }
         onDelete={(entry) => void deleteEntry(entry)}
+        onOpenSaf={handleOpenSaf}
+        onAddBookmark={handleAddBookmark}
+        onRemoveBookmark={handleRemoveBookmark}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTerminal={() => {
+          setView("terminal")
+          setTerminalMounted(true)
+        }}
+        onOpenRuntimes={() => setView("runtimes")}
+        version={info?.version ?? "0.1.0"}
       />
 
       <RunSheet
@@ -859,17 +1050,16 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         onConfirm={(value) => void handlePrompt(value)}
       />
 
-      <ActionSheet
-        open={error !== null}
-        title="Something went wrong"
-        onClose={() => setError(null)}
-        actions={[
-          {
-            label: "Dismiss",
-            onSelect: () => setError(null)
-          }
-        ]}
-      />
+      <Sheet open={error !== null} onClose={() => setError(null)} title="Something went wrong">
+        <div style={{ padding: "16px 20px", color: "var(--fg, #eee)", wordBreak: "break-word", fontSize: "14px", lineHeight: "1.5" }}>
+          {error}
+        </div>
+        <div className="action-list">
+          <button className="action-row" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      </Sheet>
     </div>
   )
 }

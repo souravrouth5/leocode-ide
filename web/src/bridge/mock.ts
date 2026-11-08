@@ -4,6 +4,8 @@ import type {
   FileEntry,
   ProcessEvent,
   RunHandle,
+  SafDocument,
+  StorageInfo,
   TerminalHandle,
   TerminalOptions,
   ThemeMode,
@@ -281,6 +283,39 @@ export class MockBridge implements Bridge {
       if (!this.nodes.has(current)) {
         this.nodes.set(current, { kind: "dir", content: "", mtime: now() })
       }
+    }
+  }
+
+  async getStorageInfo(): Promise<StorageInfo> {
+    return {
+      hasPermission: true,
+      internalStorage: "/storage/emulated/0",
+      downloads: "/storage/emulated/0/Download",
+      documents: "/storage/emulated/0/Documents",
+      workspace: "."
+    }
+  }
+
+  async requestStoragePermission(): Promise<boolean> {
+    return true
+  }
+
+  async openSafDocument(): Promise<SafDocument | null> {
+    return {
+      name: "saf-sample.py",
+      uri: "content://saf/sample.py",
+      content: "# Opened via Storage Access Framework\nprint('SAF works!')\n",
+      size: 58
+    }
+  }
+
+  async saveSafDocument(
+    filename: string,
+    _content: string
+  ): Promise<{ name: string; uri: string } | null> {
+    return {
+      name: filename,
+      uri: `content://saf/${filename}`
     }
   }
 }

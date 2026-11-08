@@ -15,6 +15,11 @@ export interface UserSettings {
   wordWrap: boolean
   lineNumbers: boolean
   formatOnSave: boolean
+  resumeSession: boolean
+
+  // Navigation & Bookmarks
+  recentFiles: string[]
+  bookmarks: string[]
 
   // Terminal
   terminalFontSize: number
@@ -40,6 +45,9 @@ export const DEFAULT_SETTINGS: UserSettings = {
   wordWrap: true,
   lineNumbers: true,
   formatOnSave: false,
+  resumeSession: true,
+  recentFiles: [],
+  bookmarks: ["/storage/emulated/0/Download"],
   terminalFontSize: 13
 }
 

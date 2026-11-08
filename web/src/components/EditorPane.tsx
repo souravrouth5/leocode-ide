@@ -8,8 +8,11 @@ import {
   defaultKeymap,
   history,
   historyKeymap,
+  indentLess,
+  indentMore,
   indentWithTab,
   redo,
+  selectAll,
   undo
 } from "@codemirror/commands"
 import { bracketMatching, indentOnInput } from "@codemirror/language"
@@ -21,7 +24,7 @@ import { javascript } from "@codemirror/lang-javascript"
 import { json } from "@codemirror/lang-json"
 import { markdown } from "@codemirror/lang-markdown"
 import { python } from "@codemirror/lang-python"
-import { highlightSelectionMatches, searchKeymap } from "@codemirror/search"
+import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search"
 import { Compartment, EditorState, type Extension } from "@codemirror/state"
 import {
   drawSelection,
@@ -441,6 +444,62 @@ export function EditorPane({
     run(view)
     view.focus()
   }
+
+  useEffect(() => {
+    const handleCommand = (e: Event) => {
+      const custom = e as CustomEvent<{ action: string; value?: unknown }>
+      if (!custom.detail) return
+      const view = viewRef.current
+      if (!view) return
+      switch (custom.detail.action) {
+        case "undo":
+          undo(view)
+          view.focus()
+          break
+        case "redo":
+          redo(view)
+          view.focus()
+          break
+        case "selectAll":
+          selectAll(view)
+          view.focus()
+          break
+        case "format":
+          void handleFormat()
+          break
+        case "indent":
+          indentMore(view)
+          view.focus()
+          break
+        case "unindent":
+          indentLess(view)
+          view.focus()
+          break
+        case "search":
+          openSearchPanel(view)
+          view.focus()
+          break
+        case "gotoLine": {
+          const lineNum = Number(custom.detail.value)
+          if (!isNaN(lineNum) && lineNum > 0 && lineNum <= view.state.doc.lines) {
+            const line = view.state.doc.line(lineNum)
+            view.dispatch({
+              selection: { anchor: line.from },
+              scrollIntoView: true
+            })
+            view.focus()
+          }
+          break
+        }
+        case "insert": {
+          if (custom.detail.value) insert(String(custom.detail.value))
+          break
+        }
+      }
+    }
+    window.addEventListener("leocode:editor-command", handleCommand)
+    return () => window.removeEventListener("leocode:editor-command", handleCommand)
+  }, [handleFormat])
 
   return (
     <div className="editor-shell">

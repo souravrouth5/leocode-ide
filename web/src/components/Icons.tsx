@@ -328,4 +328,71 @@ export function PaletteIcon({ size = 20, className }: Props) {
   )
 }
 
+export function StarIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  )
+}
+
+export function HistoryIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <polyline points="12 7 12 12 15 15" />
+    </svg>
+  )
+}
+
+export function SmartphoneIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+      <line x1="12" y1="18" x2="12.01" y2="18" strokeWidth="2.5" />
+    </svg>
+  )
+}
+
+export function DownloadIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+export function EditIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  )
+}
+
+export function MoreVerticalIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <circle cx="12" cy="5" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function SafIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M8 7h8M8 11h6" />
+    </svg>
+  )
+}
+
+
 

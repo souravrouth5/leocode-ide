@@ -50,6 +50,8 @@ export type {
   OpenFile,
   ProcessEvent,
   RunHandle,
+  SafDocument,
+  StorageInfo,
   TerminalHandle,
   ThemeMode,
   ThemeState

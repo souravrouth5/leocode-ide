@@ -23,6 +23,11 @@ interface Props {
 }
 
 function parentOf(path: string) {
+  if (path.startsWith("/")) {
+    const lastSlash = path.lastIndexOf("/")
+    if (lastSlash <= 0) return "/"
+    return path.slice(0, lastSlash)
+  }
   return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "."
 }
 
@@ -35,6 +40,16 @@ function formatSize(bytes: number) {
 
 function crumbs(path: string) {
   if (path === ".") return [{ label: "workspace", path: "." }]
+  if (path.startsWith("/")) {
+    const parts = path.split("/").filter(Boolean)
+    const out = [{ label: "root", path: "/" }]
+    let current = ""
+    for (const part of parts) {
+      current = `${current}/${part}`
+      out.push({ label: part, path: current })
+    }
+    return out
+  }
   const parts = path.split("/")
   const out = [{ label: "workspace", path: "." }]
   let current = ""

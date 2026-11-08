@@ -5,6 +5,8 @@ import {
   type FileEntry,
   type ProcessEvent,
   type RunHandle,
+  type SafDocument,
+  type StorageInfo,
   type TerminalHandle,
   type TerminalOptions,
   type ThemeMode,
@@ -245,6 +247,31 @@ export class AndroidBridge implements Bridge {
         void this.send("term.close", { sessionId }).result.catch(() => {})
       }
     }
+  }
+
+  // -------------------------------------------------------- storage & SAF
+
+  async getStorageInfo(): Promise<StorageInfo> {
+    return this.send<StorageInfo>("storage.info", {}).result
+  }
+
+  async requestStoragePermission(): Promise<boolean> {
+    const reply = await this.send<{ granted: boolean }>("storage.requestPermission", {}).result
+    return Boolean(reply.granted)
+  }
+
+  async openSafDocument(): Promise<SafDocument | null> {
+    return this.send<SafDocument | null>("saf.open", {}).result
+  }
+
+  async saveSafDocument(
+    filename: string,
+    content: string
+  ): Promise<{ name: string; uri: string } | null> {
+    return this.send<{ name: string; uri: string } | null>("saf.save", {
+      name: filename,
+      content
+    }).result
   }
 }
 
