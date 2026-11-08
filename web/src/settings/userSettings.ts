@@ -20,6 +20,13 @@ export interface UserSettings {
   // Navigation & Bookmarks
   recentFiles: string[]
   bookmarks: string[]
+  openTabs: string[]
+  activeTab: string | null
+
+  // File Explorer Filtering & Sorting
+  showHiddenFiles: boolean
+  filterBinaryFiles: boolean
+  sortBy: "name-asc" | "name-desc" | "size-desc" | "size-asc" | "mtime-desc" | "mtime-asc" | "ext"
 
   // Terminal
   terminalFontSize: number
@@ -48,6 +55,11 @@ export const DEFAULT_SETTINGS: UserSettings = {
   resumeSession: true,
   recentFiles: [],
   bookmarks: ["/storage/emulated/0/Download"],
+  openTabs: [],
+  activeTab: null,
+  showHiddenFiles: false,
+  filterBinaryFiles: true,
+  sortBy: "name-asc",
   terminalFontSize: 13
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { XIcon } from "./Icons"
 
 interface SheetProps {
@@ -18,7 +19,7 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
     return () => window.removeEventListener("keydown", onKey)
   }, [open, onClose])
 
-  return (
+  return createPortal(
     <>
       <div
         className={"sheet-backdrop" + (open ? " is-open" : "")}
@@ -42,7 +43,8 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
         )}
         <div className="sheet-body">{children}</div>
       </section>
-    </>
+    </>,
+    document.body
   )
 }
 
@@ -72,8 +74,8 @@ export function ActionSheet({
             key={action.label}
             className={"action-row" + (action.destructive ? " destructive" : "")}
             onClick={() => {
-              onClose()
               action.onSelect()
+              onClose()
             }}
           >
             <span className="action-icon">{action.icon}</span>

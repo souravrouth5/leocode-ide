@@ -15,7 +15,7 @@ import {
   selectAll,
   undo
 } from "@codemirror/commands"
-import { bracketMatching, indentOnInput } from "@codemirror/language"
+import { StreamLanguage, bracketMatching, indentOnInput } from "@codemirror/language"
 import { cpp } from "@codemirror/lang-cpp"
 import { css } from "@codemirror/lang-css"
 import { html } from "@codemirror/lang-html"
@@ -23,7 +23,13 @@ import { java } from "@codemirror/lang-java"
 import { javascript } from "@codemirror/lang-javascript"
 import { json } from "@codemirror/lang-json"
 import { markdown } from "@codemirror/lang-markdown"
+import { php } from "@codemirror/lang-php"
 import { python } from "@codemirror/lang-python"
+import { rust } from "@codemirror/lang-rust"
+import { sql } from "@codemirror/lang-sql"
+import { xml } from "@codemirror/lang-xml"
+import { yaml } from "@codemirror/lang-yaml"
+import { shell } from "@codemirror/legacy-modes/mode/shell"
 import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search"
 import { Compartment, EditorState, type Extension } from "@codemirror/state"
 import {
@@ -95,6 +101,27 @@ export function getLanguageExtension(path: string): Extension {
       return markdown()
     case ".py":
       return python()
+    case ".php":
+    case ".phtml":
+    case ".php3":
+    case ".php4":
+    case ".php5":
+    case ".phps":
+      return php()
+    case ".rs":
+      return rust()
+    case ".sql":
+      return sql()
+    case ".xml":
+    case ".svg":
+      return xml()
+    case ".yml":
+    case ".yaml":
+      return yaml()
+    case ".sh":
+    case ".bash":
+    case ".zsh":
+      return StreamLanguage.define(shell)
     default:
       return []
   }
@@ -290,8 +317,9 @@ export function EditorPane({
   useEffect(() => {
     if (!host.current) return
 
+    const normalizedInitial = (initialContent || "").replace(/\r\n/g, "\n")
     const state = EditorState.create({
-      doc: initialContent,
+      doc: normalizedInitial,
       extensions: [
         lineNumbersCompartment.current.of(showLineNumbers ? lineNumbers() : []),
         lineWrappingCompartment.current.of(

@@ -43,11 +43,17 @@ type View = "files" | "editor" | "terminal" | "runtimes"
 interface OpenDoc {
   path: string
   content: string
-  /** Last content written to disk; `content !== saved` means unsaved changes. */
-  saved: string
+  /** Content when last loaded or saved; null for new unsaved files. */
+  saved: string | null
+  isUntitled?: boolean
 }
 
-const isDirty = (doc: OpenDoc) => doc.content !== doc.saved
+const normalizeText = (text: string) => text.replace(/\r\n/g, "\n")
+
+const isDirty = (doc: OpenDoc): boolean => {
+  if (doc.saved === null) return true
+  return normalizeText(doc.content) !== normalizeText(doc.saved)
+}
 
 const join = (base: string, name: string) => (base === "." ? name : `${base}/${name}`)
 
@@ -218,6 +224,22 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
     void refresh(cwd)
   }, [cwd, refresh])
 
+  const untitledCounter = useRef(1)
+  const sessionLoaded = useRef(false)
+
+  const handleNewUntitled = useCallback(() => {
+    const name = `Untitled-${untitledCounter.current++}`
+    const newDoc: OpenDoc = {
+      path: name,
+      content: "",
+      saved: null,
+      isUntitled: true
+    }
+    setDocs((current) => [...current, newDoc])
+    setActivePath(name)
+    setView("editor")
+  }, [])
+
   const openFile = useCallback(
     async (entry: FileEntry | string) => {
       const path = typeof entry === "string" ? entry : entry.path
@@ -228,8 +250,9 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         return
       }
       try {
-        const content = await bridge.read(path)
-        setDocs((current) => [...current, { path, content, saved: content }])
+        const rawContent = await bridge.read(path)
+        const content = normalizeText(rawContent)
+        setDocs((current) => [...current, { path, content, saved: content, isUntitled: false }])
         setActivePath(path)
         setView("editor")
         // Update recent files
@@ -251,7 +274,8 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       setDocs((current) => {
         const exists = current.find((d) => d.path === safPath)
         if (exists) return current
-        return [...current, { path: safPath, content: doc.content, saved: doc.content }]
+        const content = normalizeText(doc.content)
+        return [...current, { path: safPath, content, saved: content, isUntitled: false }]
       })
       setActivePath(safPath)
       setView("editor")
@@ -263,10 +287,15 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
 
   const handleSaveAs = useCallback(() => {
     if (!activeDoc) return
+    const initialName = activeDoc.isUntitled
+      ? `${activeDoc.path}.txt`
+      : activeDoc.path.startsWith("saf://")
+        ? activeDoc.path.slice(6)
+        : activeDoc.path
     setPrompt({
       title: "Save As",
       label: "Save file as (filename or full path):",
-      initial: activeDoc.path.startsWith("saf://") ? activeDoc.path.slice(6) : activeDoc.path,
+      initial: initialName,
       kind: "file"
     })
   }, [activeDoc])
@@ -303,17 +332,24 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
   const SESSION_KEY = "leocode.open-session"
 
   useEffect(() => {
-    if (!settings.resumeSession) return
+    if (!settings.resumeSession) {
+      sessionLoaded.current = true
+      return
+    }
     try {
       const raw = localStorage.getItem(SESSION_KEY)
-      if (!raw) return
+      if (!raw) {
+        sessionLoaded.current = true
+        return
+      }
       const session = JSON.parse(raw) as { paths: string[]; active: string | null }
       if (session.paths && session.paths.length > 0) {
         void Promise.all(
-          session.paths.map(async (p) => {
+          session.paths.map(async (p): Promise<OpenDoc | null> => {
             try {
-              const content = await bridge.read(p)
-              return { path: p, content, saved: content }
+              const rawContent = await bridge.read(p)
+              const content = normalizeText(rawContent)
+              return { path: p, content, saved: content, isUntitled: false }
             } catch {
               return null
             }
@@ -328,36 +364,46 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
                 : valid[0].path
             )
           }
+          sessionLoaded.current = true
         })
+      } else {
+        sessionLoaded.current = true
       }
     } catch {
-      // ignore corrupted session
+      sessionLoaded.current = true
     }
   }, [bridge, settings.resumeSession])
 
   useEffect(() => {
-    if (!settings.resumeSession) return
+    if (!sessionLoaded.current || !settings.resumeSession) return
     try {
+      const validPaths = docs
+        .filter((d) => !d.isUntitled && !d.path.startsWith("saf://"))
+        .map((d) => d.path)
       const session = {
-        paths: docs.map((d) => d.path).filter((p) => !p.startsWith("saf://")),
-        active: activePath
+        paths: validPaths,
+        active: activeDoc?.isUntitled ? null : activePath
       }
       localStorage.setItem(SESSION_KEY, JSON.stringify(session))
     } catch {
       // quota
     }
-  }, [docs, activePath, settings.resumeSession])
+  }, [docs, activePath, activeDoc, settings.resumeSession])
 
   const save = useCallback(
     async (path = activePath): Promise<boolean> => {
       if (!path) return false
       const doc = docs.find((item) => item.path === path)
       if (!doc) return false
+      if (doc.isUntitled || doc.saved === null) {
+        handleSaveAs()
+        return false
+      }
       try {
         await bridge.write(path, doc.content)
         setDocs((current) =>
           current.map((item) =>
-            item.path === path ? { ...item, saved: item.content } : item
+            item.path === path ? { ...item, saved: item.content, isUntitled: false } : item
           )
         )
         flash("Saved")
@@ -368,7 +414,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         return false
       }
     },
-    [activePath, bridge, cwd, docs, flash, refresh]
+    [activeDoc, activePath, bridge, cwd, docs, flash, handleSaveAs, refresh]
   )
 
   const reloadFile = useCallback(
@@ -560,7 +606,21 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
     async (value: string) => {
       if (!prompt) return
       try {
-        if (prompt.kind === "rename" && prompt.target) {
+        if (prompt.title === "Save As" && activeDoc) {
+          const target = value.startsWith("/") ? value : join(cwd, value)
+          await bridge.write(target, activeDoc.content)
+          setDocs((current) =>
+            current.map((item) =>
+              item.path === activeDoc.path
+                ? { ...item, path: target, saved: activeDoc.content, isUntitled: false }
+                : item
+            )
+          )
+          setActivePath(target)
+          flash(`Saved as ${baseName(target)}`)
+          await refresh()
+          return
+        } else if (prompt.kind === "rename" && prompt.target) {
           const target = join(dirName(prompt.target.path), value)
           await bridge.rename(prompt.target.path, target)
           setDocs((current) =>
@@ -574,7 +634,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
           await bridge.mkdir(join(cwd, value))
           flash("Folder created")
         } else {
-          const path = join(cwd, value)
+          const path = value.startsWith("/") ? value : join(cwd, value)
           await bridge.write(path, "")
           flash("File created")
           await refresh()
@@ -586,7 +646,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         setError((e as Error).message)
       }
     },
-    [bridge, cwd, flash, openFile, prompt, refresh]
+    [activeDoc, bridge, cwd, flash, openFile, prompt, refresh]
   )
 
   const deleteEntry = useCallback(
@@ -673,14 +733,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         </div>
         <div className="app-bar-actions">
           <FileMenu
-            onNew={() =>
-              setPrompt({
-                kind: "file",
-                title: "New File",
-                label: "File name",
-                initial: ""
-              })
-            }
+            onNew={handleNewUntitled}
             onOpenExplorer={() => setSidebarOpen(true)}
             onOpenSaf={handleOpenSaf}
             onSave={() => void save()}
@@ -741,7 +794,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
               aria-label={`Run ${baseName(activeDoc.path)}`}
               title={run?.running ? "Running…" : "Run"}
             >
-              <PlayIcon size={19} />
+              <PlayIcon size={15} />
             </button>
           )}
 
@@ -851,9 +904,9 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
               ))}
               <button
                 className="tab-add"
-                onClick={() => setSidebarOpen(true)}
-                title="Open file from explorer"
-                aria-label="Open file"
+                onClick={handleNewUntitled}
+                title="New file"
+                aria-label="New file"
               >
                 +
               </button>
@@ -892,9 +945,14 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
             <div className="empty editor-empty">
               <CodeIcon size={32} />
               <p>No file open</p>
-              <button className="btn primary" onClick={() => setSidebarOpen(true)}>
-                Open File Explorer
-              </button>
+              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                <button className="btn primary" onClick={() => setSidebarOpen(true)}>
+                  Open File Explorer
+                </button>
+                <button className="btn ghost" onClick={handleNewUntitled}>
+                  + New File
+                </button>
+              </div>
             </div>
           )}
         </section>

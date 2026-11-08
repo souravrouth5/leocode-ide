@@ -21,14 +21,16 @@ import {
   XIcon
 } from "./Icons"
 
-interface OpenDoc {
+export interface OpenDoc {
   path: string
   content: string
-  saved: string
+  saved: string | null
+  isUntitled?: boolean
 }
 
 const baseName = (path: string) => path.split("/").pop() ?? path
-const isDirty = (doc: OpenDoc) => doc.content !== doc.saved
+const isDirty = (doc: OpenDoc) =>
+  doc.saved === null ? true : doc.content.replace(/\r\n/g, "\n") !== doc.saved.replace(/\r\n/g, "\n")
 
 interface Props {
   open: boolean

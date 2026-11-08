@@ -394,5 +394,52 @@ export function SafIcon({ size = 20, className }: Props) {
   )
 }
 
+export function InfoIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" strokeWidth="2.5" />
+    </svg>
+  )
+}
+
+export function SortIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16" />
+    </svg>
+  )
+}
+
+export function FilterIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  )
+}
+
+export function EyeIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+export function EyeOffIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  )
+}
+
+
 
 

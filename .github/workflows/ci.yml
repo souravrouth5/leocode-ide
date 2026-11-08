@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 # TODO(security): pin every action to a commit SHA before the repo is public.
 env:
@@ -47,11 +47,20 @@ jobs:
   android:
     name: Android (assembleDebug)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: android
+    needs: web
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: android/app/src/main/assets/web
 
       - uses: actions/setup-java@v4
         with:
@@ -76,9 +85,11 @@ jobs:
           gradle-version: "8.9"
 
       - name: Assemble debug APK
+        working-directory: android
         run: ./gradlew --no-daemon assembleDebug
 
       - name: Lint
+        working-directory: android
         run: ./gradlew --no-daemon lintDebug
         continue-on-error: true
 
@@ -87,6 +98,26 @@ jobs:
           name: leocode-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      - name: Create or Update GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "LeoCode IDE (Nightly Build)"
+          body: |
+            Automated debug APK build from commit ${{ github.sha }} on `main`.
+
+            ### Features included:
+            - Full file system explorer with search, sorting, binary/media filter, hidden file toggle, and file properties.
+            - Mobile-optimized editor with tab management, unsaved indicators, and syntax highlighting for Python, PHP, JS/TS, SQL, Rust, YAML, XML/HTML, and Shell.
+            - Compact run button and live terminal runtime.
+          files: |
+            android/app/build/outputs/apk/debug/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   python-runtime:
     name: Python runtime (stub)
