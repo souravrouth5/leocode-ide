@@ -1,23 +1,22 @@
 interface Props {
   mode: "mock" | "android"
-  cwd: string
-  fileCount: number
-  activePath: string | null
+  path: string
+  dirty: boolean
+  message?: string | null
 }
 
-export function StatusBar({ mode, cwd, fileCount, activePath }: Props) {
+export function StatusBar({ mode, path, dirty, message }: Props) {
   return (
-    <footer className="statusbar">
-      <span className="status-item">
-        <span className={"dot-mode " + mode} />
-        {mode === "mock" ? "mock bridge" : "android"}
-      </span>
-      <span className="status-item">
-        {fileCount} items · /{cwd === "." ? "" : cwd}
-      </span>
-      <span className="status-item status-path" title={activePath ?? ""}>
-        {activePath ?? "no file"}
-      </span>
+    <footer className="status-bar">
+      <span className={"dot " + (mode === "android" ? "live" : "mock")} />
+      <span className="status-path">{path === "." ? "workspace" : path}</span>
+      {dirty && <span className="status-dirty">unsaved</span>}
+      <span className="status-spacer" />
+      {message ? (
+        <span className="status-message">{message}</span>
+      ) : (
+        <span className="status-mode">{mode === "android" ? "device" : "preview"}</span>
+      )}
     </footer>
   )
 }

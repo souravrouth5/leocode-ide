@@ -1,4 +1,14 @@
-import type { AppInfo, Bridge, FileEntry, ProcessEvent } from "./types"
+import type {
+  AppInfo,
+  Bridge,
+  FileEntry,
+  ProcessEvent,
+  TerminalHandle,
+  TerminalOptions,
+  ThemeMode,
+  ThemeState
+} from "./types"
+import { isThemeMode } from "./types"
 
 interface Node {
   kind: "file" | "dir"
@@ -7,6 +17,7 @@ interface Node {
 }
 
 const now = () => Date.now()
+const THEME_KEY = "leocode.theme"
 
 const SEED: Array<[string, Node]> = [
   [".", { kind: "dir", content: "", mtime: now() }],
@@ -19,7 +30,7 @@ const SEED: Array<[string, Node]> = [
       content: `# Demo project
 
 This workspace is served by the **mock bridge**, so the UI can be developed in a
-desktop browser before the Android bridge exists.
+desktop browser before the Android bridge is involved.
 
 Try the terminal: \`ls\`, \`cat main.py\`, \`python main.py\`, \`git status\`, \`help\`.
 `
@@ -67,16 +78,30 @@ const join = (base: string, name: string) => (base === "." ? name : `${base}/${n
 const parentOf = (path: string) =>
   path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "."
 
+const systemDark = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+
 export class MockBridge implements Bridge {
   readonly mode = "mock" as const
   private nodes = new Map<string, Node>(SEED)
+  private themeListeners = new Set<(state: ThemeState) => void>()
+  private mode_: ThemeMode
+
+  constructor() {
+    const stored = localStorage.getItem(THEME_KEY)
+    this.mode_ = isThemeMode(stored) ? stored : "system"
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (this.mode_ === "system") this.emitTheme()
+    })
+  }
 
   async info(): Promise<AppInfo> {
     return {
       app: "LeoCode",
       version: "0.0.1-mock",
       mode: "mock",
-      webview: navigator.userAgent
+      webview: navigator.userAgent,
+      theme: this.themeState()
     }
   }
 
@@ -108,11 +133,7 @@ export class MockBridge implements Bridge {
 
   async write(path: string, content: string): Promise<void> {
     const existing = this.nodes.get(path)
-    this.nodes.set(path, {
-      kind: "file",
-      content,
-      mtime: now()
-    })
+    this.nodes.set(path, { kind: "file", content, mtime: now() })
     if (!existing) this.ensureParents(path)
   }
 
@@ -139,6 +160,26 @@ export class MockBridge implements Bridge {
     }
     for (const [key, node] of moved) this.nodes.set(key, node)
     this.ensureParents(to)
+  }
+
+  async getTheme(): Promise<ThemeState> {
+    return this.themeState()
+  }
+
+  async setTheme(mode: ThemeMode): Promise<ThemeState> {
+    this.mode_ = mode
+    localStorage.setItem(THEME_KEY, mode)
+    this.emitTheme()
+    return this.themeState()
+  }
+
+  onThemeChanged(listener: (state: ThemeState) => void): () => void {
+    this.themeListeners.add(listener)
+    return () => this.themeListeners.delete(listener)
+  }
+
+  async openTerminal(_options: TerminalOptions): Promise<TerminalHandle | null> {
+    return null
   }
 
   async run(
@@ -186,6 +227,19 @@ export class MockBridge implements Bridge {
 
     emit(`${cmd}: command not found (mock bridge)\n`, "stderr")
     return 127
+  }
+
+  private themeState(): ThemeState {
+    return {
+      mode: this.mode_,
+      effective:
+        this.mode_ === "system" ? (systemDark() ? "dark" : "light") : this.mode_
+    }
+  }
+
+  private emitTheme() {
+    const state = this.themeState()
+    this.themeListeners.forEach((listener) => listener(state))
   }
 
   private hasChildren(dir: string): boolean {
