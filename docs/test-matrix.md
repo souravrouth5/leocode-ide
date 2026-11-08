@@ -23,14 +23,17 @@ Measured 2026-11-08 on D1, `app-debug.apk` targetSdk 28, driven by
 | T2 exec binary from app data | **PASS** | | | `exec-from-data-ok`; the critical W^X gate |
 | T3 process-group kill (`setsid` + `kill(-pgid)`) | **PASS** | | | group gone on SIGTERM within 5 s |
 | T4 exit-code propagation | **PASS** | | | exit 42, stdout/stderr separated |
-| T5 output flood, bounded | **PASS** | | | 25 MB in 13–46 s (0.5–2 MB/s depending on thermal/cache); captured exactly 262 144 B |
+| T5 output flood, bounded | **PASS** | | | 25 MB in 6–46 s (0.5–4 MB/s, cache/thermal dependent); captured exactly 262 144 B |
 | T6 native PTY (`fork`/`setsid`/`TIOCSCTTY`) | **PASS** | | | `pty-ok`, `cols=80`, exit 7, page size 4096 |
 | T7 shell applet inventory | **INFO** | | | setsid/tar/gzip/sed/awk/grep/find/xxd/curl present; **no** unzip, git, python |
 | T8 control: targetSdk 29 build must fail T2 | | | | not yet run; documents finding #1 |
 
-**Throughput finding.** `yes | head -c` moves 0.5–2 MB/s through the system shell on this device
-(cold vs warm: 46 s vs 13 s for 25 MB; 69 s for 50 MB). Real compiler/test output is far smaller;
-the number matters only for the output-buffer and coalescing design.
+**Throughput finding.** `yes | head -c` moves 0.5–4 MB/s through the system shell on this device
+(cold 50 MB: 69 s; 25 MB: 46 s cold, 13 s, then 6 s warm). Real compiler/test output is far
+smaller; the number matters only for the output-buffer and coalescing design.
+
+**Repeatability.** Two independent runs produced the same PASS set (harness-driven and
+user-driven from the UI). T5's timing is the only value that varies, as expected.
 
 **Shell gap.** `unzip` is absent, so runtime/archive extraction must be done in Kotlin
 (`ZipFile`/`ZipInputStream`), not by shelling out. `git` and `python` are supplied by JGit and

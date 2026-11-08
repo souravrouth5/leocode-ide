@@ -30,7 +30,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | T2 exec from app data (W^X gate) | **PASS** — `exec-from-data-ok` |
 | T3 process-group kill | **PASS** |
 | T4 exit code + stderr | **PASS** — exit 42 |
-| T5 flood, bounded | **PASS** — 25 MB in 13–46 s (warm/cold), captured exactly 256 KB |
+| T5 flood, bounded | **PASS** — 25 MB in 6–46 s (warm/cold), captured exactly 256 KB |
 | T6 native PTY | **PASS** — output, cols=80, exit 7 |
 | T7 applets | INFO — no `unzip`, `git`, `python` |
 
@@ -40,7 +40,8 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 - CI has not run on GitHub (no remote yet).
 
 **Findings from the first device run**
-- Shell pipeline throughput is 0.5–2 MB/s (thermal/cache dependent): 25 MB took 13–46 s, 50 MB took 69 s. Output buffering must stay bounded (it is), and the terminal UI must coalesce.
+- Shell pipeline throughput is 0.5–4 MB/s (thermal/cache dependent): 25 MB took 6–46 s, 50 MB took 69 s cold. Output buffering must stay bounded (it is), and the terminal UI must coalesce.
+- Repeatability: two independent run-all passes (ADB-driven and UI-driven) produced the same PASS set.
 - `unzip` is absent from the system shell on Android 9 → archive extraction moves to Kotlin `ZipFile`, not a shelled-out tool.
 - `git`/`python` are absent as expected: JGit and the NDK CPython build are the only paths.
 - 50 MB flood timing is a device property, not a bug — harness now uses 25 MB.
