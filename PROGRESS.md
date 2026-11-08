@@ -17,14 +17,16 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 | Plan + decisions | Done (v8 + Runtime & Editor Experience Plan) |
 | Repository scaffold | Done |
 | Android app (real IDE shell) | **Built and installed** (`app-debug.apk`, versionCode 2, targetSdk 28) |
-| Web IDE shell | **Live on device** — Collapsible File Explorer sidebar, multi-tab editor, live PTY terminal, Runtime manager |
+| Web IDE shell | **Live on device** — Collapsible File Explorer with instant search, 6-mode sort, file properties sheet, binary & dotfile filters, multi-tab editor with session restore, live PTY terminal, Runtime manager |
 | Branding & Mascot | **Unified** — Authentic Puppy coder mascot (`design/app-icon.png`) on launcher, splash, and app bar |
 | Theme & Settings system | **Live** — System/Light/Dark, 6 syntax themes (Tokyo Night, Dracula, One Dark, Monokai, GitHub Light, Solarized Light), font picker, font size stepper with live preview |
 | Code Formatting | **Live** — In-browser Prettier formatting for JS, TS, HTML, CSS, Markdown, JSON with instant feedback |
-| Run + undo/redo | **Live** — Run button, live output sheet with Stop (process-group kill), editor undo/redo keys |
+| Syntax Highlighting | **Live** — Multi-language AST highlighters for Python, JavaScript, TypeScript, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, and Shell |
+| Run + undo/redo | **Live** — Redesigned 32x32 emerald Run badge, live output sheet with Stop (process-group kill), editor undo/redo keys |
+| CI / CD & Release | **Live on GitHub** — Automated build + `nightly` release with downloadable debug APK on push to `main` |
 | Launcher icon | **Done** — adaptive + legacy + round, generated from `design/app-icon.png` |
 | Python runtime artifacts | Draft `scripts/build-python.sh`; runtime manager UI wired to device probe |
-| Device validation | **D1 (Android 9) done** — T1–T7 pass + Phase 1 smoke test. D2/D3 pending |
+| Device validation | **D1 (Android 9) done** — T1–T7 pass + Phase 1 smoke test + Editor & File Tree feature suite. D2/D3 pending |
 | Android 14+ device | **Blocked — hardware not acquired** |
 
 **Measured on device 1 (2026-11-08)** — Redmi Note 7S `lavender`, Android 9 / SDK 28, MIUI V11,
@@ -222,6 +224,11 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 - [x] WebView host activity + `WebViewAssetLoader` (`MainActivity`)
 - [x] `addWebMessageListener` bridge (Kotlin side, `WebAppBridge`) with strict origin check
 - [x] File CRUD + path jail (canonicalise + symlink check) — list/read/write/mkdir/rename/delete
+- [x] File/Folder Properties Action Sheet (metadata inspection: Name, Type, Size, Directory, Full Path, Last Modified)
+- [x] File Explorer instant search with clear button
+- [x] File Explorer 6-mode sorting (Name A-Z, Name Z-A, Size Largest, Size Smallest, Date Newest, Extension)
+- [x] Binary/media file hiding filter (.apk, .mp4, .zip, .so, etc.) and hidden dotfile (.*) toggle
+- [x] Action Sheets & Modals rendered via React Portal (`createPortal` to `document.body`, `z-index: 141`) to escape sidebar CSS transform clipping
 - [x] Navigation + settings (files/editor/terminal tabs, appearance + about sheet)
 - [x] Permission and error surfaces (bridge error → status bar + error sheet)
 - [x] Theme manager (system/light/dark) shared by WebView, system bars and window background
@@ -233,11 +240,15 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 
 ## 10. Phase 2 — editor and terminal
 
-- [x] CodeMirror 6 editor with Python mode, tabs, dirty state
+- [x] CodeMirror 6 editor with Python, JS/TS, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, and Shell mode syntax highlighting
 - [x] Mobile keyboard accessory row (editor keys + terminal keys, keep-keyboard-open)
-- [x] Bracket matching, close-brackets, Python mode
+- [x] Bracket matching, close-brackets, syntax trees
 - [x] Undo/redo buttons in the mobile key row
+- [x] Redesigned 32x32 emerald Run badge (`PlayIcon`, emerald styling, no terminal clash)
 - [x] Run sheet: save-before-run, live stdout/stderr, Stop, bounded scrollback
+- [x] Normalized CRLF/LF dirty tracking (opening saved files starts clean; only modifications trigger unsaved indicator `•`)
+- [x] `+` new untitled document flow (`Untitled-X`, unsaved indicator `•`, Save As dialog workflow)
+- [x] Robust multi-tab session restoration across restarts (guarded against initial empty render overwrite)
 - [x] Atomic save (temp → fsync → rename)
 - [x] Terminal wired to native PTY in-app (base64 byte stream, resize, restart)
 - [x] Terminal tab lifecycle (close on unmount/activity destroy; no leaks observed)
@@ -306,3 +317,4 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | 2026-11-08 | New launcher artwork; generated adaptive, round and legacy icons plus `design/app-icon.png` source. |
 | 2026-11-08 | Repository published to GitHub (`souravrouth5/leocode-ide`); CI becomes runnable. |
 | 2026-11-08 | Runtime Manager UI (Python 3, Node.js, Java OpenJDK, C/C++ toolchain, Shell) with live probe & env inspection; dedicated LeoCode SVG logo brand mark; boot splash styling; file reload & workspace refresh; reinstalled APK to device with MIUI launcher cache reset. |
+| 2026-11-08 | **File Explorer, Editor & CI Release Enhancements**: File/folder properties inspection sheet; file search and 6-mode sorting; binary extension and dotfile filters; AST syntax highlighters for PHP, Rust, SQL, XML, YAML, and Shell; in-memory untitled doc flow (`+` tab) with unsaved indicator; normalized CRLF/LF dirty tracking; session persistence safety guard; sleek 32x32 emerald Run badge; React portal modal sheets; automated GitHub Actions CI release workflow publishing nightly APK on push to `main`. |
