@@ -46,7 +46,8 @@ class Workspace(rootDir: File) {
         "HOME" to home.absolutePath,
         "TMPDIR" to tmp.absolutePath,
         "TMP" to tmp.absolutePath,
-        "PATH" to "/system/bin:/system/xbin",
+        "PATH" to listOf(File(usr, "bin").absolutePath, "/system/bin", "/system/xbin")
+            .joinToString(":"),
         "TERM" to "xterm-256color",
         "LANG" to "en_US.UTF-8",
         "PWD" to defaultWorkspace.absolutePath

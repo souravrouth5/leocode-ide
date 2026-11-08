@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 val ndkVersionProp = (project.findProperty("leocode.ndk") as String?) ?: "27.0.12077973"
@@ -88,6 +89,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.webkit:webkit:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // Phase 0D (declared now so versions are pinned early; exercised in Phase 0D)
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.0.202406032230-r")

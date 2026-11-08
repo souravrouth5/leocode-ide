@@ -101,16 +101,18 @@ class ProcessHost(private val env: Map<String, String> = emptyMap()) {
         }
     }
 
-    /**
-     * android's java.lang.Process does not expose pid() (Java 9 API). The libcore
-     * implementation keeps an int field named "pid"; read it reflectively.
-     */
-    fun pidOf(process: Process): Int = try {
-        val field = process.javaClass.getDeclaredField("pid")
-        field.isAccessible = true
-        field.getInt(process)
-    } catch (_: Throwable) {
-        -1
+    companion object {
+        /**
+         * android's java.lang.Process does not expose pid() (Java 9 API). The libcore
+         * implementation keeps an int field named "pid"; read it reflectively.
+         */
+        fun pidOf(process: Process): Int = try {
+            val field = process.javaClass.getDeclaredField("pid")
+            field.isAccessible = true
+            field.getInt(process)
+        } catch (_: Throwable) {
+            -1
+        }
     }
 
     private class Collector(private val cap: Int) {

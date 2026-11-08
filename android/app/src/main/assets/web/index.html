@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0f1115" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>LeoCode</title>
+    <style>
+      /* First-paint splash; removed as soon as React commits. */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: #f7f8fa;
+        color: #1b2028;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        text-align: center;
+      }
+      [data-theme="dark"] #boot {
+        background: #0f1115;
+        color: #e6e9ef;
+      }
+      .boot-mark {
+        width: 64px;
+        height: 64px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        font-family: ui-monospace, monospace;
+        font-size: 22px;
+        font-weight: 600;
+        color: #fff;
+        background: linear-gradient(145deg, #4f8cff, #6f5cff);
+        box-shadow: 0 10px 28px rgba(79, 140, 255, 0.35);
+      }
+      .boot-name {
+        font-size: 20px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .boot-note {
+        color: #6e7787;
+        font-size: 13px;
+      }
+      [data-theme="dark"] .boot-note {
+        color: #8b93a3;
+      }
+    </style>
+    <script>
+      // Runs before the stylesheet so the first paint already has the right
+      // colours. The Android host passes ?theme=<mode>; otherwise we fall back to
+      // the persisted choice, then to the system preference.
+      ;(function () {
+        var DARK = "#0f1115"
+        var LIGHT = "#f7f8fa"
+        try {
+          var params = new URLSearchParams(location.search)
+          var fromUrl = params.get("mode")
+          if (fromUrl === "system" || fromUrl === "light" || fromUrl === "dark") {
+            localStorage.setItem("leocode.theme", fromUrl)
+          }
+          var stored = localStorage.getItem("leocode.theme") || "system"
+          var forced = params.get("theme")
+          var systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
+          var dark = forced === "dark" || forced === "light"
+            ? forced === "dark"
+            : stored === "dark" || (stored === "system" && systemDark)
+          var theme = dark ? "dark" : "light"
+          var root = document.documentElement
+          root.dataset.theme = theme
+          root.style.colorScheme = theme
+          root.style.backgroundColor = dark ? DARK : LIGHT
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute("content", dark ? DARK : LIGHT)
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark"
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="./assets/index-CYS5mVzS.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/react-cxkclgJA.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-jxrEd28-.css">
+  </head>
+  <body>
+    <div id="boot" aria-hidden="true">
+      <div class="boot-mark">&lt;/&gt;</div>
+      <div class="boot-name">LeoCode</div>
+      <div class="boot-note">Starting the workspace…</div>
+    </div>
+    <div id="root"></div>
+  </body>
+</html>

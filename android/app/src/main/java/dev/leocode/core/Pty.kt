@@ -55,6 +55,10 @@ class PtySession private constructor(
     val pid: Int
 ) {
     companion object {
+        /** Opens an interactive `/system/bin/sh -i` in a new session/process group. */
+        fun openShell(cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? =
+            open("exec /system/bin/sh -i", cwd, env, rows, cols)
+
         fun open(cmd: String, cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? {
             if (!NativePty.available()) return null
             val pairs = env.map { (k, v) -> "$k=$v" }.toTypedArray()
@@ -78,21 +82,31 @@ class PtySession private constructor(
     }
 
     /**
-     * Read until EOF/EIO or [timeoutMs]. Os.read() blocks on a PTY, so the timeout is
-     * a soft bound: it is checked between reads. Use a dedicated reader thread in Phase 0E.
+     * Blocking single read. Returns null on EOF/EIO (which is what a PTY master
+     * reports when the child exits). Intended for a dedicated reader thread.
+     */
+    fun readBlocking(maxBytes: Int = 16 * 1024): ByteArray? {
+        if (maxBytes <= 0) return null
+        val buf = ByteArray(maxBytes)
+        val n = try {
+            Os.read(fd, buf, 0, maxBytes)
+        } catch (e: ErrnoException) {
+            return null
+        }
+        if (n <= 0) return null
+        return if (n == maxBytes) buf else buf.copyOf(n)
+    }
+
+    /**
+     * Read until EOF/EIO or [timeoutMs]. Os.read() blocks, so the timeout is a soft
+     * bound checked between reads. Kept for the Phase 0 smoke test.
      */
     fun read(timeoutMs: Long, maxBytes: Int = 256 * 1024): String {
         val out = ByteArrayOutputStream()
-        val buf = ByteArray(8 * 1024)
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline && out.size() < maxBytes) {
-            val n = try {
-                Os.read(fd, buf, 0, buf.size)
-            } catch (e: ErrnoException) {
-                break // EIO when the child exits
-            }
-            if (n <= 0) break
-            out.write(buf, 0, n)
+            val chunk = readBlocking() ?: break
+            out.write(chunk)
         }
         return out.toString("UTF-8")
     }
@@ -104,6 +118,7 @@ class PtySession private constructor(
     fun waitFor(): Int = NativePty.waitFor(pid)
 
     fun destroy() {
+        // Kill the group first: that closes the slave side and unblocks any reader.
         NativePty.killGroup(pid, OsConstants.SIGTERM)
         NativePty.killGroup(pid, OsConstants.SIGKILL)
         runCatching { descriptor.close() }

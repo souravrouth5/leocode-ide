@@ -26,12 +26,12 @@ import java.util.concurrent.TimeUnit
  * Phase 0B device harness (temporary; replaced by the WebView shell in Phase 1).
  *
  * Runs from the UI or from adb:
- *   adb shell am start -n dev.leocode/.MainActivity --es run all
- *   adb shell am start -n dev.leocode/.MainActivity --es run T2
+ *   adb shell am start -n dev.leocode/.HarnessActivity --es run all
+ *   adb shell am start -n dev.leocode/.HarnessActivity --es run T2
  *
  * Every line is also written to logcat under the tag LeoCodeHarness.
  */
-class MainActivity : Activity() {
+class HarnessActivity : Activity() {
 
     private companion object {
         const val TAG = "LeoCodeHarness"
@@ -235,7 +235,7 @@ class MainActivity : Activity() {
             .start()
 
         Thread.sleep(500)
-        val pid = host.pidOf(process)
+        val pid = ProcessHost.pidOf(process)
 
         val signalResult = if (pid > 0 && NativePty.available()) {
             NativePty.killGroup(pid, 15)
