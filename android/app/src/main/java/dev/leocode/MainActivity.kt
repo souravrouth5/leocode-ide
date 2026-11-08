@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -21,6 +22,11 @@ import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import dev.leocode.core.Workspace
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.URL
+import kotlin.concurrent.thread
 
 /**
  * The IDE shell: one full-screen WebView served from APK assets over
@@ -36,6 +42,8 @@ class MainActivity : Activity() {
         private const val DOMAIN = "appassets.androidplatform.net"
         private const val ORIGIN = "https://$DOMAIN"
         private const val START_URL = "$ORIGIN/assets/web/index.html"
+        const val DEV_URL_DEFAULT = "http://localhost:5173"
+        const val DEV_URL_LOOPBACK = "http://127.0.0.1:5173"
     }
 
     private lateinit var themeManager: ThemeManager
@@ -86,6 +94,23 @@ class MainActivity : Activity() {
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
+        val allowedOrigins = mutableSetOf(ORIGIN)
+        val devUrlExtra = if (BuildConfig.DEBUG) intent?.getStringExtra("devUrl") else null
+        val extraOrigins = mutableSetOf<String>()
+
+        if (BuildConfig.DEBUG) {
+            allowedOrigins.add(DEV_URL_DEFAULT)
+            allowedOrigins.add(DEV_URL_LOOPBACK)
+            devUrlExtra?.let { url ->
+                runCatching {
+                    val uri = Uri.parse(url)
+                    val origin = "${uri.scheme}://${uri.authority}"
+                    allowedOrigins.add(origin)
+                    extraOrigins.add(origin)
+                }
+            }
+        }
+
         webView.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(
                 view: WebView,
@@ -98,6 +123,15 @@ class MainActivity : Activity() {
             ): Boolean {
                 val url = request.url
                 if (url.scheme == "https" && url.host == DOMAIN) return false
+                if (BuildConfig.DEBUG) {
+                    val origin = "${url.scheme}://${url.authority}"
+                    if (allowedOrigins.contains(origin)) return false
+                    if ((url.scheme == "http" || url.scheme == "ws") &&
+                        (url.host == "localhost" || url.host == "127.0.0.1")
+                    ) {
+                        return false
+                    }
+                }
                 // Anything else (docs links, imports) opens in a real browser; the IDE
                 // WebView never navigates away from its own origin.
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }
@@ -110,20 +144,16 @@ class MainActivity : Activity() {
         }
 
         val bridgeEnv = workspace.childEnv()
-        bridge = WebAppBridge(this, webView, workspace, themeManager, bridgeEnv)
+        bridge = WebAppBridge(this, webView, workspace, themeManager, bridgeEnv, extraOrigins)
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(
                 webView,
                 "LeoCodeAndroid",
-                setOf(ORIGIN),
+                allowedOrigins,
                 bridge
             )
-            // Pass both the stored mode and the resolved theme so the page can
-            // paint correctly on its first frame without clobbering "system".
-            webView.loadUrl(
-                "$START_URL?mode=${themeManager.mode}&theme=${themeManager.effective()}"
-            )
+            loadInitialPage(devUrlExtra)
         } else {
             webView.loadDataWithBaseURL(
                 null,
@@ -191,6 +221,61 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         if (!webViewDestroyed) webView.onPause()
+    }
+
+    private fun loadInitialPage(devUrlExtra: String?) {
+        val fallbackUrl = DevServerConfig.buildPageUrl(START_URL, themeManager.mode, themeManager.effective())
+
+        // If not a debug build or no explicit dev server was requested, load embedded assets immediately
+        if (!BuildConfig.DEBUG || (devUrlExtra.isNullOrBlank() && !intent.getBooleanExtra("devMode", false))) {
+            webView.loadUrl(fallbackUrl)
+            return
+        }
+
+        thread(name = "leocode-dev-check") {
+            val resolvedUrl = DevServerConfig.resolveDevUrl(devUrlExtra) { url ->
+                isServerReachable(url, timeoutMs = 250)
+            }
+            val finalUrl = if (resolvedUrl != null) {
+                Log.i(TAG, "Dev server reachable at $resolvedUrl, loading with hot-reload")
+                DevServerConfig.buildPageUrl(resolvedUrl, themeManager.mode, themeManager.effective())
+            } else {
+                Log.i(TAG, "Dev server not reachable, falling back to embedded assets: $START_URL")
+                fallbackUrl
+            }
+
+            runOnUiThread {
+                if (!isFinishing && !webViewDestroyed) {
+                    webView.loadUrl(finalUrl)
+                }
+            }
+        }
+    }
+
+    private fun isServerReachable(urlStr: String, timeoutMs: Int): Boolean {
+        return try {
+            val url = URL(urlStr)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
+                requestMethod = "HEAD"
+                instanceFollowRedirects = false
+            }
+            val code = conn.responseCode
+            conn.disconnect()
+            code in 200..399 || code == 404
+        } catch (_: Exception) {
+            try {
+                val url = URL(urlStr)
+                val port = if (url.port != -1) url.port else url.defaultPort
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(url.host, port), timeoutMs)
+                    true
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     override fun onDestroy() {

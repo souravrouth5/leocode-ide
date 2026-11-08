@@ -49,6 +49,7 @@ export type {
   FileEntry,
   OpenFile,
   ProcessEvent,
+  RunHandle,
   TerminalHandle,
   ThemeMode,
   ThemeState

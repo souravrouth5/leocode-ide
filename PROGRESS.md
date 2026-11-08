@@ -14,13 +14,16 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 
 | Area | State |
 |---|---|
-| Plan + decisions | Done (v8) |
+| Plan + decisions | Done (v8 + Runtime & Editor Experience Plan) |
 | Repository scaffold | Done |
-| Android app (real IDE shell) | **Built and installed** (`app-debug.apk`, 28.8 MB debug — R8 off) |
-| Web IDE shell | **Live on device** — files, editor, terminal; react 45 KB gzip; codemirror 133 KB + xterm 74 KB lazy |
-| Theme system | **Live** — system / light / dark, synced to system bars, no first-paint flash |
+| Android app (real IDE shell) | **Built and installed** (`app-debug.apk`, versionCode 2, targetSdk 28) |
+| Web IDE shell | **Live on device** — Collapsible File Explorer sidebar, multi-tab editor, live PTY terminal, Runtime manager |
+| Branding & Mascot | **Unified** — Authentic Puppy coder mascot (`design/app-icon.png`) on launcher, splash, and app bar |
+| Theme & Settings system | **Live** — System/Light/Dark, 6 syntax themes (Tokyo Night, Dracula, One Dark, Monokai, GitHub Light, Solarized Light), font picker, font size stepper with live preview |
+| Code Formatting | **Live** — In-browser Prettier formatting for JS, TS, HTML, CSS, Markdown, JSON with instant feedback |
+| Run + undo/redo | **Live** — Run button, live output sheet with Stop (process-group kill), editor undo/redo keys |
 | Launcher icon | **Done** — adaptive + legacy + round, generated from `design/app-icon.png` |
-| Python runtime artifacts | Draft `scripts/build-python.sh`; never run end-to-end |
+| Python runtime artifacts | Draft `scripts/build-python.sh`; runtime manager UI wired to device probe |
 | Device validation | **D1 (Android 9) done** — T1–T7 pass + Phase 1 smoke test. D2/D3 pending |
 | Android 14+ device | **Blocked — hardware not acquired** |
 
@@ -50,6 +53,11 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | Terminal | PASS — real PTY (`/system/bin/sh -i`), prompt, `ls` runs, resize, extra keys |
 | Theme: system / light / dark | PASS — `data-theme` + system bars update together; choice persists |
 | Adaptive launcher icon | PASS — visible in App info (MIUI squircle mask) |
+| Undo / redo keys | PASS — typed text reverted and reapplied from the key row |
+| Run `.sh` | PASS — `hello from shell` / `slept`, EXIT 0, output coalesced per frame |
+| Run `.py` without runtime | PASS (honest failure) — "not run" + hint; no fake success |
+| Stop a running script | PASS — EXIT 137 and **no child processes left** (`ps` checked) |
+| Run after unsaved edit | PASS — buffer is saved before exec |
 
 **Blocking facts (2026-11-08)**
 - Android 14+ device still not available; cannot freeze Phase 0 without it.
@@ -228,6 +236,8 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 - [x] CodeMirror 6 editor with Python mode, tabs, dirty state
 - [x] Mobile keyboard accessory row (editor keys + terminal keys, keep-keyboard-open)
 - [x] Bracket matching, close-brackets, Python mode
+- [x] Undo/redo buttons in the mobile key row
+- [x] Run sheet: save-before-run, live stdout/stderr, Stop, bounded scrollback
 - [x] Atomic save (temp → fsync → rename)
 - [x] Terminal wired to native PTY in-app (base64 byte stream, resize, restart)
 - [x] Terminal tab lifecycle (close on unmount/activity destroy; no leaks observed)
@@ -251,7 +261,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 
 ## 12. Phase 4 — Python runtime manager
 
-- [ ] Runtime catalogue UI (size, version, disk used)
+- [x] Runtime catalogue UI (size, version, disk used)
 - [ ] Install/uninstall/update with resumable progress
 - [ ] Health check + repair
 - [ ] Run current file
@@ -295,3 +305,4 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | 2026-11-08 | Web bundle split: editor (CodeMirror) and terminal (xterm) are lazy chunks; cold start to first frame 3.08 s → 2.77 s. |
 | 2026-11-08 | New launcher artwork; generated adaptive, round and legacy icons plus `design/app-icon.png` source. |
 | 2026-11-08 | Repository published to GitHub (`souravrouth5/leocode-ide`); CI becomes runnable. |
+| 2026-11-08 | Runtime Manager UI (Python 3, Node.js, Java OpenJDK, C/C++ toolchain, Shell) with live probe & env inspection; dedicated LeoCode SVG logo brand mark; boot splash styling; file reload & workspace refresh; reinstalled APK to device with MIUI launcher cache reset. |

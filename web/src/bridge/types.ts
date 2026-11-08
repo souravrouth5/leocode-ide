@@ -39,6 +39,11 @@ export interface AppInfo {
   theme: ThemeState
 }
 
+export interface RunHandle {
+  /** Ask the host to kill the process group. */
+  cancel: () => void
+}
+
 export interface TerminalOptions {
   cwd: string
   cols: number
@@ -70,7 +75,8 @@ export interface Bridge {
   run(
     argv: string[],
     cwd: string,
-    onEvent: (event: ProcessEvent) => void
+    onEvent: (event: ProcessEvent) => void,
+    onStart?: (handle: RunHandle) => void
   ): Promise<number>
   getTheme(): Promise<ThemeState>
   setTheme(mode: ThemeMode): Promise<ThemeState>

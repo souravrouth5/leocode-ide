@@ -3,6 +3,7 @@ import type {
   Bridge,
   FileEntry,
   ProcessEvent,
+  RunHandle,
   TerminalHandle,
   TerminalOptions,
   ThemeMode,
@@ -185,12 +186,16 @@ export class MockBridge implements Bridge {
   async run(
     argv: string[],
     cwd: string,
-    onEvent: (event: ProcessEvent) => void
+    onEvent: (event: ProcessEvent) => void,
+    onStart?: (handle: RunHandle) => void
   ): Promise<number> {
+    onStart?.({ cancel: () => {} })
     const emit = (data: string, stream: ProcessEvent["stream"] = "stdout") =>
       onEvent({ stream, data })
 
-    const [cmd, ...args] = argv
+    const [rawCmd, ...rawArgs] = argv
+    const cmd = rawCmd === "/system/bin/setsid" ? rawArgs.shift() ?? "" : rawCmd
+    const args = rawArgs
 
     if (cmd === "pwd") {
       emit((cwd === "." ? "/workspace" : `/workspace/${cwd}`) + "\n")
@@ -209,14 +214,32 @@ export class MockBridge implements Bridge {
       return 0
     }
 
-    if (cmd === "python" && args[0] === "--version") {
+    if ((cmd === "python" || cmd === "python3") && args[0] === "--version") {
       emit("Python 3.11.9 (mock — runtime not installed)\n")
       return 0
     }
 
-    if (cmd === "python" && args[0]) {
+    if ((cmd === "python" || cmd === "python3") && args[0]) {
       emit(`running ${join(cwd, args[0])} in mock runtime…\n`)
       emit("Hello, LeoCode!\n")
+      return 0
+    }
+
+    if ((cmd === "sh" || cmd === "/system/bin/sh") && args[0] === "-c" && args[1]) {
+      const script = args[1]
+      if (script.includes("toybox")) {
+        emit("/system/bin/sh\ntoybox 0.8.0-android (mock)\n")
+        return 0
+      }
+      if (script.includes("PATH=")) {
+        emit("PATH=/data/data/dev.leocode/files/usr/bin:/system/bin:/system/xbin\nHOME=/data/data/dev.leocode/files/home\nPYTHONHOME=\nJAVA_HOME=\nTMPDIR=/data/data/dev.leocode/files/tmp\n")
+        return 0
+      }
+    }
+
+    if ((cmd === "sh" || cmd === "/system/bin/sh") && args[0]) {
+      emit(`running ${join(cwd, args[0])} with sh (mock — no real exec)\n`)
+      emit("hello from mock shell\n")
       return 0
     }
 

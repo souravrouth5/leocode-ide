@@ -9,6 +9,8 @@ interface Props {
   cwd: string
   active: boolean
   dark: boolean
+  fontSize?: number
+  fontFamily?: string
 }
 
 function palette(dark: boolean) {
@@ -53,7 +55,14 @@ const NO_RUNTIME =
 
 const encoder = new TextEncoder()
 
-export function TerminalPane({ bridge, cwd, active, dark }: Props) {
+export function TerminalPane({
+  bridge,
+  cwd,
+  active,
+  dark,
+  fontSize = 13,
+  fontFamily = "'JetBrains Mono', monospace"
+}: Props) {
   const host = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -71,9 +80,8 @@ export function TerminalPane({ bridge, cwd, active, dark }: Props) {
     const term = new Terminal({
       convertEol: false,
       cursorBlink: true,
-      fontFamily:
-        "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
-      fontSize: 12.5,
+      fontFamily: fontFamily || "ui-monospace, monospace",
+      fontSize: fontSize || 13,
       lineHeight: 1.25,
       scrollback: 4000,
       allowProposedApi: true,
@@ -211,6 +219,19 @@ export function TerminalPane({ bridge, cwd, active, dark }: Props) {
     const term = termRef.current
     if (term) term.options.theme = palette(dark)
   }, [dark])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (term) {
+      if (fontSize) term.options.fontSize = fontSize
+      if (fontFamily) term.options.fontFamily = fontFamily
+      try {
+        fitRef.current?.fit()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [fontSize, fontFamily])
 
   // Hidden tabs have no layout; refit and focus when the tab becomes visible.
   useEffect(() => {

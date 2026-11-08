@@ -51,7 +51,8 @@ class WebAppBridge(
     private val webView: WebView,
     private val workspace: Workspace,
     private val themeManager: ThemeManager,
-    private val env: Map<String, String>
+    private val env: Map<String, String>,
+    private val extraAllowedOrigins: Set<String> = emptySet()
 ) : WebViewCompat.WebMessageListener {
 
     companion object {
@@ -59,6 +60,67 @@ class WebAppBridge(
         private const val MAX_READ = 2 * 1024 * 1024
         private const val MAX_EVENT_BYTES = 64 * 1024
         private const val TRASH_DIR = ".trash"
+
+        fun isOriginAllowed(
+            scheme: String?,
+            host: String?,
+            port: Int = -1,
+            authority: String? = null,
+            isDebug: Boolean = BuildConfig.DEBUG,
+            extraOrigins: Set<String> = emptySet()
+        ): Boolean {
+            if (scheme == "https" && host == "appassets.androidplatform.net") {
+                return true
+            }
+            if (isDebug) {
+                if (scheme == "http" && (host == "localhost" || host == "127.0.0.1") && (port == 5173 || port == -1)) {
+                    return true
+                }
+                val auth = authority ?: (if (port != -1 && host != null) "$host:$port" else host)
+                val originStr = if (auth != null) "$scheme://$auth".trimEnd('/') else ""
+                if (originStr == "http://localhost:5173" || originStr == "http://127.0.0.1:5173") {
+                    return true
+                }
+                if (extraOrigins.any { extra ->
+                    originStr.equals(extra.trimEnd('/'), ignoreCase = true)
+                }) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        fun isOriginAllowed(
+            sourceOrigin: Uri,
+            isDebug: Boolean = BuildConfig.DEBUG,
+            extraOrigins: Set<String> = emptySet()
+        ): Boolean {
+            val scheme = runCatching { sourceOrigin.scheme }.getOrNull()
+            val host = runCatching { sourceOrigin.host }.getOrNull()
+            val port = runCatching { sourceOrigin.port }.getOrDefault(-1)
+            val auth = runCatching { sourceOrigin.encodedAuthority }.getOrNull()
+            return isOriginAllowed(scheme, host, port, auth, isDebug, extraOrigins)
+        }
+
+        fun isOriginAllowed(
+            originUrl: String,
+            isDebug: Boolean = BuildConfig.DEBUG,
+            extraOrigins: Set<String> = emptySet()
+        ): Boolean {
+            return try {
+                val uri = java.net.URI(originUrl)
+                isOriginAllowed(
+                    scheme = uri.scheme,
+                    host = uri.host,
+                    port = uri.port,
+                    authority = uri.authority,
+                    isDebug = isDebug,
+                    extraOrigins = extraOrigins
+                )
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -80,7 +142,7 @@ class WebAppBridge(
         replyProxy: JavaScriptReplyProxy
     ) {
         if (!isMainFrame) return
-        if (sourceOrigin.scheme != "https" || sourceOrigin.host != "appassets.androidplatform.net") {
+        if (!isOriginAllowed(sourceOrigin, BuildConfig.DEBUG, extraAllowedOrigins)) {
             Log.w(TAG, "rejected message from foreign origin $sourceOrigin")
             return
         }
@@ -288,7 +350,15 @@ class WebAppBridge(
         val cwd = resolve(payload, "cwd")
         if (!cwd.isDirectory) throw BridgeError("E_NOT_DIR", "cwd is not a directory")
 
-        val builder = ProcessBuilder(argv).directory(cwd)
+        // Run in a fresh session so proc.cancel can signal the whole process
+        // group; a shell script's children would otherwise outlive SIGTERM.
+        val command = if (File("/system/bin/setsid").canExecute()) {
+            listOf("/system/bin/setsid") + argv
+        } else {
+            argv
+        }
+
+        val builder = ProcessBuilder(command).directory(cwd)
         val childEnv = builder.environment()
         childEnv.clear()
         childEnv.putAll(env)

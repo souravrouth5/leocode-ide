@@ -4,6 +4,7 @@ import {
   type Bridge,
   type FileEntry,
   type ProcessEvent,
+  type RunHandle,
   type TerminalHandle,
   type TerminalOptions,
   type ThemeMode,
@@ -135,7 +136,8 @@ export class AndroidBridge implements Bridge {
   async run(
     argv: string[],
     cwd: string,
-    onEvent: (event: ProcessEvent) => void
+    onEvent: (event: ProcessEvent) => void,
+    onStart?: (handle: RunHandle) => void
   ): Promise<number> {
     let finish: (code: number) => void = () => {}
     const exit = new Promise<number>((resolve) => {
@@ -148,12 +150,19 @@ export class AndroidBridge implements Bridge {
       else if (event === "proc.exit") finish(payload.code ?? 0)
     })
 
+    let reply: { jobId: string }
     try {
-      await result
+      reply = await result
     } catch (error) {
       this.streams.delete(id)
       throw error
     }
+
+    onStart?.({
+      cancel: () => {
+        void this.send("proc.cancel", { jobId: reply.jobId }).result.catch(() => {})
+      }
+    })
 
     return exit.finally(() => this.streams.delete(id))
   }

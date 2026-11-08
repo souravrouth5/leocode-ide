@@ -1,3 +1,5 @@
+import logoUrl from "../assets/logo.png"
+
 interface Props {
   size?: number
   className?: string
@@ -191,3 +193,139 @@ export function SearchIcon({ size = 20, className }: Props) {
     </svg>
   )
 }
+
+export function PlayIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M8 4.8v14.4L19.5 12 8 4.8z" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function StopIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function UndoIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M9 7 4.5 11.5 9 16" />
+      <path d="M4.5 11.5h9a5.5 5.5 0 0 1 0 11H9" />
+    </svg>
+  )
+}
+
+export function RedoIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="m15 7 4.5 4.5L15 16" />
+      <path d="M19.5 11.5h-9a5.5 5.5 0 0 0 0 11H15" />
+    </svg>
+  )
+}
+
+export function CpuIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <path d="M9 9h6v6H9zM9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" />
+    </svg>
+  )
+}
+
+export function LeoCodeLogo({ size = 24, className }: Props) {
+  return (
+    <img
+      src={logoUrl}
+      alt="LeoCode Logo"
+      width={size}
+      height={size}
+      className={className}
+      style={{
+        borderRadius: Math.round(size * 0.28),
+        objectFit: "cover",
+        display: "inline-block",
+        verticalAlign: "middle",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
+      }}
+    />
+  )
+}
+
+
+export function SparklesIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="m12 3-1.9 4.6L5.5 9.5l4.6 1.9L12 16l1.9-4.6 4.6-1.9-4.6-1.9z" />
+      <path d="M5 3v4M3 5h4M19 17v4M17 19h4" />
+    </svg>
+  )
+}
+
+export function MenuIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+    </svg>
+  )
+}
+
+export function SidebarIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18" />
+    </svg>
+  )
+}
+
+export function FilePlusIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="12" y1="18" x2="12" y2="12" />
+      <line x1="9" y1="15" x2="15" y2="15" />
+    </svg>
+  )
+}
+
+export function FolderPlusIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <line x1="9" y1="14" x2="15" y2="14" />
+    </svg>
+  )
+}
+
+export function TypeIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" y1="20" x2="15" y2="20" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  )
+}
+
+export function PaletteIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+      <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+      <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2z" />
+    </svg>
+  )
+}
+
+
