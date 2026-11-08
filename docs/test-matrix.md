@@ -15,7 +15,7 @@ Raw report: [`device-reports/20261108-131918-device.txt`](device-reports/2026110
 ## Phase 0B — process execution
 
 Measured 2026-11-08 on D1, `app-debug.apk` targetSdk 28, driven by
-`adb shell am start -n dev.leocode/.MainActivity --es run all`.
+`adb shell am start -n dev.leocode/.HarnessActivity --es run all`.
 
 | Test | D1 (A9) | D2 (A11) | D3 (A14+) | Notes |
 |---|---|---|---|---|
@@ -45,8 +45,9 @@ the NDK CPython build respectively.
 |---|---|---|---|
 | WebView version | 137.0.7151.115 (Chrome) | | |
 | Chromium ≥ 100 | **PASS** | | |
-| `WebViewFeature.isFeatureSupported(ADD_WEB_MESSAGE_LISTENER)` | not yet exercised (needs the Phase 1 host) | | |
-| CodeMirror 6 boots | not yet exercised (needs the WebView shell) | | |
+| `WebViewFeature.isFeatureSupported(ADD_WEB_MESSAGE_LISTENER)` | **PASS** — bridge answers `app.info` | | |
+| CodeMirror 6 boots | **PASS** — Python highlighting, line numbers, keymap | | |
+| xterm.js boots | **PASS** — raw PTY bytes render | | |
 | Degraded mode required? | **No** | | |
 
 ## Phase 0C — Python
@@ -100,6 +101,31 @@ the NDK CPython build respectively.
 | OSC 52 write ignored | | | |
 | terminal title sanitised | | | |
 | ANR count during session | | | |
+
+## Phase 1 — IDE shell (WebView + bridge)
+
+Measured 2026-11-08 on D1, debug APK with the real IDE (no harness).
+
+| Test | D1 (A9) | D2 (A11) | D3 (A14+) | Notes |
+|---|---|---|---|---|
+| Cold start → first frame | **2.77 s** | | | `am start -W` TotalTime; 3.08 s before lazy editor chunk |
+| Splash before JS runs | **PASS** | | | static markup in `index.html`, correct theme from URL |
+| Bridge attach (`addWebMessageListener`) | **PASS** | | | origin `https://appassets.androidplatform.net` only |
+| List workspace | **PASS** | | | dirs first, sizes, `.trash` hidden |
+| Create file | **PASS** | | | prompt sheet → `fs.write` |
+| Open + edit | **PASS** | | | CodeMirror, Python highlight, dirty dot |
+| Save | **PASS** | | | `print(1+2)` on disk; atomic tmp → fsync → rename |
+| Terminal PTY | **PASS** | | | prompt, `ls` runs, live resize, restart button |
+| Terminal keystroke batching | **PASS** | | | one bridge message per animation frame |
+| Theme: system / light / dark | **PASS** | | | `data-theme` + status/nav bars update together |
+| No first-paint theme flash | **PASS** | | | mode + resolved theme passed in the page URL |
+| Keyboard accessory rows | **PASS** | | | keeps soft keyboard open |
+| Adaptive launcher icon | **PASS** | | | MIUI squircle mask, art visible |
+| Back button hierarchy | **PASS** | | | closes sheets → returns to Files → exits |
+| Rename / delete | PARTIAL | | | implemented, not yet exercised on device; delete uses `.trash` |
+
+**Cold-start breakdown.** WebView init dominates; the web bundle is ~45 KB gzip at boot and
+CodeMirror (133 KB) / xterm (74 KB) are fetched on first use.
 
 ## Lifecycle / environment
 

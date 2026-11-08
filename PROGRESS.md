@@ -1,7 +1,9 @@
 # LeoCode — Progress Tracker
 
 **Last updated:** 2026-11-08
-**Current phase:** Phase 0 (feasibility) — **0B and 0E gates PASS on device 1** (Redmi Note 7S, Android 9). WebView gate passes. Next: Android 11 repeat, then 0C2 CPython.
+**Current phase:** Phase 1 — the real IDE is wired into the APK and running on device 1
+(Redmi Note 7S, Android 9). Phase 0 gates 0B/0E still PASS. Next: Android 11 repeat,
+then 0C2 CPython, then Git/SSH UI.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v8.md`](docs/LeoCode_Implementation_Plan_v8.md)
 
 Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocked · `[~]` deferred
@@ -14,10 +16,12 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 |---|---|
 | Plan + decisions | Done (v8) |
 | Repository scaffold | Done |
-| Android app (Phase 0B harness) | **Built and installed** (`app-debug.apk`, 17.6 MB) |
-| Web IDE shell | **Build green** + code-split (react 46 KB gzip, codemirror 134 KB, xterm 73 KB lazy) |
+| Android app (real IDE shell) | **Built and installed** (`app-debug.apk`, 28.8 MB debug — R8 off) |
+| Web IDE shell | **Live on device** — files, editor, terminal; react 45 KB gzip; codemirror 133 KB + xterm 74 KB lazy |
+| Theme system | **Live** — system / light / dark, synced to system bars, no first-paint flash |
+| Launcher icon | **Done** — adaptive + legacy + round, generated from `design/app-icon.png` |
 | Python runtime artifacts | Draft `scripts/build-python.sh`; never run end-to-end |
-| Device validation | **D1 (Android 9) done** — T1–T7 pass. D2/D3 pending |
+| Device validation | **D1 (Android 9) done** — T1–T7 pass + Phase 1 smoke test. D2/D3 pending |
 | Android 14+ device | **Blocked — hardware not acquired** |
 
 **Measured on device 1 (2026-11-08)** — Redmi Note 7S `lavender`, Android 9 / SDK 28, MIUI V11,
@@ -34,6 +38,19 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | T6 native PTY | **PASS** — output, cols=80, exit 7 |
 | T7 applets | INFO — no `unzip`, `git`, `python` |
 
+**Phase 1 smoke test on device 1 (2026-11-08, installed APK)**
+
+| Check | Result |
+|---|---|
+| Cold start to first frame | **2.77 s** (3.08 s before the editor chunk was made lazy); splash paints immediately from `index.html` |
+| File list from app storage | PASS — directories first, sizes, hidden `.trash` |
+| Create file → open in editor | PASS (`hello.py`) |
+| Edit → Save | PASS — `print(1+2)` written; dirty dot cleared; "Saved" status |
+| Atomic save | PASS by construction (`tmp` → `fsync` → `rename`); unit-tested jail |
+| Terminal | PASS — real PTY (`/system/bin/sh -i`), prompt, `ls` runs, resize, extra keys |
+| Theme: system / light / dark | PASS — `data-theme` + system bars update together; choice persists |
+| Adaptive launcher icon | PASS — visible in App info (MIUI squircle mask) |
+
 **Blocking facts (2026-11-08)**
 - Android 14+ device still not available; cannot freeze Phase 0 without it.
 - Android 11 phone not yet tested (software is ready).
@@ -46,12 +63,14 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 - `git`/`python` are absent as expected: JGit and the NDK CPython build are the only paths.
 - 50 MB flood timing is a device property, not a bug — harness now uses 25 MB.
 
-**Known debt added by the scaffold**
-- `web` initial bundle is ~550 KB raw / ~184 KB gzip (react + codemirror); xterm is lazy-loaded. Re-measure cold start on the Redmi.
+**Known debt added by the IDE shell**
+- Debug APK is 28.8 MB: JGit, SSHD and Bouncy Castle are bundled and R8 is off. Wire a release build with shrinker rules before 0.1.
 - Gradle wrapper is committed (8.9); CI still invokes the system `gradle` for speed — switch to `./gradlew` when convenient.
-- `MainActivity` is the Phase 0B harness. It is replaced by the WebView shell in Phase 1.
-- Web assets are not copied into `android/app/src/main/assets/web` yet.
-- [x] APK is 17.6 MB because JGit/SSHD/Bouncy Castle are all bundled and R8 is off. Enable minification and check shrinker rules before release.
+- `HarnessActivity` is still exported (debug-only by intent). Remove or guard before 0.1.
+- Rename and delete exist in the bridge but have not been exercised on device yet; delete moves to `.trash` first.
+- No external-change detection or autosave yet; closing a dirty tab asks for confirmation.
+- Terminal keystrokes are coalesced per animation frame; sustained 4 MB/s streams still need a stress test in-app.
+- `androidx.webkit` logs a harmless `NoClassDefFoundError` for an API-29 class on Android 9 during class verification; message passing works.
 - `targetSdk 28` lint rule is intentionally disabled; do not "fix" it (D-002).
 
 **Verified by unit test** (`./gradlew testDebugUnitTest`, 5/5 pass)
@@ -191,30 +210,32 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 - [x] Bridge contract v1 drafted (`docs/bridge-contract.md`)
 - [x] Commit Gradle wrapper (`./gradlew`, Gradle 8.9)
 - [x] Code-split bundled: xterm deferred to the terminal tab (initial bundle ~550 KB raw / ~184 KB gzip)
-- [ ] Copy `web/dist` into `android/app/src/main/assets/web` during build
-- [ ] WebView host activity + `WebViewAssetLoader`
-- [ ] `addWebMessageListener` bridge (Kotlin side)
+- [x] Copy `web/dist` into `android/app/src/main/assets/web` (`scripts/sync-web.sh`)
+- [x] WebView host activity + `WebViewAssetLoader` (`MainActivity`)
+- [x] `addWebMessageListener` bridge (Kotlin side, `WebAppBridge`) with strict origin check
+- [x] File CRUD + path jail (canonicalise + symlink check) — list/read/write/mkdir/rename/delete
+- [x] Navigation + settings (files/editor/terminal tabs, appearance + about sheet)
+- [x] Permission and error surfaces (bridge error → status bar + error sheet)
+- [x] Theme manager (system/light/dark) shared by WebView, system bars and window background
+- [x] Launcher icon set generated from the new artwork
 - [ ] Generated TS types from Kotlin models
 - [ ] Workspace create/open, recent list, project metadata
-- [ ] File CRUD + path jail (canonicalise + symlink check)
 - [ ] SAF import/export (copy-in/copy-out)
 - [ ] Zip export/backup + uninstall warning
-- [ ] Navigation + settings
-- [ ] Permission and error surfaces
 
 ## 10. Phase 2 — editor and terminal
 
 - [x] CodeMirror 6 editor with Python mode, tabs, dirty state
-- [ ] Mobile keyboard accessory row
-- [ ] Find/replace
-- [ ] Bracket matching, autocomplete tuning
-- [ ] Atomic save (temp → fsync → rename)
+- [x] Mobile keyboard accessory row (editor keys + terminal keys, keep-keyboard-open)
+- [x] Bracket matching, close-brackets, Python mode
+- [x] Atomic save (temp → fsync → rename)
+- [x] Terminal wired to native PTY in-app (base64 byte stream, resize, restart)
+- [x] Terminal tab lifecycle (close on unmount/activity destroy; no leaks observed)
+- [ ] Find/replace UI (keymap exists)
 - [ ] Draft autosave + crash recovery
 - [ ] External-change detection
 - [ ] Native workspace search with streaming + ignores
 - [ ] Large-file tests (>1 MB)
-- [ ] Terminal wired to native PTY in-app
-- [ ] Terminal tab lifecycle (no process leaks)
 
 ## 11. Phase 3 — Git and SSH UI
 
@@ -270,3 +291,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | 2026-11-08 | APK built (Gradle 8.9 / AGP 8.5.2 / NDK r27) and installed on the Redmi Note 7S. Device report captured: Android 9, arm64-v8a, PAGE_SIZE 4096, WebView 137. |
 | 2026-11-08 | **Phase 0B gate PASS on Android 9**: T1 shell exec, T2 exec-from-app-data (W^X), T3 group kill, T4 exit codes, T5 bounded 25 MB flood, T6 native PTY. Results in `docs/test-matrix.md`. |
 | 2026-11-08 | T5 resized 50 MB → 25 MB after measuring 0.7 MB/s shell throughput; harness now drives from ADB (`--es run all`). |
+| 2026-11-08 | **Phase 1 milestone: real IDE in the APK.** WebView host + asset loader, v1 bridge (fs/proc/term/theme), real files in app storage, native PTY terminal, light/dark/system themes with system-bar sync, keyboard accessory rows, boot splash. Verified on device: create/open/edit/save, terminal, theme switching. |
+| 2026-11-08 | Web bundle split: editor (CodeMirror) and terminal (xterm) are lazy chunks; cold start to first frame 3.08 s → 2.77 s. |
+| 2026-11-08 | New launcher artwork; generated adaptive, round and legacy icons plus `design/app-icon.png` source. |
+| 2026-11-08 | Repository published to GitHub (`souravrouth5/leocode-ide`); CI becomes runnable. |
