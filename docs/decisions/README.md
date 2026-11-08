@@ -1,0 +1,75 @@
+# LeoCode — Decision Records
+
+Aggregated record of the frozen decisions. Each entry: context → decision → alternatives → trigger to reopen.
+
+---
+
+## D-001 — Distribution: direct APK, no Google Play
+
+**Context** LeoCode downloads and executes interpreters and package-manager content. Play policies restrict downloaded executable code and impose target-API floors.
+**Decision** Distribute signed APKs via GitHub Releases. F-Droid only if the app is fully FOSS and reproducible.
+**Alternatives** Play Store (rejected: incompatible), F-Droid-only (rejected: excludes closed-source options).
+**Reopen if** the project becomes fully FOSS and F-Droid inclusion is worth the build constraints.
+
+## D-002 — targetSdk 28, compileSdk 34, minSdk 28
+
+**Context** API 29+ blocks `execve()` of app-written files, which kills local runtimes.
+**Decision** targetSdk 28 (Termux's approach). compileSdk 34 for modern tooling. minSdk 28 to match the tested floor.
+**Alternatives** targetSdk 34 (rejected: no local execution), shipping executables as `lib*.so` in `nativeLibraryDir` (partial workaround: works for the interpreter, not for `dlopen` of venv `.so` files).
+**Reopen if** Android's install floor reaches 29, or a workaround makes targetSdk 34 viable. See plan §14 (plan B).
+
+## D-003 — Package ID `dev.leocode`
+
+**Context** The app's data path becomes the runtime prefix and appears in shebangs. Changing it invalidates every built package and the key store.
+**Decision** `dev.leocode` → prefix `/data/data/dev.leocode/files/usr` (33 chars).
+**Alternatives** `com.leocode.ide` (longer), `io.leo` (risk of domain collision).
+**Reopen never.** Treat as final.
+
+## D-004 — Terminal: xterm.js over our own JNI PTY
+
+**Context** Termux `terminal-view`/`terminal-emulator` are GPLv3 and are linked into the APK, so the "separate process" mitigation does not apply.
+**Decision** xterm.js in the IDE WebView, attached to our own `openpty`/`fork`/`setsid` JNI layer. No GPL code.
+**Alternatives** GPLv3 the whole app and use Termux views (better native IME, but forces GPL); write a clean-room native view (3–5 weeks).
+**Reopen if** xterm.js fails the 0E IME/layout criteria **and** the app is going GPLv3, or if a clean-room native view becomes worth the time.
+
+## D-005 — Git/SSH: JGit + MINA SSHD + Bouncy Castle
+
+**Context** JGit and MINA SSHD are pure Java, so Git works with no runtime installed and no native binaries.
+**Decision** In-process JGit for Git, MINA SSHD for SSH, Bouncy Castle for Ed25519/Curve25519 on API < 33.
+**Alternatives** Native git/OpenSSH from a userspace (deferred to Track C1), libgit2 via JNI (unnecessary).
+**Reopen if** JGit blocks a required workflow (hooks, LFS, complex submodules) and a userspace exists.
+
+## D-006 — Python: two tracks, C2 first
+
+**Context** No official CPython for Android/bionic. Full userspace rebuild is 3–5 weeks plus maintenance.
+**Decision** MVP uses the system shell (`/system/bin/sh` + toybox) with a CPython built by us using the NDK, plus our own wheel index for native extensions (**Track C2**). A Termux-style userspace rebuild (**Track C1**) is optional and only if broad `pip`/npm compatibility is required.
+**Alternatives** Full userspace first (rejected: too slow to validate the product), Chaquopy (rejected: build-time only).
+**Reopen if** device tests show the system shell is unusable, or users need packages we cannot wheel.
+
+## D-007 — WebView minimum: Chromium 100
+
+**Context** `addWebMessageListener` needs WebView 88+; CodeMirror 6 needs ~87+. The secure bridge design depends on the former.
+**Decision** Chromium 100+ is a hard Phase-0A gate. Degraded mode: textarea+Prism editor and an intercepted-request bridge for devices that cannot update.
+**Alternatives** `addJavascriptInterface` (rejected: cannot be origin-restricted), GeckoView (heavy, different engine).
+**Reopen if** the target devices cannot reach 100 and degraded mode is unacceptable → GeckoView evaluation.
+
+## D-008 — Shared-UID execution model
+
+**Context** Unrooted Android gives no way to run project code under a different UID.
+**Decision** Accept it, document it, and minimise exposure: keys encrypted at rest, decrypted only in memory for the duration of an operation, no secrets in child environments, onboarding warning that a malicious project can read other projects.
+**Alternatives** Separate helper app with `sharedUserId` (deprecated and still same data dir access), per-project encryption (optional, does not stop same-UID reads while mounted).
+**Reopen if** a sandboxing primitive becomes available unrooted.
+
+## D-009 — Secrets: Keystore envelope encryption
+
+**Context** Keystore cannot hold arbitrary OpenSSH/Ed25519 keys directly.
+**Decision** A non-exportable AES-GCM key in the Keystore wraps key material stored as an encrypted blob in app-private storage. StrongBox when available. No plaintext key files.
+**Alternatives** Storing keys directly in Keystore (not possible), plain files (rejected).
+**Reopen if** biometric/device-credential gating is requested for key use.
+
+## D-010 — Preview isolation
+
+**Context** Dev servers and preview content are untrusted.
+**Decision** Bind `127.0.0.1` only, random port, per-session token, strict `Host`/`Origin`; separate WebView with no bridge, no file access, own storage partition.
+**Alternatives** Same WebView with CSP (rejected).
+**Reopen if** preview needs to call IDE APIs — it must not.

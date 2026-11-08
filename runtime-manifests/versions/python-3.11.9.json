@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "python",
+  "version": "3.11.9",
+  "versionCode": 1,
+  "abi": ["arm64-v8a"],
+  "minAndroid": 28,
+  "artifact": {
+    "url": "https://REPLACE_ME.invalid/leocode/python-3.11.9-android-aarch64.tar.zst",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 1
+  },
+  "install": {
+    "layout": "prefix",
+    "strip": 1,
+    "executables": ["bin/python3", "bin/python3.11", "bin/pip3"]
+  },
+  "env": {
+    "PYTHONHOME": "{{prefix}}",
+    "PYTHONPATH": "{{prefix}}/lib/python3.11",
+    "SSL_CERT_FILE": "{{prefix}}/etc/ca-certificates.pem",
+    "PATH": "{{prefix}}/bin:/system/bin:/system/xbin",
+    "TMPDIR": "{{tmp}}"
+  },
+  "healthCheck": {
+    "argv": ["bin/python3", "-c", "import sys; print(sys.version)"],
+    "timeoutMs": 15000
+  },
+  "limitations": [
+    "no compiler on device: sdists cannot build",
+    "manylinux/musllinux wheels do not run on Bionic",
+    "native packages only from the LeoCode wheel index"
+  ]
+}

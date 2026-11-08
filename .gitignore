@@ -1,0 +1,28 @@
+# build output
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/.idea/
+android/local.properties
+android/captures/
+web/node_modules/
+web/dist/
+web/.vite/
+
+# runtime artifacts (large, produced by CI, never committed)
+runtime-packaging/out/
+runtime-packaging/build/
+runtime-manifests/artifacts/
+
+# secrets — never commit
+*.jks
+*.keystore
+runtime-manifests/private-key*
+.env
+.env.*
+
+# os / editor
+.DS_Store
+*.swp

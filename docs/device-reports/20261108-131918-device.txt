@@ -1,0 +1,82 @@
+# LeoCode device report
+generated: 2026-11-08T07:49:18Z
+
+## identity
+ro.product.manufacturer      Xiaomi
+ro.product.model             Redmi Note 7S
+ro.product.device            lavender
+ro.build.version.release     9
+ro.build.version.sdk         28
+ro.build.version.security_patch 2020-02-05
+ro.boot.selinux              
+ro.miui.ui.version.name      V11
+ro.miui.ui.version.code      9
+
+## cpu / abi
+ro.product.cpu.abi           arm64-v8a
+ro.product.cpu.abilist       arm64-v8a,armeabi-v7a,armeabi
+ro.product.cpu.abilist32     armeabi-v7a,armeabi
+ro.product.cpu.abilist64     arm64-v8a
+ro.build.version.sdk_int     
+
+## memory / storage
+MemTotal:        3824408 kB
+MemFree:           74020 kB
+MemAvailable:    1362148 kB
+Buffers:           40868 kB
+Cached:          1433772 kB
+
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/block/dm-2  50G   34G   16G  69% /data
+
+## page size
+getconf unavailable (use native helper)
+
+## webview
+Current WebView Update Service state
+  Fallback logic enabled: true
+  Multiprocess enabled: true
+  Current WebView package (name, version): (com.android.chrome, 137.0.7151.115)
+  Minimum WebView version code: 398709932
+  Number of relros started: 2
+  Number of relros finished: 2
+  WebView package dirty: false
+  Any WebView package installed: true
+  Preferred WebView package (name, version): (com.android.chrome, 137.0.7151.115)
+  WebView packages:
+    Valid package com.android.chrome (versionName: 137.0.7151.115, versionCode: 715111521, targetSdkVersion: 35) is  installed/enabled for all users
+    Valid package com.google.android.webview (versionName: 80.0.3987.99, versionCode: 398709900, targetSdkVersion: 29) is NOT installed/enabled for all users
+    com.chrome.beta is NOT installed.
+    com.chrome.dev is NOT installed.
+    com.chrome.canary is NOT installed.
+    com.google.android.apps.chrome is NOT installed.
+    versionCode=398709900 minSdk=24 targetSdk=29
+    versionName=80.0.3987.99
+
+## system shell
+acpi am app_process app_process32 app_process64 applypatch appops appwidget atrace awk base64 
+basename bcc blockdev bmgr bu bugreport bugreportz bunzip2 bzcat bzip2 cal cat chcon chgrp chmod 
+chown chroot chrt cksum clear cmd cmp comm content copy_bugreport_file.sh cp cpio crash_dump32 
+crash_dump64 curl cut dalvikvm dalvikvm32 dalvikvm64 date dd debuggerd dex2oat dexdiag dexdump 
+dexlist df diff dirname dmesg dos2unix dpm du dumpsys echo egrep emmcosv env expand expr fallocate 
+false fgrep file find flock fmt free getenforce getevent getprop ghr grep groups gunzip gzip head 
+hid host_manager_11ad hostname hw hwclock id ifconfig ime incident inotifyd input insmod ionice 
+iorenice ip ip-wrapper-1.0 ip6tables ip6tables-restore ip6tables-save ip6tables-wrapper-1.0 
+
+yes setsid
+yes tar
+yes gzip
+no  unzip
+yes sed
+yes awk
+yes grep
+yes find
+yes xxd
+yes curl
+no  git
+no  python
+
+## adb
+List of devices attached
+11f98015               device usb:2-2 product:lavender model:Redmi_Note_7S device:lavender transport_id:4
+
