@@ -7,21 +7,29 @@
 # Resolution order:
 #   1. LEO_D1 / LEO_D2 from the environment, when those serials are connected;
 #   2. otherwise auto-detect: with exactly two devices, the lower Android API is
-#      D1 (old-Android baseline) and the higher is D2 (new Android).
+#      D1 (old-Android baseline) and the higher is D2 (new Android);
+#      with one device, API <= 28 (Android 9) is D1, anything newer is D2.
 #
 # Wi-Fi ADB for D1 (both phones on one cable):
 #   adb -s <d1-usb-serial> tcpip 5555
 #   adb -s <d1-usb-serial> shell ip addr show wlan0     # note the inet address
 #   adb connect <d1-ip>:5555
 #   # unplug D1, plug in D2; re-run `adb tcpip 5555` after every D1 reboot.
-set -uo pipefail
+set -euo pipefail
 
 adb="${ADB:-adb}"
 mode="${1:-table}"
 
+if ! command -v "$adb" >/dev/null 2>&1; then
+  echo "error: '$adb' not found; install platform-tools or set ADB=<path>" >&2
+  exit 1
+fi
+
 connected=()
 while IFS= read -r serial; do
-  [ -n "$serial" ] && connected+=("$serial")
+  if [ -n "$serial" ]; then
+    connected+=("$serial")
+  fi
 done < <("$adb" devices | awk 'NR > 1 && $2 == "device" { print $1 }')
 
 if [ ${#connected[@]} -eq 0 ]; then
@@ -30,7 +38,7 @@ if [ ${#connected[@]} -eq 0 ]; then
 fi
 
 is_connected() {
-  local serial="$1"
+  local serial="$1" s
   for s in "${connected[@]}"; do
     [ "$s" = "$serial" ] && return 0
   done
@@ -38,7 +46,7 @@ is_connected() {
 }
 
 prop() {
-  "$adb" -s "$1" shell getprop "$2" 2>/dev/null | tr -d '\r'
+  "$adb" -s "$1" shell getprop "$2" 2>/dev/null | tr -d '\r' || true
 }
 
 api_of() {
@@ -65,7 +73,8 @@ if [ -z "$d1" ] || [ -z "$d2" ]; then
   elif [ ${#connected[@]} -eq 1 ]; then
     # One phone at a time: use it for whichever slot is unset.
     if [ -z "$d1" ] && [ -z "$d2" ]; then
-      if [ "$(api_of "${connected[0]}")" -le 10 ]; then
+      # API level, not Android version: Android 9 is API 28 and belongs in D1.
+      if [ "$(api_of "${connected[0]}")" -le 28 ]; then
         d1="${connected[0]}"
       else
         d2="${connected[0]}"
@@ -82,19 +91,17 @@ fi
 
 printf 'connected: %s\n\n' "${connected[*]}"
 
+# Root is reported from read-only facts only. Never run `su`: a rooted phone
+# would show a grant dialog for the shell UID, and LeoCode must never trigger
+# a root prompt without the user opting in (D-011).
 root_state() {
-  local serial="$1" su out
-  su="$("$adb" -s "$serial" shell 'command -v su' 2>/dev/null | tr -d '\r')"
-  if [ -z "$su" ]; then
+  local serial="$1" su
+  su="$("$adb" -s "$serial" shell 'command -v su' 2>/dev/null | tr -d '\r' || true)"
+  if [ -n "$su" ]; then
+    printf 'su present (not tested)'
+  else
     printf 'no su'
-    return
   fi
-  # Never prompt interactively: stdin closed, short timeout.
-  out="$(timeout 6 "$adb" -s "$serial" shell 'su -c id </dev/null' 2>/dev/null | tr -d '\r')"
-  case "$out" in
-    *uid=0*) printf 'su granted (%s)' "$su" ;;
-    *) printf 'su present, not granted' ;;
-  esac
 }
 
 describe() {
@@ -105,37 +112,49 @@ describe() {
   fi
   if ! is_connected "$serial"; then
     printf '%-3s %-22s NOT CONNECTED\n' "$slot" "$serial"
+    missing=1
     return
   fi
-  local model android api abi page webview
+  local model android api abi page page_hex webview
   model="$(prop "$serial" ro.product.model)"
   android="$(prop "$serial" ro.build.version.release)"
   api="$(prop "$serial" ro.build.version.sdk)"
   abi="$(prop "$serial" ro.product.cpu.abi)"
-  page="$("$adb" -s "$serial" shell getconf PAGE_SIZE 2>/dev/null | tr -d '\r')"
+  page="$("$adb" -s "$serial" shell getconf PAGE_SIZE 2>/dev/null | tr -d '\r' || true)"
   if [ -z "$page" ]; then
     # Android 9 toybox has no getconf: read AT_PAGESZ (type 6) from auxv.
     page_hex="$("$adb" -s "$serial" shell \
       'od -An -tx8 -v /proc/self/auxv | tr -s " " "\n" | awk "p{print; exit} /^0*6\$/{p=1}"' \
-      2>/dev/null | tr -d '\r' | tr -d ' ')"
-    [ -n "$page_hex" ] && page="$(printf '%d' "0x$page_hex")"
+      2>/dev/null | tr -d '\r' | tr -d ' ' || true)"
+    if [ -n "$page_hex" ]; then
+      page="$(printf '%d' "0x$page_hex" 2>/dev/null || true)"
+    fi
   fi
   webview="$("$adb" -s "$serial" shell dumpsys webviewupdate 2>/dev/null \
-    | sed -n 's/.*Current WebView package (name, version): (.*, \(.*\))/\1/p' | head -1 | tr -d '\r')"
+    | sed -n 's/.*Current WebView package (name, version): (.*, \(.*\))/\1/p' | head -1 | tr -d '\r' || true)"
   [ -n "$webview" ] || webview="$(prop "$serial" ro.build.version.webview)"
-  printf '%-3s %-22s %-22s Android %-5s API %-3s %-9s PAGE_SIZE=%-5s WebView=%-18s root=%s\n' \
+  printf '%-3s %-22s %-22s Android %-5s API %-3s %-9s PAGE_SIZE=%-5s WebView=%-18s root: %s\n' \
     "$slot" "$serial" "$model" "$android" "$api" "${abi:-?}" "${page:-?}" "${webview:-?}" \
     "$(root_state "$serial")"
 }
+
+missing=0
 
 printf '%-3s %-22s %-22s %-13s %-7s %-9s %-14s %-18s %s\n' \
   ID SERIAL MODEL ANDROID API ABI PAGE_SIZE WEBVIEW ROOT
 describe D1 "$d1"
 describe D2 "$d2"
 
+if [ "$missing" -ne 0 ]; then
+  echo >&2
+  echo "error: a configured serial is not connected (see NOT CONNECTED above)" >&2
+  exit 3
+fi
+
 echo
 echo "# ready to paste"
-[ -n "$d1" ] && echo "export LEO_D1='$d1'"
-[ -n "$d2" ] && echo "export LEO_D2='$d2'"
+if [ -n "$d1" ]; then echo "export LEO_D1='$d1'"; fi
+if [ -n "$d2" ]; then echo "export LEO_D2='$d2'"; fi
 echo
 echo "scripts/smoke.sh \"\$LEO_D2\""
+exit 0

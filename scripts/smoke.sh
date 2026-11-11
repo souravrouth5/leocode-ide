@@ -4,14 +4,15 @@
 #   scripts/smoke.sh <serial> [apk]
 #
 # Installs the APK (default: the debug build), force-stops the app, starts it
-# cold with `am start -W`, then records cold-start timing and a focused logcat
-# to docs/device-reports/. Exit code is non-zero if the launch fails.
-set -uo pipefail
+# cold with `am start -W`, then records cold-start timing, the focused window
+# and a focused logcat to docs/device-reports/. Exit code is non-zero if the
+# launch fails.
+set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 adb="${ADB:-adb}"
 
-serial="${1:-${LEO_D1:-}}"
+serial="${1:-}"
 apk="${2:-$root/android/app/build/outputs/apk/debug/app-debug.apk}"
 
 if [ -z "$serial" ]; then
@@ -29,8 +30,8 @@ if [ ! -f "$apk" ]; then
   exit 2
 fi
 
-model="$("$adb" -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
-api="$("$adb" -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r')"
+model="$("$adb" -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || true)"
+api="$("$adb" -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r' || true)"
 stamp="$(date +%Y%m%d-%H%M%S)"
 out="$root/docs/device-reports/${stamp}-smoke-${serial//[:\/]/_}.txt"
 mkdir -p "$(dirname "$out")"
@@ -44,15 +45,16 @@ if ! "$adb" -s "$serial" install -r "$apk"; then
   exit 1
 fi
 
+# Expected to fail on some phones/builds; never abort the run for these.
 "$adb" -s "$serial" logcat -c 2>/dev/null || true
 # A locked or sleeping screen prevents the activity from reaching first frame.
 "$adb" -s "$serial" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
 "$adb" -s "$serial" shell wm dismiss-keyguard 2>/dev/null || true
-"$adb" -s "$serial" shell am force-stop dev.leocode
+"$adb" -s "$serial" shell am force-stop dev.leocode 2>/dev/null || true
 sleep 0.5
 
 echo "== cold start (am start -W)"
-start_out="$("$adb" -s "$serial" shell am start -W -n dev.leocode/.MainActivity 2>&1 | tr -d '\r')"
+start_out="$("$adb" -s "$serial" shell am start -W -n dev.leocode/.MainActivity 2>&1 | tr -d '\r' || true)"
 echo "$start_out"
 
 status="$(printf '%s\n' "$start_out" | sed -n 's/^Status: //p')"
@@ -61,7 +63,17 @@ wait_time="$(printf '%s\n' "$start_out" | sed -n 's/^WaitTime: //p')"
 launch_state="$(printf '%s\n' "$start_out" | sed -n 's/^LaunchState: //p')"
 
 sleep 2
-pid="$("$adb" -s "$serial" shell pidof dev.leocode 2>/dev/null | tr -d '\r')"
+pid="$("$adb" -s "$serial" shell pidof dev.leocode 2>/dev/null | tr -d '\r' || true)"
+
+# Focused window: a hint for an old-target-SDK warning dialog. Whether such a
+# dialog is actually on screen is a manual observation (see the report header).
+focus="$("$adb" -s "$serial" shell dumpsys window 2>/dev/null \
+  | grep -i mCurrentFocus | head -1 | tr -d '\r' || true)"
+case "$focus" in
+  "") dialog_hint="unknown (dumpsys reported no mCurrentFocus)" ;;
+  *dev.leocode*) dialog_hint="app has focus; no system dialog visible in focus" ;;
+  *) dialog_hint="focus is not dev.leocode; a system dialog may be up" ;;
+esac
 
 # Focused logcat: app tags plus crashes. Avoids multi-MB dumps on a phone.
 log_tmp="$(mktemp)"
@@ -76,6 +88,11 @@ log_tmp="$(mktemp)"
   echo "model:     $model"
   echo "api:       $api"
   echo "apk:       $apk"
+  echo
+  echo "## window focus"
+  echo "mCurrentFocus: ${focus:-<unavailable>}"
+  echo "old-target-SDK warning dialog: manual observation"
+  echo "  heuristic from focus: ${dialog_hint}"
   echo
   echo "## am start -W"
   printf '%s\n' "$start_out"
@@ -95,6 +112,7 @@ echo "LaunchState: ${launch_state:-?}"
 echo "TotalTime:   ${total:-?} ms"
 echo "WaitTime:    ${wait_time:-?} ms"
 echo "pid:         ${pid:-<none>}"
+echo "focus:       ${focus:-?}"
 echo "logcat:      ${out#$root/}"
 
 if [ "$status" != "ok" ] || [ -z "$pid" ] || [ -z "$total" ]; then
