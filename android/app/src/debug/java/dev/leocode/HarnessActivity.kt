@@ -17,7 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dev.leocode.core.DeviceReport
 import dev.leocode.core.NativePty
-import dev.leocode.core.ProcessHost
+import dev.leocode.core.ProcessSupervisor
 import dev.leocode.core.PtySession
 import dev.leocode.core.Workspace
 import java.io.File
@@ -44,7 +44,7 @@ class HarnessActivity : Activity() {
 
     private lateinit var output: TextView
     private lateinit var workspace: Workspace
-    private lateinit var host: ProcessHost
+    private lateinit var supervisor: ProcessSupervisor
     private var busy = false
 
     private data class Test(val id: String, val title: String, val body: () -> String)
@@ -55,7 +55,7 @@ class HarnessActivity : Activity() {
         super.onCreate(savedInstanceState)
         workspace = Workspace(filesDir)
         workspace.ensure()
-        host = ProcessHost(workspace.childEnv())
+        supervisor = ProcessSupervisor(workspace.childEnv())
 
         tests = listOf(
             Test("T1", "/system/bin/sh") { t1Shell() },
@@ -80,6 +80,11 @@ class HarnessActivity : Activity() {
                 else main.postDelayed({ runSingle(test) }, 400)
             }
         }
+    }
+
+    override fun onDestroy() {
+        supervisor.close()
+        super.onDestroy()
     }
 
     // ---------------------------------------------------------------- UI
@@ -178,7 +183,10 @@ class HarnessActivity : Activity() {
         "  FAIL ${t.javaClass.simpleName}: ${t.message}"
     }
 
-    private fun format(result: ProcessHost.Result): String = buildString {
+    private fun runSpec(spec: ProcessSupervisor.Spec): HarnessProcess.Result =
+        HarnessProcess.run(supervisor, spec)
+
+    private fun format(result: HarnessProcess.Result): String = buildString {
         appendLine(
             "  pid=${result.pid} exit=${result.exitCode} time=${result.durationMs}ms " +
                 "timedOut=${result.timedOut} truncated=${result.stdoutTruncated}"
@@ -194,8 +202,8 @@ class HarnessActivity : Activity() {
     // -------------------------------------------------------------- tests
 
     private fun t1Shell(): String {
-        val r = host.run(
-            ProcessHost.Spec(
+        val r = runSpec(
+            ProcessSupervisor.Spec(
                 argv = listOf("/system/bin/sh", "-c", "echo hello-from-android; id; pwd; echo PATH=\$PATH"),
                 cwd = workspace.defaultWorkspace,
                 timeoutMs = 10_000
@@ -210,8 +218,8 @@ class HarnessActivity : Activity() {
         File("/system/bin/sh").copyTo(probe, overwrite = true)
         probe.setExecutable(true, false)
 
-        val r = host.run(
-            ProcessHost.Spec(
+        val r = runSpec(
+            ProcessSupervisor.Spec(
                 argv = listOf(probe.absolutePath, "-c", "echo exec-from-data-ok; echo arg0=\$0"),
                 cwd = workspace.defaultWorkspace,
                 timeoutMs = 10_000
@@ -223,42 +231,45 @@ class HarnessActivity : Activity() {
             else "  FAIL — execve() blocked or binary unusable (expected at targetSdk >= 29)"
     }
 
+    /**
+     * Group kill through the production path: ProcessSupervisor starts the child under
+     * setsid, cancel() sends SIGTERM to the group, waits 2 s, then SIGKILL.
+     */
     private fun t3GroupKill(): String {
-        val setsid = File("/system/bin/setsid")
-        if (!setsid.exists()) return "  SKIP — /system/bin/setsid not present"
+        if (!File("/system/bin/setsid").exists()) return "  SKIP — /system/bin/setsid not present"
 
-        val process = ProcessBuilder(
-            setsid.absolutePath,
-            "/system/bin/sh",
-            "-c",
-            "sleep 30; echo should-not-print"
+        val exitCode = java.util.concurrent.atomic.AtomicInteger(-2)
+        val done = java.util.concurrent.CountDownLatch(1)
+        val handle = supervisor.start(
+            ProcessSupervisor.Spec(
+                argv = listOf("/system/bin/sh", "-c", "sleep 30; echo should-not-print"),
+                cwd = workspace.defaultWorkspace,
+                timeoutMs = 60_000
+            ),
+            onStdout = {},
+            onStderr = {},
+            onExit = { code ->
+                exitCode.set(code)
+                done.countDown()
+            }
         )
-            .directory(workspace.defaultWorkspace)
-            .redirectErrorStream(true)
-            .start()
 
         Thread.sleep(500)
-        val pid = ProcessHost.pidOf(process)
+        val cancelled = supervisor.cancel(handle.jobId)
+        val exited = done.await(5, TimeUnit.SECONDS)
 
-        val signalResult = if (pid > 0 && NativePty.available()) {
-            NativePty.killGroup(pid, 15)
-        } else {
-            ProcessBuilder("/system/bin/sh", "-c", "kill -TERM -$pid")
-                .redirectErrorStream(true)
-                .start()
-                .waitFor()
-        }
+        val groupGone = ProcessBuilder("/system/bin/sh", "-c", "kill -0 -${handle.pid} 2>/dev/null")
+            .start()
+            .waitFor() != 0
 
-        val exited = process.waitFor(5, TimeUnit.SECONDS)
-        if (!exited) process.destroyForcibly()
-
-        return "  pid=$pid killGroup=$signalResult exited=${if (exited) "yes" else "no"}\n" +
-            if (exited) "  PASS" else "  FAIL — process group survived SIGTERM"
+        return "  pid=${handle.pid} cancelled=$cancelled exited=${if (exited) "yes" else "no"} " +
+            "exit=${exitCode.get()} groupGone=$groupGone\n" +
+            if (exited && groupGone) "  PASS" else "  FAIL — process group survived cancel"
     }
 
     private fun t4ExitCode(): String {
-        val r = host.run(
-            ProcessHost.Spec(
+        val r = runSpec(
+            ProcessSupervisor.Spec(
                 argv = listOf("/system/bin/sh", "-c", "echo to-stdout; echo to-stderr >&2; exit 42"),
                 cwd = workspace.defaultWorkspace,
                 timeoutMs = 10_000
@@ -271,8 +282,8 @@ class HarnessActivity : Activity() {
         // 25 MB, not 50: measured on the Redmi Note 7S, a `yes | head -c` pipeline moves
         // ~0.7 MB/s through the shell (69 s for 50 MB). 25 MB finishes inside the timeout,
         // which lets us assert both "process completed" and "buffer stayed bounded".
-        val r = host.run(
-            ProcessHost.Spec(
+        val r = runSpec(
+            ProcessSupervisor.Spec(
                 argv = listOf("/system/bin/sh", "-c", "yes 0123456789 | head -c 25000000"),
                 cwd = workspace.defaultWorkspace,
                 timeoutMs = 120_000,
@@ -309,8 +320,8 @@ class HarnessActivity : Activity() {
     }
 
     private fun t7Toybox(): String {
-        val r = host.run(
-            ProcessHost.Spec(
+        val r = runSpec(
+            ProcessSupervisor.Spec(
                 argv = listOf(
                     "/system/bin/sh",
                     "-c",
