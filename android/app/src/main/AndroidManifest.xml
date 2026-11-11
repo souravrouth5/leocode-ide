@@ -28,14 +28,5 @@
             </intent-filter>
         </activity>
 
-        <!-- Phase 0 device harness. Debug builds only in spirit: it executes fixed
-             test commands and must not ship in a release. Remove before 0.1. -->
-        <activity
-            android:name=".HarnessActivity"
-            android:exported="true"
-            android:label="LeoCode Harness"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
-            android:windowSoftInputMode="adjustResize" />
-
     </application>
 </manifest>
