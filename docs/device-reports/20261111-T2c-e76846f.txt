@@ -1,0 +1,40 @@
+T2c control build — targetSdk 29 must block execve() from app data
+date         : 2026-11-11 (16:50 IST / 11:20 UTC)
+device       : POCO F1, Android 15 (SDK 35), serial e76846f
+build variant: control, targetSdk 29 — ./gradlew --no-daemon assembleDebug -Pleocode.controlTargetSdk=29
+
+commands
+  cd android && ANDROID_HOME=$HOME/Android/Sdk ./gradlew --no-daemon assembleDebug -Pleocode.controlTargetSdk=29
+  adb -s e76846f install -r app/build/outputs/apk/debug/app-debug.apk
+  adb -s e76846f shell dumpsys package dev.leocode | grep -i targetSdk
+  adb -s e76846f shell input keyevent KEYCODE_WAKEUP
+  adb -s e76846f shell am force-stop dev.leocode
+  adb -s e76846f logcat -c
+  adb -s e76846f shell am start -n dev.leocode/.HarnessActivity --es run T2
+  sleep 10
+  adb -s e76846f logcat -d -s LeoCodeHarness:I | sed 's/^.*LeoCodeHarness: //'
+
+installed package
+  versionCode=2 minSdk=28 targetSdk=29
+
+observed result — BLOCKED (expected)
+  T2 fails with error=13, Permission denied: the app data directory is no longer
+  executable at targetSdk >= 29, so the copied probe-sh cannot be run.
+
+raw logcat (tag LeoCodeHarness)
+--------- beginning of main
+LeoCode Phase 0B harness
+device     : Xiaomi POCO F1
+android    : 15 (sdk 35, patch 2025-09-01)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.google.android.webview 156.0.8078.47
+page size  : 4096 bytes (native)
+storage    : 100774 MB free / 115797 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+▶ T2 — exec binary from app data (W^X gate)
+  FAIL IOException: Cannot run program "/data/user/0/dev.leocode/files/workspaces/default/t2/probe-sh" (in directory "/data/user/0/dev.leocode/files/workspaces/default"): error=13, Permission denied

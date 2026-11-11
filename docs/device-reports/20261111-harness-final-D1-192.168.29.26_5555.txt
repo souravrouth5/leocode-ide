@@ -1,0 +1,83 @@
+# LeoCode harness — final Phase A APK
+date:   2026-11-11T16:56:54+05:30
+device: Redmi Note 7S, Android 9, serial 192.168.29.26:5555
+apk:    android/app/build/outputs/apk/debug/app-debug.apk (versionCode 2, targetSdk 28)
+cmd:    adb -s 192.168.29.26:5555 shell am start -n dev.leocode/.HarnessActivity --es run all
+
+--------- beginning of main
+--------- beginning of system
+--------- beginning of crash
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 15287 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+════ RUN ALL ════
+
+▶ T1 — /system/bin/sh
+  pid=17127 exit=0 time=258ms timedOut=false truncated=false
+  stdout: hello-from-android
+          uid=10090(u0_a90) gid=10090(u0_a90) groups=10090(u0_a90),3003(inet),9997(everybody),20090(u0_a90_cache),50090(all_a90),99909997(u999_everybody) context=u:r:untrusted_app:s0:c90,c256,c512,c768
+          /data/user/0/dev.leocode/files/workspaces/default
+          PATH=/data/user/0/dev.leocode/files/usr/bin:/system/bin:/system/xbin
+  PASS
+
+▶ T2 — exec binary from app data (W^X gate)
+  pid=17152 exit=0 time=107ms timedOut=false truncated=false
+  stdout: exec-from-data-ok
+          arg0=/data/user/0/dev.leocode/files/workspaces/default/t2/probe-sh
+  canExecute=true
+  PASS
+
+▶ T3 — process-group kill via setsid
+  pid=17162 killGroup=0 exited=yes
+  PASS
+
+▶ T4 — exit code + stderr capture
+  pid=17169 exit=42 time=109ms timedOut=false truncated=false
+  stdout: to-stdout
+  stderr: to-stderr
+  PASS
+
+▶ T5 — output flood, bounded buffer
+  exit=0 time=7766ms captured=262144B truncated=true timedOut=false rate=3219KB/s
+  PASS — bounded and completed
+
+▶ T6 — native PTY smoke test
+  pageSize=4096
+  output=pty-ok | cols=80
+  exit=7 (expected 7)
+  PASS
+
+▶ T7 — system shell applet inventory
+  pid=17237 exit=0 time=105ms timedOut=false truncated=false
+  stdout: --- tools ---
+          yes setsid
+          yes tar
+          yes gzip
+          no  unzip
+          yes sed
+          yes awk
+          yes grep
+          yes find
+          yes xxd
+          yes curl
+          no  git
+          no  python
+
+▶ S1 — shared storage with legacy permissions
+  root=/storage/emulated/0 entries=56
+  read=true write=true writeTest=true
+  probe=/storage/emulated/0/Download/leocode-s1-1794396437039.txt
+  PASS — legacy shared storage usable
+
+════ RUN ALL COMPLETE ════
