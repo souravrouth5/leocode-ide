@@ -22,10 +22,13 @@ class SafHandlerTest {
         var lastSaveName: String? = null
         var lastSaveContent: String? = null
 
-        override fun storageInfo(): JsonObject = buildJsonObject {
-            put("hasPermission", granted)
-            put("workspace", "/data/data/dev.leocode/files/workspaces/default")
-        }
+        override fun storageInfo(): StorageInfo = StorageInfo(
+            hasPermission = granted,
+            internalStorage = "/storage/emulated/0",
+            downloads = "/storage/emulated/0/Download",
+            documents = "/storage/emulated/0/Documents",
+            workspace = "/data/data/dev.leocode/files/workspaces/default"
+        )
 
         override fun requestStoragePermission(callback: (Boolean) -> Unit) {
             callback(granted)

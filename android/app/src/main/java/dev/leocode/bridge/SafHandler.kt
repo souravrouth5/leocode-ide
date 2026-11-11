@@ -1,11 +1,8 @@
 package dev.leocode.bridge
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 
 /**
  * `saf.*` and `storage.*`, `docs/bridge-contract.md`.
@@ -14,7 +11,10 @@ import kotlinx.serialization.json.put
  * asynchronously through [AsyncReply]. Cancelling a picker is a normal `null`
  * reply, not an error. Content is capped at 4 MB for both directions.
  */
-class SafHandler(private val port: SafPort) : AsyncBridgeHandler {
+class SafHandler(
+    private val port: SafPort,
+    private val json: Json = Json { ignoreUnknownKeys = true }
+) : AsyncBridgeHandler {
 
     companion object {
         private val METHODS =
@@ -31,15 +31,26 @@ class SafHandler(private val port: SafPort) : AsyncBridgeHandler {
         sink: StreamSink
     ) {
         when (method) {
-            "storage.info" -> respond(AsyncReply.Ok(port.storageInfo()))
+            "storage.info" -> respond(
+                AsyncReply.Ok(
+                    json.encodeToJsonElement(StorageInfo.serializer(), port.storageInfo())
+                )
+            )
 
             "storage.requestPermission" -> port.requestStoragePermission { granted ->
-                respond(AsyncReply.Ok(buildJsonObject { put("granted", granted) }))
+                respond(
+                    AsyncReply.Ok(
+                        json.encodeToJsonElement(
+                            StoragePermissionReply.serializer(),
+                            StoragePermissionReply(granted)
+                        )
+                    )
+                )
             }
 
             "saf.open" -> {
-                val mime = payload.str("mime") ?: "*/*"
-                port.openDocument(mime) { document ->
+                val request = json.decodePayload(SafOpenRequest.serializer(), payload, method)
+                port.openDocument(request.mime ?: "*/*") { document ->
                     when {
                         document == null -> respond(AsyncReply.Ok(JsonNull))
                         document.size > MAX_WRITE_BYTES -> respond(
@@ -47,12 +58,15 @@ class SafHandler(private val port: SafPort) : AsyncBridgeHandler {
                         )
                         else -> respond(
                             AsyncReply.Ok(
-                                buildJsonObject {
-                                    put("name", document.name)
-                                    put("uri", document.uri)
-                                    put("content", document.content)
-                                    put("size", document.size)
-                                }
+                                json.encodeToJsonElement(
+                                    SafOpenReply.serializer(),
+                                    SafOpenReply(
+                                        document.name,
+                                        document.uri,
+                                        document.content,
+                                        document.size
+                                    )
+                                )
                             )
                         )
                     }
@@ -60,8 +74,9 @@ class SafHandler(private val port: SafPort) : AsyncBridgeHandler {
             }
 
             "saf.save" -> {
-                val name = payload.str("name") ?: "document.txt"
-                val content = payload.str("content") ?: ""
+                val request = json.decodePayload(SafSaveRequest.serializer(), payload, method)
+                val name = request.name ?: "document.txt"
+                val content = request.content ?: ""
                 val size = content.toByteArray(Charsets.UTF_8).size
                 if (size > MAX_WRITE_BYTES) {
                     throw BridgeException(ErrorCode.E_LIMIT, "content is larger than 4 MB")
@@ -72,10 +87,10 @@ class SafHandler(private val port: SafPort) : AsyncBridgeHandler {
                             if (uri == null) {
                                 JsonNull
                             } else {
-                                buildJsonObject {
-                                    put("name", name)
-                                    put("uri", uri)
-                                }
+                                json.encodeToJsonElement(
+                                    SafSaveReply.serializer(),
+                                    SafSaveReply(name, uri)
+                                )
                             }
                         )
                     )
@@ -88,7 +103,4 @@ class SafHandler(private val port: SafPort) : AsyncBridgeHandler {
             )
         }
     }
-
-    private fun JsonObject.str(key: String): String? =
-        this[key]?.jsonPrimitive?.contentOrNull
 }

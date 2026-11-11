@@ -12,6 +12,7 @@ import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.EventSink
 import dev.leocode.bridge.StreamSink
 import dev.leocode.bridge.ThemePort
+import dev.leocode.bridge.ThemeState
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -149,7 +150,7 @@ class BridgeHost(
 
     /** Re-applies the current theme after a page load. */
     fun pushTheme() {
-        val payload = themePort.state().toString()
+        val payload = json.encodeToJsonElement(ThemeState.serializer(), themePort.state()).toString()
         webView.post {
             webView.evaluateJavascript(
                 "window.__leocodeThemeEvent && window.__leocodeThemeEvent($payload)",

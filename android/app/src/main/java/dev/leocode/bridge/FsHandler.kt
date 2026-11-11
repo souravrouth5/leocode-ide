@@ -4,14 +4,12 @@ import dev.leocode.core.AtomicWriter
 import dev.leocode.core.PathJail
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import java.io.File
 import java.io.IOException
 
@@ -70,19 +68,22 @@ class FsHandler(
         return buildJsonArray {
             for (file in visible) {
                 add(
-                    buildJsonObject {
-                        put("name", file.name)
-                        put("path", rel(file))
-                        put("kind", if (file.isDirectory) "dir" else "file")
-                        put("size", if (file.isFile) file.length() else 0L)
-                        put("mtime", file.lastModified())
-                    }
+                    json.encodeToJsonElement(
+                        FileEntry.serializer(),
+                        FileEntry(
+                            name = file.name,
+                            path = rel(file),
+                            kind = if (file.isDirectory) "dir" else "file",
+                            size = if (file.isFile) file.length() else 0L,
+                            mtime = file.lastModified()
+                        )
+                    )
                 )
             }
         }
     }
 
-    private fun read(rawPath: String?): JsonObject {
+    private fun read(rawPath: String?): JsonElement {
         val file = resolve(rawPath)
         if (!file.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
         if (file.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "is a directory")
@@ -93,14 +94,13 @@ class FsHandler(
         if (bytes.any { it == 0.toByte() }) {
             throw BridgeException(ErrorCode.E_BINARY, "binary file")
         }
-        return buildJsonObject {
-            put("path", rel(file))
-            put("content", String(bytes, Charsets.UTF_8))
-            put("size", bytes.size)
-        }
+        return json.encodeToJsonElement(
+            ReadReply.serializer(),
+            ReadReply(rel(file), String(bytes, Charsets.UTF_8), bytes.size)
+        )
     }
 
-    private fun write(rawPath: String?, content: String): JsonObject {
+    private fun write(rawPath: String?, content: String): JsonElement {
         val file = resolve(rawPath)
         val bytes = content.toByteArray(Charsets.UTF_8)
         if (bytes.size > MAX_WRITE_BYTES) {
@@ -115,23 +115,23 @@ class FsHandler(
         } catch (e: IOException) {
             throw BridgeException(ErrorCode.E_IO, "cannot write ${rel(file)}")
         }
-        return buildJsonObject {
-            put("path", rel(file))
-            put("size", file.length())
-        }
+        return json.encodeToJsonElement(
+            WriteReply.serializer(),
+            WriteReply(rel(file), file.length())
+        )
     }
 
-    private fun mkdir(rawPath: String?): JsonObject {
+    private fun mkdir(rawPath: String?): JsonElement {
         val dir = resolve(rawPath)
         if (dir.exists()) {
             if (!dir.isDirectory) throw BridgeException(ErrorCode.E_EXISTS, "a file already exists here")
-            return buildJsonObject { put("path", rel(dir)) }
+            return json.encodeToJsonElement(PathReply.serializer(), PathReply(rel(dir)))
         }
         if (!dir.mkdirs()) throw BridgeException(ErrorCode.E_IO, "cannot create directory")
-        return buildJsonObject { put("path", rel(dir)) }
+        return json.encodeToJsonElement(PathReply.serializer(), PathReply(rel(dir)))
     }
 
-    private fun rename(rawFrom: String?, rawTo: String?): JsonObject {
+    private fun rename(rawFrom: String?, rawTo: String?): JsonElement {
         val from = resolve(rawFrom)
         val to = resolve(rawTo)
         if (!from.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "source does not exist")
@@ -141,13 +141,13 @@ class FsHandler(
             throw BridgeException(ErrorCode.E_IO, "cannot create target parent")
         }
         if (!from.renameTo(to)) throw BridgeException(ErrorCode.E_IO, "rename failed")
-        return buildJsonObject {
-            put("from", rel(from))
-            put("to", rel(to))
-        }
+        return json.encodeToJsonElement(
+            RenameReply.serializer(),
+            RenameReply(rel(from), rel(to))
+        )
     }
 
-    private fun delete(rawPath: String?): JsonObject {
+    private fun delete(rawPath: String?): JsonElement {
         val target = resolve(rawPath)
         if (!target.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
 
@@ -166,7 +166,7 @@ class FsHandler(
         } catch (e: IOException) {
             throw BridgeException(ErrorCode.E_IO, "delete failed")
         }
-        return buildJsonObject { put("deleted", rel(target)) }
+        return json.encodeToJsonElement(DeleteReply.serializer(), DeleteReply(rel(target)))
     }
 
     // ------------------------------------------------------------------ helpers
@@ -195,13 +195,4 @@ class FsHandler(
 
     private fun pathOf(payload: JsonObject, method: String): String? =
         json.decodePayload(PathRequest.serializer(), payload, method).path
-
-    @Serializable
-    private data class PathRequest(val path: String? = null)
-
-    @Serializable
-    private data class WriteRequest(val path: String? = null, val content: String? = null)
-
-    @Serializable
-    private data class RenameRequest(val from: String? = null, val to: String? = null)
 }

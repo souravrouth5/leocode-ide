@@ -1,6 +1,6 @@
 package dev.leocode.bridge
 
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.Serializable
 
 /**
  * Platform side of `saf.*` and `storage.*` (Task 6).
@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonObject
 interface SafPort {
 
     /** `storage.info` payload. Kept in the platform layer because it names real paths. */
-    fun storageInfo(): JsonObject
+    fun storageInfo(): StorageInfo
 
     fun requestStoragePermission(callback: (Boolean) -> Unit)
 
@@ -26,6 +26,7 @@ interface SafPort {
 }
 
 /** A document read through SAF: display name, URI and UTF-8 content. */
+@Serializable
 data class SafDocument(
     val name: String,
     val uri: String,

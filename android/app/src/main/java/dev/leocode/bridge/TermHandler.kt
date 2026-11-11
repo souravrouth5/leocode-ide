@@ -4,14 +4,9 @@ import dev.leocode.core.ChildEnv
 import dev.leocode.core.PathJail
 import dev.leocode.core.PtySession
 import dev.leocode.core.Workspace
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.longOrNull
-import kotlinx.serialization.json.put
 import java.io.Closeable
 import java.io.File
 import java.util.Base64
@@ -29,7 +24,8 @@ import kotlin.concurrent.thread
 class TermHandler(
     private val workspace: Workspace,
     private val jail: PathJail,
-    private val childEnv: Map<String, String>
+    private val childEnv: Map<String, String>,
+    private val json: Json = Json { ignoreUnknownKeys = true }
 ) : StreamingBridgeHandler, Closeable {
 
     companion object {
@@ -66,18 +62,16 @@ class TermHandler(
         }
     }
 
-    private fun open(payload: JsonObject, sink: StreamSink): JsonObject {
-        val cwd = resolve(payload["cwd"]?.jsonContent() ?: ".")
+    private fun open(payload: JsonObject, sink: StreamSink): JsonElement {
+        val request = json.decodePayload(TermOpenRequest.serializer(), payload, "term.open")
+        val cwd = resolve(request.cwd ?: ".")
         if (!cwd.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "cwd is not a directory")
-
-        val cols = payload.int("cols") ?: DEFAULT_COLS
-        val rows = payload.int("rows") ?: DEFAULT_ROWS
 
         val pty = PtySession.openShell(
             cwd.absolutePath,
             ChildEnv.build(childEnv) + ("PWD" to cwd.absolutePath),
-            rows,
-            cols
+            request.rows ?: DEFAULT_ROWS,
+            request.cols ?: DEFAULT_COLS
         ) ?: throw BridgeException(ErrorCode.E_NO_RUNTIME, "native PTY is not available")
 
         val sessionId = UUID.randomUUID().toString()
@@ -87,53 +81,60 @@ class TermHandler(
             pump(session, sink)
         }
 
-        return buildJsonObject {
-            put("sessionId", sessionId)
-            put("pid", pty.pid)
-        }
+        return json.encodeToJsonElement(
+            TermOpenReply.serializer(),
+            TermOpenReply(sessionId, pty.pid)
+        )
     }
 
-    private fun write(payload: JsonObject): JsonObject {
-        val session = session(payload)
+    private fun write(payload: JsonObject): JsonElement {
+        val request = json.decodePayload(TermWriteRequest.serializer(), payload, "term.write")
+        val session = session(request.sessionId)
         val bytes = try {
-            Base64.getDecoder().decode(payload.str("b64") ?: "")
+            Base64.getDecoder().decode(request.b64 ?: "")
         } catch (e: IllegalArgumentException) {
             throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "invalid base64")
         }
-        if (bytes.isEmpty()) return buildJsonObject { put("accepted", 0) }
-        if (session.write(bytes) < 0) {
+        if (bytes.isNotEmpty() && session.write(bytes) < 0) {
             throw BridgeException(ErrorCode.E_NOT_FOUND, "no such session")
         }
-        return buildJsonObject { put("accepted", bytes.size) }
+        return json.encodeToJsonElement(
+            TermWriteReply.serializer(),
+            TermWriteReply(bytes.size)
+        )
     }
 
-    private fun resize(payload: JsonObject): JsonObject {
-        val session = session(payload)
-        val rows = payload.int("rows") ?: DEFAULT_ROWS
-        val cols = payload.int("cols") ?: DEFAULT_COLS
-        if (!session.resize(rows, cols)) {
+    private fun resize(payload: JsonObject): JsonElement {
+        val request = json.decodePayload(TermResizeRequest.serializer(), payload, "term.resize")
+        val session = session(request.sessionId)
+        if (!session.resize(request.rows ?: DEFAULT_ROWS, request.cols ?: DEFAULT_COLS)) {
             throw BridgeException(ErrorCode.E_NOT_FOUND, "no such session")
         }
-        return buildJsonObject { put("ok", true) }
+        return json.encodeToJsonElement(TermOk.serializer(), TermOk())
     }
 
-    private fun closeSession(payload: JsonObject): JsonObject {
-        val sessionId = payload["sessionId"]?.jsonContent()
+    private fun closeSession(payload: JsonObject): JsonElement {
+        val request = json.decodePayload(TermSessionRequest.serializer(), payload, "term.close")
+        val sessionId = request.sessionId
             ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "sessionId is required")
         val session = sessions.remove(sessionId)
         session?.close()
-        return buildJsonObject { put("closed", session != null) }
+        return json.encodeToJsonElement(
+            TermCloseReply.serializer(),
+            TermCloseReply(session != null)
+        )
     }
 
-    private fun ack(payload: JsonObject): JsonObject {
-        val session = session(payload)
-        val bytes = (payload["bytes"] as? JsonPrimitive)?.longOrNull
+    private fun ack(payload: JsonObject): JsonElement {
+        val request = json.decodePayload(TermAckRequest.serializer(), payload, "term.ack")
+        val session = session(request.sessionId)
+        val bytes = request.bytes?.toLong()
             ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "bytes is required")
         if (bytes < 0) throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "bytes must be positive")
         if (!session.ack(bytes)) {
             throw BridgeException(ErrorCode.E_NOT_FOUND, "no such session")
         }
-        return buildJsonObject { put("ok", true) }
+        return json.encodeToJsonElement(TermOk.serializer(), TermOk())
     }
 
     private fun pump(session: Session, sink: StreamSink) {
@@ -162,15 +163,18 @@ class TermHandler(
             val removed = sessions.remove(session.id) == session
             session.close()
             if (removed) {
-                sink.event("term.exit", buildJsonObject { put("code", code) })
+                sink.event(
+                    "term.exit",
+                    json.encodeToJsonElement(TermExit.serializer(), TermExit(code))
+                )
             }
         }
     }
 
-    private fun session(payload: JsonObject): Session {
-        val sessionId = payload["sessionId"]?.jsonContent()
+    private fun session(sessionId: String?): Session {
+        val id = sessionId
             ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "sessionId is required")
-        return sessions[sessionId]
+        return sessions[id]
             ?: throw BridgeException(ErrorCode.E_NOT_FOUND, "no such session")
     }
 
@@ -179,15 +183,6 @@ class TermHandler(
     } catch (e: SecurityException) {
         throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
     }
-
-    private fun JsonObject.str(key: String): String? =
-        (this[key] as? JsonPrimitive)?.contentOrNull
-
-    private fun JsonObject.int(key: String): Int? =
-        (this[key] as? JsonPrimitive)?.intOrNull
-
-    private fun JsonElement.jsonContent(): String? =
-        (this as? JsonPrimitive)?.contentOrNull
 
     private class Session(val id: String, val pty: PtySession) {
         private val lock = Object()

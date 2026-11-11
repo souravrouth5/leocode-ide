@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import dev.leocode.bridge.AppHandler
+import dev.leocode.bridge.AppInfo
 import dev.leocode.bridge.FsHandler
 import dev.leocode.bridge.ProcHandler
 import dev.leocode.bridge.RuntimeHandler
@@ -19,7 +20,6 @@ import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
 import java.io.File
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 
 /**
  * App-wide container for the bridge domains (Task 5).
@@ -69,7 +69,7 @@ class AppGraph(private val app: Application) {
 
     fun fsHandler(): FsHandler = FsHandler(workspace, jail, trash, json)
 
-    fun appHandler(theme: ThemePort, appInfo: () -> JsonObject): AppHandler =
+    fun appHandler(theme: ThemePort, appInfo: () -> AppInfo): AppHandler =
         AppHandler(theme, appInfo, json)
 
     fun procHandler(): ProcHandler = procHandler

@@ -24,14 +24,14 @@ import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import dev.leocode.bridge.AppInfo
 import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.SafDocument
 import dev.leocode.bridge.SafPort
+import dev.leocode.bridge.StorageInfo
 import dev.leocode.bridge.ThemePort
+import dev.leocode.bridge.ThemeState
 import dev.leocode.core.Workspace
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -136,19 +136,13 @@ class MainActivity : Activity(), SafPort {
         saveSafDocument(name, content) { uri -> onResult(uri?.toString()) }
     }
 
-    override fun storageInfo(): JsonObject = buildJsonObject {
-        put("hasPermission", checkStoragePermission())
-        put("internalStorage", Environment.getExternalStorageDirectory().absolutePath)
-        put(
-            "downloads",
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
-        )
-        put(
-            "documents",
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath
-        )
-        put("workspace", (application as LeoApp).graph.workspace.defaultWorkspace.absolutePath)
-    }
+    override fun storageInfo(): StorageInfo = StorageInfo(
+        hasPermission = checkStoragePermission(),
+        internalStorage = Environment.getExternalStorageDirectory().absolutePath,
+        downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath,
+        documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath,
+        workspace = (application as LeoApp).graph.workspace.defaultWorkspace.absolutePath
+    )
 
     private fun pickDocument(mime: String, callback: (Uri?) -> Unit) {
         val code = newRequestCode()
@@ -232,17 +226,17 @@ class MainActivity : Activity(), SafPort {
      * The `app.info` payload. Kept in the Activity because it reports WebView,
      * SDK and workspace details that are only meaningful for this window.
      */
-    private fun appInfoJson(workspace: Workspace, theme: ThemePort): JsonObject = buildJsonObject {
-        put("app", "LeoCode")
-        put("version", BuildConfig.VERSION_NAME)
-        put("mode", "android")
-        put("androidSdk", Build.VERSION.SDK_INT)
-        put("androidRelease", Build.VERSION.RELEASE)
-        put("abi", Build.SUPPORTED_ABIS.firstOrNull() ?: "")
-        put("webview", runCatching { WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "")
-        put("workspace", workspace.defaultWorkspace.absolutePath)
-        put("theme", theme.state())
-    }
+    private fun appInfo(workspace: Workspace, theme: ThemePort): AppInfo = AppInfo(
+        app = "LeoCode",
+        version = BuildConfig.VERSION_NAME,
+        mode = "android",
+        androidSdk = Build.VERSION.SDK_INT,
+        androidRelease = Build.VERSION.RELEASE,
+        abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "",
+        webview = runCatching { WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "",
+        workspace = workspace.defaultWorkspace.absolutePath,
+        theme = theme.state()
+    )
 
     private lateinit var themeManager: ThemeManager
     private lateinit var bridge: BridgeHost
@@ -342,12 +336,10 @@ class MainActivity : Activity(), SafPort {
         }
 
         val themePort = object : ThemePort {
-            override fun state(): JsonObject = buildJsonObject {
-                put("mode", themeManager.mode)
-                put("effective", themeManager.effective())
-            }
+            override fun state(): ThemeState =
+                ThemeState(themeManager.mode, themeManager.effective())
 
-            override fun setMode(mode: String?): JsonObject {
+            override fun setMode(mode: String?): ThemeState {
                 val changed = themeManager.setMode(mode)
                 runOnUiThread {
                     themeManager.applyToWindow()
@@ -362,7 +354,7 @@ class MainActivity : Activity(), SafPort {
         val router = BridgeRouter(
             graph.json,
             listOf(
-                graph.appHandler(themePort) { appInfoJson(workspace, themePort) },
+                graph.appHandler(themePort) { appInfo(workspace, themePort) },
                 graph.fsHandler(),
                 graph.procHandler(),
                 graph.termHandler(),

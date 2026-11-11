@@ -4,11 +4,8 @@ import android.content.Context
 import dev.leocode.core.RuntimeInstallException
 import dev.leocode.core.RuntimeInstaller
 import dev.leocode.core.Workspace
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -23,7 +20,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class RuntimeHandler(
     context: Context,
-    private val workspace: Workspace
+    private val workspace: Workspace,
+    private val json: Json = Json { ignoreUnknownKeys = true }
 ) : AsyncBridgeHandler, Closeable {
 
     companion object {
@@ -47,12 +45,19 @@ class RuntimeHandler(
         when (method) {
             "runtime.install" -> install(payload, respond, sink)
             "runtime.cancel" -> {
-                val id = payload.str("id")
+                val request =
+                    json.decodePayload(RuntimeCancelRequest.serializer(), payload, method)
+                val id = request.id
                     ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "id is required")
                 val flag = jobs[id]
                 flag?.set(true)
                 respond(
-                    AsyncReply.Ok(buildJsonObject { put("cancelling", flag != null) })
+                    AsyncReply.Ok(
+                        json.encodeToJsonElement(
+                            RuntimeCancelReply.serializer(),
+                            RuntimeCancelReply(flag != null)
+                        )
+                    )
                 )
             }
 
@@ -68,7 +73,8 @@ class RuntimeHandler(
         respond: (AsyncReply) -> Unit,
         sink: StreamSink
     ) {
-        val runtimeId = payload.str("id")
+        val request = json.decodePayload(RuntimeInstallRequest.serializer(), payload, "runtime.install")
+        val runtimeId = request.id
             ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "id is required")
         val cancelled = AtomicBoolean(false)
         if (jobs.putIfAbsent(runtimeId, cancelled) != null) {
@@ -82,21 +88,24 @@ class RuntimeHandler(
                     onProgress = { progress ->
                         sink.event(
                             "runtime.progress",
-                            buildJsonObject {
-                                put("phase", progress.phase)
-                                put("bytes", progress.bytes)
-                                put("total", progress.total)
-                                put("message", progress.message)
-                            }
+                            json.encodeToJsonElement(
+                                RuntimeProgress.serializer(),
+                                RuntimeProgress(
+                                    progress.phase,
+                                    progress.bytes,
+                                    progress.total,
+                                    progress.message
+                                )
+                            )
                         )
                     },
                     isCancelled = { cancelled.get() }
                 )
                 AsyncReply.Ok(
-                    buildJsonObject {
-                        put("id", runtimeId)
-                        put("installed", true)
-                    }
+                    json.encodeToJsonElement(
+                        RuntimeInstallReply.serializer(),
+                        RuntimeInstallReply(runtimeId, true)
+                    )
                 )
             } catch (e: RuntimeInstallException) {
                 AsyncReply.Error(ErrorCode.fromCode(e.code), e.message)
@@ -122,7 +131,4 @@ class RuntimeHandler(
     override fun close() {
         jobs.values.forEach { it.set(true) }
     }
-
-    private fun JsonObject.str(key: String): String? =
-        this[key]?.jsonPrimitive?.contentOrNull
 }

@@ -4,14 +4,9 @@ import dev.leocode.core.ChildEnv
 import dev.leocode.core.PathJail
 import dev.leocode.core.ProcessSupervisor
 import dev.leocode.core.Workspace
-import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.longOrNull
-import kotlinx.serialization.json.put
 import java.io.Closeable
 import java.io.File
 
@@ -24,7 +19,8 @@ import java.io.File
 class ProcHandler(
     private val workspace: Workspace,
     private val jail: PathJail,
-    private val supervisor: ProcessSupervisor
+    private val supervisor: ProcessSupervisor,
+    private val json: Json = Json { ignoreUnknownKeys = true }
 ) : StreamingBridgeHandler, Closeable {
 
     companion object {
@@ -49,59 +45,62 @@ class ProcHandler(
         supervisor.close()
     }
 
-    private fun run(payload: JsonObject, sink: StreamSink): JsonObject {
-        val array = payload["argv"] as? JsonArray
-            ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "argv is required")
-        if (array.isEmpty()) throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "argv is empty")
-        val argv = array.map { element ->
-            val primitive = element as? JsonPrimitive
-            if (primitive == null || !primitive.isString) {
-                throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "argv must be strings")
-            }
-            primitive.content
+    private fun run(payload: JsonObject, sink: StreamSink): JsonElement {
+        val request = json.decodePayload(ProcRunRequest.serializer(), payload, "proc.run")
+        if (request.argv.isEmpty()) {
+            throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "argv is empty")
         }
 
-        val cwd = resolve(payload["cwd"]?.jsonContent() ?: ".")
+        val cwd = resolve(request.cwd ?: ".")
         if (!cwd.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "cwd is not a directory")
 
-        val extra = mutableMapOf<String, String>()
-        (payload["env"] as? JsonObject)?.forEach { (key, value) ->
-            (value as? JsonPrimitive)?.contentOrNull?.let { extra[key] = it }
-        }
-
-        val timeoutMs = (payload["timeoutMs"] as? JsonPrimitive)
-            ?.longOrNull
-            ?.takeIf { it > 0 }
-            ?: DEFAULT_TIMEOUT_MS
-
         val spec = ProcessSupervisor.Spec(
-            argv = argv,
+            argv = request.argv,
             cwd = cwd,
-            env = ChildEnv.build(emptyMap(), extra),
-            timeoutMs = timeoutMs
+            env = ChildEnv.build(emptyMap(), request.env),
+            timeoutMs = request.timeoutMs?.takeIf { it > 0 } ?: DEFAULT_TIMEOUT_MS
         )
 
         val handle = try {
             supervisor.start(
                 spec,
-                onStdout = { text -> sink.text("proc.stdout", text) },
-                onStderr = { text -> sink.text("proc.stderr", text) },
-                onExit = { code -> sink.event("proc.exit", buildJsonObject { put("code", code) }) }
+                onStdout = { text ->
+                    sink.event(
+                        "proc.stdout",
+                        json.encodeToJsonElement(ProcOutput.serializer(), ProcOutput(text))
+                    )
+                },
+                onStderr = { text ->
+                    sink.event(
+                        "proc.stderr",
+                        json.encodeToJsonElement(ProcOutput.serializer(), ProcOutput(text))
+                    )
+                },
+                onExit = { code ->
+                    sink.event(
+                        "proc.exit",
+                        json.encodeToJsonElement(ProcExit.serializer(), ProcExit(code))
+                    )
+                }
             )
         } catch (e: Exception) {
-            throw BridgeException(ErrorCode.E_IO, "cannot start ${argv.first()}")
+            throw BridgeException(ErrorCode.E_IO, "cannot start ${request.argv.first()}")
         }
 
-        return buildJsonObject {
-            put("jobId", handle.jobId)
-            put("pid", handle.pid)
-        }
+        return json.encodeToJsonElement(
+            ProcRunReply.serializer(),
+            ProcRunReply(handle.jobId, handle.pid)
+        )
     }
 
-    private fun cancel(payload: JsonObject): JsonObject {
-        val jobId = payload["jobId"]?.jsonContent()
+    private fun cancel(payload: JsonObject): JsonElement {
+        val request = json.decodePayload(ProcCancelRequest.serializer(), payload, "proc.cancel")
+        val jobId = request.jobId
             ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "jobId is required")
-        return buildJsonObject { put("cancelled", supervisor.cancel(jobId)) }
+        return json.encodeToJsonElement(
+            ProcCancelReply.serializer(),
+            ProcCancelReply(supervisor.cancel(jobId))
+        )
     }
 
     private fun resolve(raw: String): File = try {
@@ -109,7 +108,4 @@ class ProcHandler(
     } catch (e: SecurityException) {
         throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
     }
-
-    private fun JsonElement.jsonContent(): String? =
-        (this as? JsonPrimitive)?.contentOrNull
 }

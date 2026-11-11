@@ -40,9 +40,16 @@ class BridgeRouterTest {
         put("payload", payload)
     }
 
+    private fun appInfo(): AppInfo = AppInfo(
+        app = "LeoCode",
+        version = "0.1.0",
+        mode = "android",
+        theme = ThemeState("system", "dark")
+    )
+
     private fun noTheme(): ThemePort = object : ThemePort {
-        override fun state(): JsonObject = JsonObject(emptyMap())
-        override fun setMode(mode: String?): JsonObject = state()
+        override fun state(): ThemeState = ThemeState("system", "dark")
+        override fun setMode(mode: String?): ThemeState = state()
     }
 
     private fun errorCode(reply: JsonObject): String =
@@ -56,7 +63,7 @@ class BridgeRouterTest {
     @Test
     fun `dispatches app ping and echoes the request id`() {
         val router = router(
-            AppHandler(noTheme(), { buildJsonObject { put("app", "LeoCode") } }, json)
+            AppHandler(noTheme(), { appInfo() }, json)
         )
 
         val reply = router.dispatch(request("app.ping"))
@@ -149,7 +156,7 @@ class BridgeRouterTest {
     @Test
     fun `malformed payload returns E_BAD_ENVELOPE`() {
         val router = router(
-            AppHandler(noTheme(), { JsonObject(emptyMap()) }, json)
+            AppHandler(noTheme(), { appInfo() }, json)
         )
         val payload = buildJsonObject {
             put("mode", buildJsonObject { put("nested", true) })

@@ -1,3 +1,14 @@
+import type {
+  AppInfo as GeneratedAppInfo,
+  ErrorCode,
+  FileEntry as GeneratedFileEntry,
+  RuntimeProgress as GeneratedRuntimeProgress,
+  SafDocument as GeneratedSafDocument,
+  StorageInfo as GeneratedStorageInfo
+} from "./types.gen"
+
+export type { ErrorCode } from "./types.gen"
+
 export type EntryKind = "file" | "dir"
 
 export type ThemeMode = "system" | "light" | "dark"
@@ -8,13 +19,8 @@ export interface ThemeState {
   effective: EffectiveTheme
 }
 
-export interface FileEntry {
-  name: string
-  path: string
-  kind: EntryKind
-  size: number
-  mtime: number
-}
+/** Generated from the Kotlin `FileEntry` DTO; only `kind` is narrowed here. */
+export type FileEntry = Omit<GeneratedFileEntry, "kind"> & { kind: EntryKind }
 
 export interface OpenFile {
   path: string
@@ -27,14 +33,8 @@ export interface ProcessEvent {
   data: string
 }
 
-export interface AppInfo {
-  app: string
-  version: string
-  webview?: string
-  abi?: string
-  androidSdk?: number
-  androidRelease?: string
-  workspace?: string
+/** Generated from `AppInfo`; mode/theme are narrowed to the UI unions. */
+export type AppInfo = Omit<GeneratedAppInfo, "mode" | "theme"> & {
   mode: "mock" | "android"
   theme: ThemeState
 }
@@ -59,20 +59,9 @@ export interface TerminalHandle {
   close: () => void
 }
 
-export interface StorageInfo {
-  hasPermission: boolean
-  internalStorage: string
-  downloads: string
-  documents: string
-  workspace: string
-}
+export type StorageInfo = GeneratedStorageInfo
 
-export interface SafDocument {
-  name: string
-  uri: string
-  content: string
-  size: number
-}
+export type SafDocument = GeneratedSafDocument
 
 export type RuntimeInstallPhase =
   | "preparing"
@@ -83,15 +72,7 @@ export type RuntimeInstallPhase =
   | "health"
   | "done"
 
-export interface RuntimeInstallProgress {
-  phase: RuntimeInstallPhase | string
-  /** Bytes done in the current phase. */
-  bytes: number
-  /** Expected bytes, or 0 when the phase has no fixed size. */
-  total: number
-  /** Human-readable detail suitable for direct display. */
-  message: string
-}
+export type RuntimeInstallProgress = GeneratedRuntimeProgress
 
 export interface RuntimeInstallHandle {
   cancel: () => void
