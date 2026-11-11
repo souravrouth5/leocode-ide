@@ -35,7 +35,8 @@ import kotlin.concurrent.thread
  * The IDE shell: one full-screen WebView served from APK assets over
  * https://appassets.androidplatform.net, with the v1 bridge attached.
  *
- * The Phase 0 device harness lives in [HarnessActivity] and is still reachable:
+ * The Phase 0 device harness is debug-only (debug source set, not in release builds)
+ * and is still reachable in a debug build:
  *   adb shell am start -n dev.leocode/.HarnessActivity --es run all
  */
 class MainActivity : Activity() {
@@ -153,9 +154,25 @@ class MainActivity : Activity() {
         return name
     }
 
-    fun readUriContent(uri: Uri): String {
+    /**
+     * Reads a SAF document as UTF-8, stopping just past [maxBytes] so a huge
+     * pick cannot exhaust the heap. The bridge rejects anything over 4 MB; it
+     * must never be handed an unbounded string.
+     */
+    fun readUriContent(uri: Uri, maxBytes: Int = 4 * 1024 * 1024): String {
         return contentResolver.openInputStream(uri)?.use { stream ->
-            stream.bufferedReader(Charsets.UTF_8).readText()
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            var total = 0
+            while (total <= maxBytes) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                val keep = minOf(read, maxBytes + 1 - total)
+                out.write(buffer, 0, keep)
+                total += keep
+                if (total > maxBytes) break
+            }
+            out.toString(Charsets.UTF_8.name())
         } ?: ""
     }
 

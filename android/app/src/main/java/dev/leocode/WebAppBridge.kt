@@ -13,10 +13,13 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
+import dev.leocode.core.AtomicWriter
+import dev.leocode.core.PathJail
 import dev.leocode.core.ProcessHost
 import dev.leocode.core.PtySession
 import dev.leocode.core.RuntimeInstallException
 import dev.leocode.core.RuntimeInstaller
+import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -32,7 +35,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
-import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.UUID
@@ -48,8 +51,9 @@ import kotlin.concurrent.thread
  * Every request gets exactly one ok/err reply; long operations stream events keyed
  * by the request id.
  *
- * Security: every path is canonicalised and jailed inside the workspace root by
- * [Workspace.jail]. Secrets never cross this boundary.
+ * Security: every path is canonicalised and jailed by [PathJail] inside the
+ * workspace roots, plus shared storage only while its permission is granted.
+ * Secrets never cross this boundary.
  */
 class WebAppBridge(
     private val activity: MainActivity,
@@ -63,8 +67,11 @@ class WebAppBridge(
     companion object {
         private const val TAG = "LeoCodeBridge"
         private const val MAX_READ = 2 * 1024 * 1024
+        private const val MAX_WRITE_BYTES = 4 * 1024 * 1024
+        private const val MAX_MESSAGE_BYTES = 256 * 1024
         private const val MAX_EVENT_BYTES = 64 * 1024
         private const val TRASH_DIR = ".trash"
+        private const val SHARED_TRASH_DIR = ".leocode-trash"
 
         fun isOriginAllowed(
             scheme: String?,
@@ -138,6 +145,25 @@ class WebAppBridge(
     private val jobs = ConcurrentHashMap<String, Process>()
     private val runtimeJobs = ConcurrentHashMap<String, AtomicBoolean>()
 
+    private val sharedStorageRoot: File? =
+        runCatching { Environment.getExternalStorageDirectory().canonicalFile }.getOrNull()
+
+    /**
+     * Task 4: every bridge path is canonicalised and must stay under a workspace
+     * root, or under shared storage while its permission is granted. This is the
+     * single authority; [resolve] below must not bypass it.
+     */
+    private val pathJail = PathJail(
+        workspaceRoot = workspace.workspacesRoot,
+        sharedStorageRoot = sharedStorageRoot,
+        storageGranted = { activity.checkStoragePermission() }
+    )
+
+    private val trash = Trash(
+        workspaceTrash = File(workspace.root, TRASH_DIR),
+        sharedTrash = sharedStorageRoot?.let { File(it, SHARED_TRASH_DIR) }
+    )
+
     // ------------------------------------------------------------ WebMessageListener
 
     override fun onPostMessage(
@@ -153,6 +179,12 @@ class WebAppBridge(
             return
         }
         val raw = message.data ?: return
+        if (raw.length > MAX_MESSAGE_BYTES ||
+            raw.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES
+        ) {
+            sendError(replyProxy, null, "E_LIMIT", "message is larger than 256 KB")
+            return
+        }
 
         val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
         if (root == null) {
@@ -297,26 +329,19 @@ class WebAppBridge(
     private fun write(payload: JsonObject): JsonObject {
         val file = resolve(payload, "path")
         val content = payload.str("content") ?: ""
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        if (bytes.size > MAX_WRITE_BYTES) {
+            throw BridgeError("E_LIMIT", "content is larger than 4 MB")
+        }
         val parent = file.parentFile ?: throw BridgeError("E_IO", "path has no parent")
         if (!parent.exists() && !parent.mkdirs()) {
             throw BridgeError("E_IO", "cannot create ${rel(parent)}")
         }
 
-        val tmp = File(parent, ".${file.name}.leocode-tmp")
         try {
-            FileOutputStream(tmp).use { out ->
-                out.write(content.toByteArray(Charsets.UTF_8))
-                out.flush()
-                out.fd.sync()
-            }
-            if (file.exists() && !file.delete()) {
-                throw BridgeError("E_IO", "cannot replace ${file.name}")
-            }
-            if (!tmp.renameTo(file)) {
-                throw BridgeError("E_IO", "atomic rename failed")
-            }
-        } finally {
-            if (tmp.exists()) tmp.delete()
+            AtomicWriter.write(file, bytes)
+        } catch (e: IOException) {
+            throw BridgeError("E_IO", "cannot write ${rel(file)}")
         }
 
         return buildJsonObject {
@@ -352,17 +377,23 @@ class WebAppBridge(
     private fun delete(payload: JsonObject): JsonObject {
         val target = resolve(payload, "path")
         if (!target.exists()) throw BridgeError("E_NOT_FOUND", "no such file")
-        if (target == workspace.defaultWorkspace.canonicalFile ||
-            target == Environment.getExternalStorageDirectory().canonicalFile
-        ) {
+
+        // Never trash a whole allowed root.
+        val protectedRoots = buildList {
+            add(workspace.workspacesRoot.canonicalFile)
+            add(workspace.defaultWorkspace.canonicalFile)
+            sharedStorageRoot?.let { add(it) }
+        }
+        if (target in protectedRoots) {
             throw BridgeError("E_PERMISSION", "refusing to delete root storage")
         }
 
-        // Move to trash inside app workspace if possible, or delete directly
-        val trash = File(workspace.root, TRASH_DIR).apply { mkdirs() }
-        val dest = File(trash, "${System.currentTimeMillis()}-${target.name}")
-        val moved = runCatching { target.renameTo(dest) }.getOrDefault(false)
-        if (!moved && !target.deleteRecursively()) {
+        // Task 4: no silent permanent delete. Purge old trash entries first, then
+        // move this target into the trash on the same filesystem.
+        runCatching { trash.purge() }
+        try {
+            trash.move(target, sharedStorageRoot)
+        } catch (e: IOException) {
             throw BridgeError("E_IO", "delete failed")
         }
         return buildJsonObject { put("deleted", rel(target)) }
@@ -646,6 +677,10 @@ class WebAppBridge(
                 io.execute {
                     val name = activity.queryUriFileName(uri)
                     val content = activity.readUriContent(uri)
+                    if (content.toByteArray(Charsets.UTF_8).size > MAX_WRITE_BYTES) {
+                        sendError(proxy, id, "E_LIMIT", "file is larger than 4 MB")
+                        return@execute
+                    }
                     sendOk(
                         proxy,
                         id,
@@ -664,6 +699,9 @@ class WebAppBridge(
     private fun saveSaf(payload: JsonObject, proxy: JavaScriptReplyProxy, id: String?) {
         val filename = payload.str("name") ?: "document.txt"
         val content = payload.str("content") ?: ""
+        if (content.toByteArray(Charsets.UTF_8).size > MAX_WRITE_BYTES) {
+            throw BridgeError("E_LIMIT", "content is larger than 4 MB")
+        }
         activity.runOnUiThread {
             activity.saveSafDocument(filename, content) { uri ->
                 if (uri == null) {
@@ -686,27 +724,11 @@ class WebAppBridge(
         val raw = payload.str(key) ?: if (key == "path" || key == "cwd") "." else
             throw BridgeError("E_BAD_ENVELOPE", "$key is required")
 
-        val target = if (raw.startsWith("/")) {
-            File(raw).normalize()
-        } else {
-            File(workspace.defaultWorkspace, raw).normalize()
+        return try {
+            pathJail.resolve(raw, workspace.defaultWorkspace)
+        } catch (e: SecurityException) {
+            throw BridgeError("E_PATH_OUTSIDE_ROOT", "path is outside the allowed roots")
         }
-
-        // Security check: Never allow escaping into other apps' private data (/data/data/<other> or /data/user/0/<other>)
-        val targetPath = target.path
-        if (targetPath.startsWith("/data/data/") || targetPath.startsWith("/data/user/")) {
-            val pkg = activity.packageName
-            val allowed1 = "/data/data/$pkg"
-            val allowed2 = "/data/user/0/$pkg"
-            if (!targetPath.startsWith(allowed1) && !targetPath.startsWith(allowed2) &&
-                !targetPath.startsWith(workspace.root.canonicalPath) &&
-                !targetPath.startsWith(workspace.root.path)
-            ) {
-                throw BridgeError("E_PERMISSION", "Access to other application private storage is restricted")
-            }
-        }
-
-        return target
     }
 
     private fun rel(file: File): String {
