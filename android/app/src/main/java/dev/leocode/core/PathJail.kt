@@ -12,7 +12,8 @@ import java.io.IOException
  */
 class PathJail(
     private val workspaceRoot: File,
-    private val sharedStorageRoot: File? = null,
+    /** Shared-storage root, also used by handlers that route deletes to the shared trash. */
+    val sharedStorageRoot: File? = null,
     private val storageGranted: () -> Boolean = { false }
 ) {
 

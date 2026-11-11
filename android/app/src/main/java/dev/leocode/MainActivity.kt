@@ -24,7 +24,12 @@ import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import dev.leocode.bridge.BridgeRouter
+import dev.leocode.bridge.ThemePort
 import dev.leocode.core.Workspace
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -176,6 +181,22 @@ class MainActivity : Activity() {
         } ?: ""
     }
 
+    /**
+     * The `app.info` payload. Kept in the Activity because it reports WebView,
+     * SDK and workspace details that are only meaningful for this window.
+     */
+    private fun appInfoJson(workspace: Workspace, theme: ThemePort): JsonObject = buildJsonObject {
+        put("app", "LeoCode")
+        put("version", BuildConfig.VERSION_NAME)
+        put("mode", "android")
+        put("androidSdk", Build.VERSION.SDK_INT)
+        put("androidRelease", Build.VERSION.RELEASE)
+        put("abi", Build.SUPPORTED_ABIS.firstOrNull() ?: "")
+        put("webview", runCatching { WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "")
+        put("workspace", workspace.defaultWorkspace.absolutePath)
+        put("theme", theme.state())
+    }
+
     private lateinit var themeManager: ThemeManager
     private lateinit var bridge: WebAppBridge
     private lateinit var webView: WebView
@@ -189,7 +210,7 @@ class MainActivity : Activity() {
         themeManager = ThemeManager(this)
         themeManager.applyToWindow()
 
-        val workspace = Workspace(filesDir).also { it.ensure() }
+        val workspace = (application as LeoApp).graph.workspace
 
         webView = WebView(this).apply {
             setBackgroundColor(themeManager.background())
@@ -273,8 +294,44 @@ class MainActivity : Activity() {
             }
         }
 
+        val themePort = object : ThemePort {
+            override fun state(): JsonObject = buildJsonObject {
+                put("mode", themeManager.mode)
+                put("effective", themeManager.effective())
+            }
+
+            override fun setMode(mode: String?): JsonObject {
+                val changed = themeManager.setMode(mode)
+                runOnUiThread {
+                    themeManager.applyToWindow()
+                    if (!webViewDestroyed) webView.setBackgroundColor(themeManager.background())
+                }
+                if (changed && ::bridge.isInitialized) bridge.pushTheme()
+                return state()
+            }
+        }
+
+        val graph = (application as LeoApp).graph
+        val router = BridgeRouter(
+            graph.json,
+            listOf(
+                graph.appHandler(themePort) { appInfoJson(workspace, themePort) },
+                graph.fsHandler()
+            ),
+            { message -> Log.w("LeoCodeBridge", message) }
+        )
+
         val bridgeEnv = workspace.childEnv()
-        bridge = WebAppBridge(this, webView, workspace, themeManager, bridgeEnv, extraOrigins)
+        bridge = WebAppBridge(
+            this,
+            webView,
+            workspace,
+            themePort,
+            bridgeEnv,
+            graph.jail,
+            extraOrigins,
+            router
+        )
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(

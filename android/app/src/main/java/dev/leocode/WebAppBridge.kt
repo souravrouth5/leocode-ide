@@ -3,7 +3,6 @@ package dev.leocode
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -13,13 +12,13 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
-import dev.leocode.core.AtomicWriter
+import dev.leocode.bridge.BridgeRouter
+import dev.leocode.bridge.ThemePort
 import dev.leocode.core.PathJail
 import dev.leocode.core.ProcessHost
 import dev.leocode.core.PtySession
 import dev.leocode.core.RuntimeInstallException
 import dev.leocode.core.RuntimeInstaller
-import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -27,15 +26,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
-import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.UUID
@@ -59,19 +55,18 @@ class WebAppBridge(
     private val activity: MainActivity,
     private val webView: WebView,
     private val workspace: Workspace,
-    private val themeManager: ThemeManager,
+    private val themePort: ThemePort,
     private val env: Map<String, String>,
-    private val extraAllowedOrigins: Set<String> = emptySet()
+    private val jail: PathJail,
+    private val extraAllowedOrigins: Set<String> = emptySet(),
+    private val router: BridgeRouter
 ) : WebViewCompat.WebMessageListener {
 
     companion object {
         private const val TAG = "LeoCodeBridge"
-        private const val MAX_READ = 2 * 1024 * 1024
         private const val MAX_WRITE_BYTES = 4 * 1024 * 1024
         private const val MAX_MESSAGE_BYTES = 256 * 1024
         private const val MAX_EVENT_BYTES = 64 * 1024
-        private const val TRASH_DIR = ".trash"
-        private const val SHARED_TRASH_DIR = ".leocode-trash"
 
         fun isOriginAllowed(
             scheme: String?,
@@ -145,25 +140,6 @@ class WebAppBridge(
     private val jobs = ConcurrentHashMap<String, Process>()
     private val runtimeJobs = ConcurrentHashMap<String, AtomicBoolean>()
 
-    private val sharedStorageRoot: File? =
-        runCatching { Environment.getExternalStorageDirectory().canonicalFile }.getOrNull()
-
-    /**
-     * Task 4: every bridge path is canonicalised and must stay under a workspace
-     * root, or under shared storage while its permission is granted. This is the
-     * single authority; [resolve] below must not bypass it.
-     */
-    private val pathJail = PathJail(
-        workspaceRoot = workspace.workspacesRoot,
-        sharedStorageRoot = sharedStorageRoot,
-        storageGranted = { activity.checkStoragePermission() }
-    )
-
-    private val trash = Trash(
-        workspaceTrash = File(workspace.root, TRASH_DIR),
-        sharedTrash = sharedStorageRoot?.let { File(it, SHARED_TRASH_DIR) }
-    )
-
     // ------------------------------------------------------------ WebMessageListener
 
     override fun onPostMessage(
@@ -209,18 +185,15 @@ class WebAppBridge(
             return
         }
 
+        // Task 5: app.* and fs.* are served by the typed router. It returns the
+        // complete reply (including v/id/ok/error) and never throws.
+        if (router.handles(method)) {
+            post(proxy, router.dispatch(request))
+            return
+        }
+
         try {
             val result = when (method) {
-                "app.ping" -> buildJsonObject { put("pong", true) }
-                "app.info" -> appInfo()
-                "app.theme.get" -> themeJson()
-                "app.theme.set" -> setTheme(payload)
-                "fs.list" -> list(payload)
-                "fs.read" -> read(payload)
-                "fs.write" -> write(payload)
-                "fs.mkdir" -> mkdir(payload)
-                "fs.rename" -> rename(payload)
-                "fs.delete" -> delete(payload)
                 "storage.info" -> storageInfo()
                 "storage.requestPermission" -> {
                     requestStoragePermission(proxy, id)
@@ -258,146 +231,6 @@ class WebAppBridge(
     }
 
     // ------------------------------------------------------------------- methods
-
-    private fun appInfo(): JsonObject = buildJsonObject {
-        put("app", "LeoCode")
-        put("version", BuildConfig.VERSION_NAME)
-        put("mode", "android")
-        put("androidSdk", Build.VERSION.SDK_INT)
-        put("androidRelease", Build.VERSION.RELEASE)
-        put("abi", Build.SUPPORTED_ABIS.firstOrNull() ?: "")
-        put("webview", runCatching { WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "")
-        put("workspace", workspace.defaultWorkspace.absolutePath)
-        put("theme", themeJson())
-    }
-
-    private fun themeJson(): JsonObject = buildJsonObject {
-        put("mode", themeManager.mode)
-        put("effective", themeManager.effective())
-    }
-
-    private fun setTheme(payload: JsonObject): JsonElement {
-        val changed = themeManager.setMode(payload.str("mode"))
-        main.post {
-            themeManager.applyToWindow()
-            webView.setBackgroundColor(themeManager.background())
-        }
-        if (changed) pushTheme()
-        return themeJson()
-    }
-
-    private fun list(payload: JsonObject): JsonArray {
-        val dir = resolve(payload, "path")
-        if (!dir.exists()) throw BridgeError("E_NOT_FOUND", "no such directory")
-        if (!dir.isDirectory) throw BridgeError("E_NOT_DIR", "not a directory")
-
-        val items = dir.listFiles()?.toList() ?: emptyList()
-        val visible = items.filter { it.name != TRASH_DIR }
-        val sorted = visible.sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() }))
-
-        return buildJsonArray {
-            for (f in sorted) {
-                add(buildJsonObject {
-                    put("name", f.name)
-                    put("path", rel(f))
-                    put("kind", if (f.isDirectory) "dir" else "file")
-                    put("size", if (f.isFile) f.length() else 0L)
-                    put("mtime", f.lastModified())
-                })
-            }
-        }
-    }
-
-    private fun read(payload: JsonObject): JsonObject {
-        val file = resolve(payload, "path")
-        if (!file.exists()) throw BridgeError("E_NOT_FOUND", "no such file")
-        if (file.isDirectory) throw BridgeError("E_NOT_DIR", "is a directory")
-        if (file.length() > MAX_READ) {
-            throw BridgeError("E_LIMIT", "file is larger than ${MAX_READ / (1024 * 1024)} MB")
-        }
-        val bytes = file.readBytes()
-        if (bytes.any { it == 0.toByte() }) {
-            throw BridgeError("E_BINARY", "binary file")
-        }
-        return buildJsonObject {
-            put("path", rel(file))
-            put("content", String(bytes, Charsets.UTF_8))
-            put("size", bytes.size)
-        }
-    }
-
-    private fun write(payload: JsonObject): JsonObject {
-        val file = resolve(payload, "path")
-        val content = payload.str("content") ?: ""
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        if (bytes.size > MAX_WRITE_BYTES) {
-            throw BridgeError("E_LIMIT", "content is larger than 4 MB")
-        }
-        val parent = file.parentFile ?: throw BridgeError("E_IO", "path has no parent")
-        if (!parent.exists() && !parent.mkdirs()) {
-            throw BridgeError("E_IO", "cannot create ${rel(parent)}")
-        }
-
-        try {
-            AtomicWriter.write(file, bytes)
-        } catch (e: IOException) {
-            throw BridgeError("E_IO", "cannot write ${rel(file)}")
-        }
-
-        return buildJsonObject {
-            put("path", rel(file))
-            put("size", file.length())
-        }
-    }
-
-    private fun mkdir(payload: JsonObject): JsonObject {
-        val dir = resolve(payload, "path")
-        if (dir.exists()) {
-            if (!dir.isDirectory) throw BridgeError("E_EXISTS", "a file already exists here")
-            return buildJsonObject { put("path", rel(dir)) }
-        }
-        if (!dir.mkdirs()) throw BridgeError("E_IO", "cannot create directory")
-        return buildJsonObject { put("path", rel(dir)) }
-    }
-
-    private fun rename(payload: JsonObject): JsonObject {
-        val from = resolve(payload, "from")
-        val to = resolve(payload, "to")
-        if (!from.exists()) throw BridgeError("E_NOT_FOUND", "source does not exist")
-        if (to.exists()) throw BridgeError("E_EXISTS", "target already exists")
-        val parent = to.parentFile ?: throw BridgeError("E_IO", "target has no parent")
-        if (!parent.exists() && !parent.mkdirs()) throw BridgeError("E_IO", "cannot create target parent")
-        if (!from.renameTo(to)) throw BridgeError("E_IO", "rename failed")
-        return buildJsonObject {
-            put("from", rel(from))
-            put("to", rel(to))
-        }
-    }
-
-    private fun delete(payload: JsonObject): JsonObject {
-        val target = resolve(payload, "path")
-        if (!target.exists()) throw BridgeError("E_NOT_FOUND", "no such file")
-
-        // Never trash a whole allowed root.
-        val protectedRoots = buildList {
-            add(workspace.workspacesRoot.canonicalFile)
-            add(workspace.defaultWorkspace.canonicalFile)
-            sharedStorageRoot?.let { add(it) }
-        }
-        if (target in protectedRoots) {
-            throw BridgeError("E_PERMISSION", "refusing to delete root storage")
-        }
-
-        // Task 4: no silent permanent delete. Purge old trash entries first, then
-        // move this target into the trash on the same filesystem.
-        runCatching { trash.purge() }
-        try {
-            trash.move(target, sharedStorageRoot)
-        } catch (e: IOException) {
-            throw BridgeError("E_IO", "delete failed")
-        }
-        return buildJsonObject { put("deleted", rel(target)) }
-    }
 
     private fun runProcess(payload: JsonObject, proxy: JavaScriptReplyProxy, id: String?): JsonObject {
         val argv = (payload["argv"] as? JsonArray)
@@ -617,7 +450,7 @@ class WebAppBridge(
     // ------------------------------------------------------------------- helpers
 
     fun pushTheme() {
-        val payload = themeJson().toString()
+        val payload = themePort.state().toString()
         webView.post {
             webView.evaluateJavascript(
                 "window.__leocodeThemeEvent && window.__leocodeThemeEvent($payload)",
@@ -725,21 +558,9 @@ class WebAppBridge(
             throw BridgeError("E_BAD_ENVELOPE", "$key is required")
 
         return try {
-            pathJail.resolve(raw, workspace.defaultWorkspace)
+            jail.resolve(raw, workspace.defaultWorkspace)
         } catch (e: SecurityException) {
             throw BridgeError("E_PATH_OUTSIDE_ROOT", "path is outside the allowed roots")
-        }
-    }
-
-    private fun rel(file: File): String {
-        val root = workspace.defaultWorkspace.normalize()
-        val target = file.normalize()
-        if (target == root) return "."
-        val prefix = root.path + File.separator
-        return if (target.path.startsWith(prefix)) {
-            target.path.substring(prefix.length).replace(File.separatorChar, '/')
-        } else {
-            target.absolutePath
         }
     }
 
