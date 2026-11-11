@@ -1,0 +1,19 @@
+--------- beginning of main
+LeoCode Phase 0B harness
+device     : Xiaomi POCO F1
+android    : 15 (sdk 35, patch 2025-09-01)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.google.android.webview 156.0.8078.47
+page size  : 4096 bytes (native)
+storage    : 100769 MB free / 115797 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+▶ S1 — shared storage with legacy permissions
+  root=/storage/emulated/0 entries=27
+  read=true write=true writeTest=true
+  probe=/storage/emulated/0/Download/leocode-s1-1794394935202.txt
+  PASS — legacy shared storage usable

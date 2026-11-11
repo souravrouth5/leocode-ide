@@ -1,0 +1,36 @@
+# Phase A verification (orchestrator, 2026-11-11T16:28:49+05:30)
+# Read-only adb checks. No su invoked. Serials: D2=e76846f (USB), D1=192.168.29.26:5555 (Wi-Fi)
+
+## e76846f
+ro.product.model=POCO F1
+ro.build.version.release=15
+ro.build.version.sdk=35
+ro.debuggable=0
+ro.build.tags=release-keys
+ro.build.type=user
+getenforce=Enforcing
+su on PATH=none
+su files=ls: /data/adb/magisk: Permission denied
+ls: /data/adb/ksu: Permission denied
+root-manager packages=none
+app:
+    versionCode=2 minSdk=28 targetSdk=28
+    versionName=0.1.0
+PAGE_SIZE=4096
+
+## 192.168.29.26:5555
+ro.product.model=Redmi Note 7S
+ro.build.version.release=9
+ro.build.version.sdk=28
+ro.debuggable=0
+ro.build.tags=release-keys
+ro.build.type=user
+getenforce=Enforcing
+su on PATH=none
+su files=ls: /data/adb/magisk: Permission denied
+ls: /data/adb/ksu: Permission denied
+root-manager packages=none
+app:
+    versionCode=2 minSdk=28 targetSdk=28
+    versionName=0.1.0
+PAGE_SIZE=/system/bin/sh: getconf: not found
