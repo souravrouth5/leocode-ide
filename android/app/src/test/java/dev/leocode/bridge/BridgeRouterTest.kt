@@ -184,4 +184,140 @@ class BridgeRouterTest {
             // expected
         }
     }
+
+    // ----------------------------------------------------------- async handlers
+
+    private class DeferredHandler(
+        private val method: String,
+        private val body: (
+            respond: (AsyncReply) -> Unit,
+            sink: StreamSink
+        ) -> Unit
+    ) : AsyncBridgeHandler {
+        override fun methods(): Set<String> = setOf(method)
+        override fun handle(
+            method: String,
+            payload: JsonObject,
+            respond: (AsyncReply) -> Unit,
+            sink: StreamSink
+        ) = body(respond, sink)
+    }
+
+    private fun dispatchAsync(
+        router: BridgeRouter,
+        request: JsonObject,
+        sink: StreamSink = NoopStreamSink
+    ): MutableList<JsonObject> {
+        val replies = mutableListOf<JsonObject>()
+        router.dispatchAsync(request, sink) { replies += it }
+        return replies
+    }
+
+    @Test
+    fun `async handler replies only when it responds`() {
+        var respondLater: ((AsyncReply) -> Unit)? = null
+        val router = router(
+            DeferredHandler("saf.open") { respond, _ -> respondLater = respond }
+        )
+
+        val replies = dispatchAsync(router, request("saf.open"))
+        assertTrue(replies.isEmpty())
+
+        respondLater!!(AsyncReply.Ok(buildJsonObject { put("name", "a.txt") }))
+        assertEquals(1, replies.size)
+        assertTrue(isOk(replies.single()))
+        assertEquals(
+            "a.txt",
+            replies.single()["payload"]!!.jsonObject["name"]!!.jsonPrimitive.content
+        )
+    }
+
+    @Test
+    fun `async handler error keeps its typed code`() {
+        val router = router(
+            DeferredHandler("saf.save") { respond, _ ->
+                respond(AsyncReply.Error(ErrorCode.E_LIMIT, "content is larger than 4 MB"))
+            }
+        )
+
+        val replies = dispatchAsync(router, request("saf.save"))
+
+        assertEquals(1, replies.size)
+        assertFalse(isOk(replies.single()))
+        assertEquals("E_LIMIT", errorCode(replies.single()))
+    }
+
+    @Test
+    fun `async handler responding twice still sends one reply`() {
+        val router = router(
+            DeferredHandler("runtime.install") { respond, _ ->
+                respond(AsyncReply.Ok(JsonObject(emptyMap())))
+                respond(AsyncReply.Error(ErrorCode.E_INTERNAL, "late"))
+            }
+        )
+
+        val replies = dispatchAsync(router, request("runtime.install"))
+
+        assertEquals(1, replies.size)
+        assertTrue(isOk(replies.single()))
+    }
+
+    @Test
+    fun `async handler that throws becomes a redacted E_INTERNAL`() {
+        val router = router(
+            DeferredHandler("runtime.cancel") { _, _ ->
+                throw IllegalStateException("secret detail /data/data/dev.leocode")
+            }
+        )
+
+        val replies = dispatchAsync(router, request("runtime.cancel"))
+
+        assertEquals(1, replies.size)
+        assertEquals("E_INTERNAL", errorCode(replies.single()))
+        assertEquals("Something went wrong", errorMessage(replies.single()))
+    }
+
+    @Test
+    fun `async method through the sync dispatch throws instead of hanging`() {
+        val router = router(
+            DeferredHandler("saf.open") { _, _ -> }
+        )
+
+        try {
+            router.dispatch(request("saf.open"))
+            fail("sync dispatch accepted an async method")
+        } catch (_: IllegalStateException) {
+            // expected: callers must use dispatchAsync
+        }
+    }
+
+    @Test
+    fun `async handler can stream before replying`() {
+        val events = mutableListOf<String>()
+        val sink = object : StreamSink {
+            override fun event(name: String, payload: JsonElement) {
+                events += name
+            }
+
+            override fun text(name: String, text: String) {
+                events += name
+            }
+
+            override fun bytes(name: String, bytes: ByteArray) {
+                events += name
+            }
+        }
+        val router = router(
+            DeferredHandler("runtime.install") { respond, stream ->
+                stream.event("runtime.progress", buildJsonObject { put("phase", "download") })
+                respond(AsyncReply.Ok(JsonObject(emptyMap())))
+            }
+        )
+
+        val replies = dispatchAsync(router, request("runtime.install"), sink)
+
+        assertEquals(listOf("runtime.progress"), events)
+        assertEquals(1, replies.size)
+        assertTrue(isOk(replies.single()))
+    }
 }

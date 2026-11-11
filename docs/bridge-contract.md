@@ -104,10 +104,10 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `app.info` | `{}` → `{ version, webview, abi, androidSdk, pageSize, rooted }` | live (fields added in Task 17) | Used by degraded-mode detection and diagnostics |
 | `app.theme.get` / `app.theme.set` | `{ mode? }` → `{ mode, effective }` | live | Syncs system bars |
 | `app.diagnostics` | `{}` → `{ report }` | planned (Task 27) | Redacted text report |
-| `storage.info` | `{}` → `{ granted, roots[] }` | live | Shared-storage roots |
+| `storage.info` | `{}` → `{ hasPermission, internalStorage, downloads, documents, workspace }` | live | Shape kept from v0; Task 27 may extend |
 | `storage.requestPermission` | `{}` → `{ granted }` | live | User-wait |
-| `saf.open` | `{ mime? }` → `{ name, content }` | live | Copy-in; size-capped |
-| `saf.save` | `{ name, content }` → `{ uri }` | live | Copy-out |
+| `saf.open` | `{ mime? }` → `{ name, uri, content, size }` (or `null` on cancel) | live | Copy-in; 4 MB cap |
+| `saf.save` | `{ name, content }` → `{ name, uri }` (or `null` on cancel) | live | Copy-out; 4 MB cap |
 | `saf.importTree` / `saf.exportWorkspace` | `{ … }` → event stream `saf.progress` | planned (Task 14) | Folder copy-in, zip export |
 | `workspace.list` | `{}` → `[{ id, name, path, lastOpened }]` | planned (Task 14) | |
 | `workspace.create` | `{ name }` → `{ id, path }` | planned (Task 14) | |
@@ -121,14 +121,14 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `fs.rename` | `{ from, to }` → `{}` | live | |
 | `fs.delete` | `{ path }` → `{}` | live | Moves to trash, never silent permanent delete |
 | `fs.search` | `{ query, glob?, maxResults? }` → event stream `search.match`, then `{ count, truncated }` | planned (Task 16) | Ignores `.git`, `node_modules`, `.venv`; cancellable |
-| `term.open` | `{ cwd, cols, rows, root? }` → `{ sessionId }` | live (`root` Task 18) | Spawns PTY (or `su` in PTY) |
+| `term.open` | `{ cwd, cols, rows, root? }` → `{ sessionId, pid }` | live (`root` Task 18) | Spawns PTY (or `su` in PTY) |
 | `term.attach` | `{ sessionId }` → `{ scrollback }` then `term.data` events | planned (Task 10) | Reattach after Activity/WebView recreation |
 | `term.list` | `{}` → `[{ sessionId, root, alive, title }]` | planned (Task 10) | |
-| `term.write` | `{ sessionId, data }` → `{}` | live | base64 bytes |
-| `term.resize` | `{ sessionId, cols, rows }` → `{}` | live | SIGWINCH |
-| `term.ack` | `{ sessionId, bytes }` → `{}` | planned (Task 6) | Backpressure credit |
-| `term.close` | `{ sessionId }` → `{}` | live | Kills the process group (via `su` for root sessions) |
-| `proc.run` | `{ cwd, argv[], env?, timeoutMs?, root? }` → `{ jobId }` | live (`root` Task 18) | Events `proc.stdout/stderr/exit`; env keys allowlisted |
+| `term.write` | `{ sessionId, b64 }` → `{ accepted }` | live | base64 bytes |
+| `term.resize` | `{ sessionId, cols, rows }` → `{ ok }` | live | SIGWINCH |
+| `term.ack` | `{ sessionId, bytes }` → `{ ok }` | live (Task 6) | Backpressure credit; 256 KB window |
+| `term.close` | `{ sessionId }` → `{ closed }` | live | Kills the process group (via `su` for root sessions) |
+| `proc.run` | `{ cwd, argv[], env?, timeoutMs?, root? }` → `{ jobId, pid }` | live (`root` Task 18) | Events `proc.stdout/stderr/exit`; env keys allowlisted; no timeout by default |
 | `proc.cancel` | `{ jobId }` → `{}` | live (grace period Task 6) | SIGTERM → 2 s → SIGKILL on the group |
 | `root.status` | `{}` → `{ available, granted, enabled }` | planned (Task 17) | Never prompts |
 | `root.request` | `{}` → `{ granted }` | planned (Task 17) | User-wait; `E_ROOT_UNAVAILABLE` / `E_ROOT_DENIED` |
@@ -148,7 +148,8 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `ssh.hostkey.answer` | `{ promptId, trust: boolean }` → `{}` | planned (Task 23) | Answers an `ssh.hostkey.prompt` event |
 | `secrets.token.set/delete/list` | `{ host, token? }` → `{}` / `[{ host }]` | planned (Task 20) | Token never returned to the WebView |
 | `runtime.catalog` | `{}` → `[{ id, version, size, installed, healthy }]` | planned (Task 25) | Manifest-verified |
-| `runtime.install` | `{ id }` → event stream `runtime.progress`, then `{}` | planned (Task 25) | Resumable; `E_DISK_FULL`, `E_OFFLINE` |
+| `runtime.install` | `{ id }` → event stream `runtime.progress`, then `{ id, installed }` | live (bundled installer; Task 25 replaces it) | `E_BUSY` while an id is installing |
+| `runtime.cancel` | `{ id }` → `{ cancelling }` | live | Flags the running install; polled between chunks |
 | `runtime.uninstall` / `runtime.repair` | `{ id }` → `{}` | planned (Task 25) | |
 | `language.list` | `{}` → `[{ id, name, extensions[], runtimeId, hasRepl, template }]` | planned (Task 30) | Language providers (D-017); Python is the first |
 | `trust.check` / `trust.grant` | `{ project, action }` → `{ trusted }` | planned (Task 26) | Scripts, pip, venv, Git hooks |
@@ -161,7 +162,7 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 |---|---|---|
 | `proc.stdout`, `proc.stderr` | `{ data }` | `proc.run` |
 | `proc.exit` | `{ code, signal? }` | `proc.run` |
-| `term.data` | `{ data }` (base64) | `term.open` / `term.attach` |
+| `term.data` | `{ b64 }` (base64) | `term.open` / `term.attach` |
 | `term.exit` | `{ code }` | terminal session |
 | `search.match` | `{ path, line, col, preview }` | `fs.search` |
 | `git.progress` | `{ task, done, total }` | Git network ops |

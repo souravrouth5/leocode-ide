@@ -25,6 +25,8 @@ import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import dev.leocode.bridge.BridgeRouter
+import dev.leocode.bridge.SafDocument
+import dev.leocode.bridge.SafPort
 import dev.leocode.bridge.ThemePort
 import dev.leocode.core.Workspace
 import kotlinx.serialization.json.JsonObject
@@ -44,7 +46,7 @@ import kotlin.concurrent.thread
  * and is still reachable in a debug build:
  *   adb shell am start -n dev.leocode/.HarnessActivity --es run all
  */
-class MainActivity : Activity() {
+class MainActivity : Activity(), SafPort {
 
     companion object {
         private const val TAG = "LeoCode"
@@ -53,17 +55,22 @@ class MainActivity : Activity() {
         private const val START_URL = "$ORIGIN/assets/web/index.html"
         const val DEV_URL_DEFAULT = "http://localhost:5173"
         const val DEV_URL_LOOPBACK = "http://127.0.0.1:5173"
-        const val PERMISSION_REQUEST_STORAGE = 1001
-        const val REQUEST_CODE_SAF_OPEN = 2001
-        const val REQUEST_CODE_SAF_SAVE = 2002
+        private const val FIRST_REQUEST_CODE = 3000
     }
 
-    private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
-    private var pendingSafOpenCallback: ((Uri?) -> Unit)? = null
-    private var pendingSafSaveCallback: ((Uri?) -> Unit)? = null
-    private var pendingSafSaveContent: String? = null
+    /**
+     * Each dialog gets its own request code, so two overlapping SAF picks or a
+     * permission prompt cannot overwrite each other's callback (Task 6).
+     */
+    private var nextRequestCode = java.util.concurrent.atomic.AtomicInteger(FIRST_REQUEST_CODE)
+    private val pendingPermissions = java.util.concurrent.ConcurrentHashMap<Int, (Boolean) -> Unit>()
+    private val pendingSafOpens = java.util.concurrent.ConcurrentHashMap<Int, (Uri?) -> Unit>()
+    private val pendingSafSaves =
+        java.util.concurrent.ConcurrentHashMap<Int, Pair<String, (Uri?) -> Unit>>()
 
-    fun checkStoragePermission(): Boolean {
+    private fun newRequestCode(): Int = nextRequestCode.getAndIncrement()
+
+    private fun checkStoragePermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
                     PackageManager.PERMISSION_GRANTED
@@ -72,20 +79,23 @@ class MainActivity : Activity() {
         }
     }
 
-    fun requestStoragePermission(callback: (Boolean) -> Unit) {
+    override fun requestStoragePermission(callback: (Boolean) -> Unit) {
         if (checkStoragePermission()) {
             callback(true)
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            pendingPermissionCallback = callback
-            requestPermissions(
-                arrayOf(
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                ),
-                PERMISSION_REQUEST_STORAGE
-            )
+            val code = newRequestCode()
+            pendingPermissions[code] = callback
+            runOnUiThread {
+                requestPermissions(
+                    arrayOf(
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    ),
+                    code
+                )
+            }
         } else {
             callback(true)
         }
@@ -97,56 +107,93 @@ class MainActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSION_REQUEST_STORAGE) {
-            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            pendingPermissionCallback?.invoke(granted)
-            pendingPermissionCallback = null
+        val callback = pendingPermissions.remove(requestCode) ?: return
+        callback(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+    }
+
+    override fun openDocument(mime: String, onResult: (SafDocument?) -> Unit) {
+        pickDocument(mime) { uri ->
+            if (uri == null) {
+                onResult(null)
+                return@pickDocument
+            }
+            thread(name = "leocode-saf-read") {
+                val name = queryUriFileName(uri)
+                val content = readUriContent(uri)
+                onResult(
+                    SafDocument(
+                        name = name,
+                        uri = uri.toString(),
+                        content = content,
+                        size = content.toByteArray(Charsets.UTF_8).size
+                    )
+                )
+            }
         }
     }
 
-    fun openSafDocument(callback: (Uri?) -> Unit) {
-        pendingSafOpenCallback = callback
+    override fun saveDocument(name: String, content: String, onResult: (String?) -> Unit) {
+        saveSafDocument(name, content) { uri -> onResult(uri?.toString()) }
+    }
+
+    override fun storageInfo(): JsonObject = buildJsonObject {
+        put("hasPermission", checkStoragePermission())
+        put("internalStorage", Environment.getExternalStorageDirectory().absolutePath)
+        put(
+            "downloads",
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        )
+        put(
+            "documents",
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath
+        )
+        put("workspace", (application as LeoApp).graph.workspace.defaultWorkspace.absolutePath)
+    }
+
+    private fun pickDocument(mime: String, callback: (Uri?) -> Unit) {
+        val code = newRequestCode()
+        pendingSafOpens[code] = callback
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
+            type = mime
         }
-        startActivityForResult(intent, REQUEST_CODE_SAF_OPEN)
+        runOnUiThread { startActivityForResult(intent, code) }
     }
 
-    fun saveSafDocument(filename: String, content: String, callback: (Uri?) -> Unit) {
-        pendingSafSaveCallback = callback
-        pendingSafSaveContent = content
+    private fun saveSafDocument(filename: String, content: String, callback: (Uri?) -> Unit) {
+        val code = newRequestCode()
+        pendingSafSaves[code] = content to callback
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "text/plain"
             putExtra(Intent.EXTRA_TITLE, filename)
         }
-        startActivityForResult(intent, REQUEST_CODE_SAF_SAVE)
+        runOnUiThread { startActivityForResult(intent, code) }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_CODE_SAF_OPEN) {
-            val uri = if (resultCode == RESULT_OK) data?.data else null
-            pendingSafOpenCallback?.invoke(uri)
-            pendingSafOpenCallback = null
-        } else if (requestCode == REQUEST_CODE_SAF_SAVE) {
-            val uri = if (resultCode == RESULT_OK) data?.data else null
-            if (uri != null && pendingSafSaveContent != null) {
-                runCatching {
-                    contentResolver.openOutputStream(uri)?.use { stream ->
-                        stream.write(pendingSafSaveContent!!.toByteArray(Charsets.UTF_8))
-                        stream.flush()
-                    }
+        val uri = if (resultCode == RESULT_OK) data?.data else null
+
+        pendingSafOpens.remove(requestCode)?.let { callback ->
+            callback(uri)
+            return
+        }
+
+        val pendingSave = pendingSafSaves.remove(requestCode) ?: return
+        val (content, callback) = pendingSave
+        if (uri != null) {
+            runCatching {
+                contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(content.toByteArray(Charsets.UTF_8))
+                    stream.flush()
                 }
             }
-            pendingSafSaveContent = null
-            pendingSafSaveCallback?.invoke(uri)
-            pendingSafSaveCallback = null
         }
+        callback(uri)
     }
 
-    fun queryUriFileName(uri: Uri): String {
+    private fun queryUriFileName(uri: Uri): String {
         var name = "document.txt"
         runCatching {
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -198,7 +245,7 @@ class MainActivity : Activity() {
     }
 
     private lateinit var themeManager: ThemeManager
-    private lateinit var bridge: WebAppBridge
+    private lateinit var bridge: BridgeHost
     private lateinit var webView: WebView
 
     private var webViewDestroyed = false
@@ -316,21 +363,21 @@ class MainActivity : Activity() {
             graph.json,
             listOf(
                 graph.appHandler(themePort) { appInfoJson(workspace, themePort) },
-                graph.fsHandler()
+                graph.fsHandler(),
+                graph.procHandler(),
+                graph.termHandler(),
+                graph.safHandler(this),
+                graph.runtimeHandler()
             ),
             { message -> Log.w("LeoCodeBridge", message) }
         )
 
-        val bridgeEnv = workspace.childEnv()
-        bridge = WebAppBridge(
-            this,
+        bridge = BridgeHost(
             webView,
-            workspace,
             themePort,
-            bridgeEnv,
-            graph.jail,
             extraOrigins,
-            router
+            router,
+            onClose = { graph.closeBridge() }
         )
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {

@@ -31,5 +31,11 @@ enum class ErrorCode(val code: String) {
     E_HOSTKEY_CHANGED("E_HOSTKEY_CHANGED"),
     E_ROOT_UNAVAILABLE("E_ROOT_UNAVAILABLE"),
     E_ROOT_DENIED("E_ROOT_DENIED"),
-    E_INTERNAL("E_INTERNAL")
+    E_INTERNAL("E_INTERNAL");
+
+    companion object {
+        /** Maps a wire code back to the enum; unknown codes become [E_INTERNAL]. */
+        fun fromCode(code: String): ErrorCode =
+            entries.firstOrNull { it.code == code } ?: E_INTERNAL
+    }
 }

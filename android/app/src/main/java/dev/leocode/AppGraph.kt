@@ -7,8 +7,14 @@ import android.os.Build
 import android.os.Environment
 import dev.leocode.bridge.AppHandler
 import dev.leocode.bridge.FsHandler
+import dev.leocode.bridge.ProcHandler
+import dev.leocode.bridge.RuntimeHandler
+import dev.leocode.bridge.SafHandler
+import dev.leocode.bridge.SafPort
+import dev.leocode.bridge.TermHandler
 import dev.leocode.bridge.ThemePort
 import dev.leocode.core.PathJail
+import dev.leocode.core.ProcessSupervisor
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
 import java.io.File
@@ -54,8 +60,30 @@ class AppGraph(private val app: Application) {
         sharedTrash = sharedStorageRoot?.let { File(it, SHARED_TRASH_DIR) }
     )
 
+    val childEnv: Map<String, String> = workspace.childEnv()
+
+    private val supervisor = ProcessSupervisor(childEnv)
+    private val procHandler = ProcHandler(workspace, jail, supervisor)
+    private val terminalHandler = TermHandler(workspace, jail, childEnv)
+    private val runtimeHandler = RuntimeHandler(app, workspace)
+
     fun fsHandler(): FsHandler = FsHandler(workspace, jail, trash, json)
 
     fun appHandler(theme: ThemePort, appInfo: () -> JsonObject): AppHandler =
         AppHandler(theme, appInfo, json)
+
+    fun procHandler(): ProcHandler = procHandler
+
+    fun termHandler(): TermHandler = terminalHandler
+
+    fun safHandler(port: SafPort): SafHandler = SafHandler(port)
+
+    fun runtimeHandler(): RuntimeHandler = runtimeHandler
+
+    /** Kill terminal sessions, jobs and runtime installs; called when the bridge closes. */
+    fun closeBridge() {
+        runCatching { supervisor.close() }
+        runCatching { terminalHandler.close() }
+        runCatching { runtimeHandler.close() }
+    }
 }

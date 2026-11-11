@@ -191,6 +191,17 @@ export class AndroidBridge implements Bridge {
   async openTerminal(options: TerminalOptions): Promise<TerminalHandle | null> {
     let sessionId = ""
     let closed = false
+    // Initial credit is 256 KB. Data can arrive before the open reply assigns
+    // sessionId, so hold the byte count until the id is known.
+    let pendingAck = 0
+    const ack = (bytes: number) => {
+      if (bytes <= 0) return
+      if (!sessionId) {
+        pendingAck += bytes
+        return
+      }
+      void this.send("term.ack", { sessionId, bytes }).result.catch(() => {})
+    }
     // IME/user input arrives in small bursts; coalesce to at most one bridge
     // message per frame so typing never floods the WebView channel.
     let queued: Uint8Array[] = []
@@ -216,8 +227,11 @@ export class AndroidBridge implements Bridge {
       "term.open",
       { cwd: options.cwd, cols: options.cols, rows: options.rows },
       (event, payload) => {
-        if (event === "term.data") options.onData(base64ToBytes(payload.b64 ?? ""))
-        else if (event === "term.exit") {
+        if (event === "term.data") {
+          const chunk = base64ToBytes(payload.b64 ?? "")
+          options.onData(chunk)
+          ack(chunk.length)
+        } else if (event === "term.exit") {
           this.streams.delete(id)
           options.onExit(payload.code ?? -1)
         }
@@ -226,6 +240,11 @@ export class AndroidBridge implements Bridge {
 
     const reply = await result
     sessionId = reply.sessionId
+    if (pendingAck > 0) {
+      const bytes = pendingAck
+      pendingAck = 0
+      ack(bytes)
+    }
 
     return {
       sessionId,
