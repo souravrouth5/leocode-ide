@@ -1,0 +1,49 @@
+# Phase B Task 5 — typed router (`app.*` / `fs.*`) on D1
+
+date     : 2026-11-11
+device   : Redmi Note 7S, Android 9 (SDK 28), serial 192.168.29.26:5555
+apk      : app-debug.apk, versionCode 2, targetSdk 28 (LeoApp + AppGraph + BridgeRouter)
+method   : WebView CDP `Runtime.evaluate` against the injected `LeoCodeAndroid` channel
+commands : adb -s 192.168.29.26:5555 forward tcp:9226 localabstract:webview_devtools_remote_<pid>
+           node cdp-eval.mjs task5-probe.js http://127.0.0.1:9226/json
+           node cdp-eval.mjs t5-theme-ui.js http://127.0.0.1:9226/json
+
+## router results
+
+app.ping                    -> ok { "pong": true }
+app.info                    -> ok { app: LeoCode, version: 0.1.0, mode: android,
+                                  androidSdk: 28, androidRelease: 9, abi: arm64-v8a, ... }
+app.theme.get               -> ok { "mode": "system", "effective": "dark" }
+app.theme.set (same mode)   -> ok { "mode": "system", "effective": "dark" }
+v=2 app.ping                -> error E_UNSUPPORTED  "unsupported protocol version"
+no.such.method              -> error E_UNKNOWN_METHOD "unknown method: no.such.method"
+app.theme.set {mode:{...}}  -> error E_BAD_ENVELOPE "invalid payload for app.theme.set"
+fs.list "."                 -> ok, 3 entries
+fs.write t5-probe.txt       -> ok { path: .../default/t5-probe.txt, size: 15 }
+fs.read t5-probe.txt        -> ok { path: ..., content: "typed-router-ok", size: 15 }
+fs.mkdir t5-dir             -> ok { path: .../default/t5-dir }
+fs.rename t5-probe.txt      -> ok { from: .../t5-probe.txt, to: .../t5-dir/moved.txt }
+fs.read t5-dir/moved.txt    -> ok { content: "typed-router-ok", size: 15 }
+fs.delete t5-dir/moved.txt  -> ok { deleted: .../t5-dir/moved.txt }
+fs.delete t5-dir            -> ok { deleted: .../default/t5-dir }
+fs.read /system/build.prop  -> error E_PATH_OUTSIDE_ROOT "path is outside the allowed roots"
+
+Path strings match the pre-Task-5 D1 probe (`.../workspaces/default/...`). The mapper
+uses the same `rel()` rule as before: workspace-relative where the canonical root
+matches, absolute otherwise.
+
+## file explorer parity
+
+`document.body.innerText` still renders the shell, the STORAGE LOCATIONS panel and the
+explorer list (`t2`, `hello.sh`, `hello.py`) with the file actions menu
+(Open file / Properties / New file here / Rename / Delete / Sort Files By).
+The theme set path still re-applies the window colours and pushes the theme event.
+
+Verdict: PASS. The typed router serves `app.*` and `fs.*` with the same JSON shapes
+and limits as the legacy `when`; the remaining domains still go through legacy code.
+
+## D2
+
+D2 (POCO F1, Android 15) dropped off both USB and Wi-Fi during the run and was
+`offline` at the transport level, so this demo was not repeated there. Re-run the
+same two probe scripts when it reconnects; the debug APK is already installed.
