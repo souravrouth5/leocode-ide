@@ -1,8 +1,10 @@
 package dev.leocode
 
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.text.method.ScrollingMovementMethod
@@ -62,7 +64,8 @@ class HarnessActivity : Activity() {
             Test("T4", "exit code + stderr capture") { t4ExitCode() },
             Test("T5", "output flood, bounded buffer") { t5Flood() },
             Test("T6", "native PTY smoke test") { t6Pty() },
-            Test("T7", "system shell applet inventory") { t7Toybox() }
+            Test("T7", "system shell applet inventory") { t7Toybox() },
+            Test("S1", "shared storage with legacy permissions") { s1SharedStorage() }
         )
 
         setContentView(buildUi())
@@ -320,5 +323,43 @@ class HarnessActivity : Activity() {
             )
         )
         return format(r)
+    }
+
+    /**
+     * S1: does legacy shared storage still work at targetSdk 28 on this Android version?
+     * Granted with `adb shell pm grant dev.leocode android.permission.READ_EXTERNAL_STORAGE`
+     * (and WRITE_...); the UI grants the same pair through MainActivity.
+     */
+    private fun s1SharedStorage(): String {
+        val readGranted = checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        val writeGranted = checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!readGranted) {
+            return "  READ_EXTERNAL_STORAGE not granted\n  SKIP — grant it first (pm grant / UI)"
+        }
+
+        val root = Environment.getExternalStorageDirectory()
+        val entries = runCatching { root.listFiles()?.size ?: 0 }.getOrElse { -1 }
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val probe = File(downloads, "leocode-s1-${System.currentTimeMillis()}.txt")
+        val wrote = runCatching {
+            probe.writeText("leocode-shared-storage-ok")
+            true
+        }.getOrElse { false }
+        val roundTrip = if (wrote) {
+            runCatching { probe.readText() }.getOrNull()
+        } else {
+            null
+        }
+        runCatching { probe.delete() }
+
+        val canList = entries > 0
+        val canWrite = wrote && roundTrip == "leocode-shared-storage-ok"
+        return "  root=${root.absolutePath} entries=$entries\n" +
+            "  read=$readGranted write=$writeGranted writeTest=$wrote\n" +
+            "  probe=${probe.absolutePath}\n" +
+            if (canList && canWrite) "  PASS — legacy shared storage usable"
+            else "  FAIL — list=$canList write=$canWrite (scoped storage enforced?)"
     }
 }

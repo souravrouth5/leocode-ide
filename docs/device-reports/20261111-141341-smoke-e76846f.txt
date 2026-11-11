@@ -1,0 +1,19 @@
+# LeoCode smoke test
+generated: 2026-11-11T08:44:27Z
+serial:    e76846f
+model:     POCO F1
+api:       35
+apk:       /home/sourav/Desktop/Apps/leocode/android/app/build/outputs/apk/debug/app-debug.apk
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: dev.leocode/.MainActivity
+TotalTime: 1088
+WaitTime: 1090
+Complete
+
+## verdict
+pid:        25616
+logcat:     /home/sourav/Desktop/Apps/leocode/docs/device-reports/20261111-141341-smoke-e76846f.txt

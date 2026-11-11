@@ -4,7 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-val ndkVersionProp = (project.findProperty("leocode.ndk") as String?) ?: "27.0.12077973"
+val ndkVersionProp = (project.findProperty("leocode.ndk") as String?) ?: "28.2.13676358"
+
+// Task 3 T2c control build only, to document the Android 10 W^X block:
+//   ./gradlew assembleDebug -Pleocode.controlTargetSdk=29
+// D-002: shipped builds stay at targetSdk 28. Never raise this property for a release.
+val controlTargetSdk = (project.findProperty("leocode.controlTargetSdk") as String?)?.toInt()
 
 android {
     namespace = "dev.leocode"
@@ -16,7 +21,7 @@ android {
         applicationId = "dev.leocode"
         // D-002: targetSdk 28 is required to execve() downloaded binaries.
         minSdk = 28
-        targetSdk = 28
+        targetSdk = controlTargetSdk ?: 28
         versionCode = 2
         versionName = "0.1.0"
 
@@ -81,6 +86,8 @@ android {
 
     lint {
         warningsAsErrors = false
+        // Known, accepted findings are recorded here; anything new fails CI.
+        baseline = file("lint-baseline.xml")
         // targetSdk 28 intentionally trips ExpiredTargetSdkVersion; do not fail the build.
         disable += listOf("ExpiredTargetSdkVersion")
     }

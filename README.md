@@ -3,9 +3,9 @@
 An Android coding IDE: file explorer, CodeMirror editor, terminal, Git/SSH, and
 on-demand language runtimes — running entirely on the phone, rooted or unrooted.
 
-> **Status: plan v9, Phase A (production restructure).** The real IDE shell runs on Android 9
-> (D1); Android 15 rooted (D2) is next to be measured. Not production-grade yet: see the audit in
-> plan v9 §3.
+> **Status: plan v9, Phase A complete (production restructure).** The IDE shell runs on Android 9
+> (D1) and Android 15 (D2). D2 is measured but currently **unrooted** (no `su`): root mode
+> (Phase E) waits for a root manager. Not production-grade yet: see the audit in plan v9 §3.
 > Live task list: [`PROGRESS.md`](PROGRESS.md) · Plan: [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md)
 
 ## Key decisions
@@ -19,7 +19,7 @@ on-demand language runtimes — running entirely on the phone, rooted or unroote
 | Git/SSH | JGit + Apache MINA SSHD + Bouncy Castle (no native binaries) |
 | Python | official python.org Android CPython + our NDK launcher (D-012) |
 | Terminal | xterm.js over our own JNI PTY — no GPL code |
-| Android | 9 – 16 (API 28–36), arm64-v8a; tested on Android 9 (unrooted) and 15 (rooted) |
+| Android | 9 – 16 (API 28–36), arm64-v8a; measured on Android 9 (unrooted) and 15 (currently unrooted) |
 | Root | optional, opt-in root mode; never prompts at startup (D-011) |
 
 ## Layout
@@ -44,16 +44,21 @@ npm run build      # typecheck + production bundle
 
 ## Android (harness)
 
-Requires JDK 17, Android SDK (platform 34, build-tools 34.0.0, CMake 3.22.1, NDK r27).
+Requires JDK 17, Android SDK (platform 34, build-tools 35.0.0 for the 16 KB
+zipalign check, CMake 3.22.1, NDK r28 / 28.2.13676358). Keep the JDK path in
+`~/.gradle/gradle.properties` (`org.gradle.java.home`), not in the repo.
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
 cd android
 ./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+bash ../scripts/check-elf-alignment.sh          # 16 KB ELF + zipalign gate
+../scripts/devices.sh                            # resolve LEO_D1 / LEO_D2
+../scripts/smoke.sh "$LEO_D2"                    # install, cold start, logcat
 ```
 
-CI installs the toolchain and uploads the APK as an artifact.
+CI installs the same NDK pin, runs unit tests and blocking lint, and uploads the
+APK as an artifact.
 
 ## On-device checklist
 

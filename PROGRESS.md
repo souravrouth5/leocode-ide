@@ -1,8 +1,9 @@
 # LeoCode — Progress Tracker
 
 **Last updated:** 2026-11-11
-**Current phase:** Plan v9, Phase A. Task 1 (v9 docs) done. Next: Task 2 (build/CI hygiene, 16 KB
-alignment), then Task 3 (D2 Android 15 baseline). Phase 0 gates 0B/0E still PASS on D1.
+**Current phase:** Plan v9, Phase A **complete**. Tasks 1–3 done. Next: Phase B, Task 4 (path jail
+and file safety). All Phase 0B runnable gates pass on D1 and D2; D2 is measured but **unrooted**
+(no `su`), so Phase E waits for a root manager.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
 
 Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocked · `[~]` deferred
@@ -14,8 +15,8 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 | Area | State |
 |---|---|
 | Plan + decisions | **v9** (D-001…D-016; D-016 open until Task 19) |
-| Devices | D1 Redmi Note 7S, Android 9, unrooted — measured. D2 custom ROM, Android 15, rooted — **not yet measured** (Task 3) |
-| Android app (real IDE shell) | Built and installed on D1 (`app-debug.apk`, versionCode 2, targetSdk 28). **Not production-grade** — see §2 |
+| Devices | D1 Redmi Note 7S, Android 9, unrooted — measured. D2 POCO F1, Android 15, **unrooted (no `su`)** — measured 2026-11-11 (Task 3) |
+| Android app (real IDE shell) | Built and installed on D1 and D2 (`app-debug.apk`, versionCode 2, targetSdk 28). CI builds with NDK r28, runs unit tests + blocking lint, checks 16 KB alignment. **Not production-grade** — see §2 |
 | Web IDE shell | Live on D1 — collapsible file explorer with search, 6-mode sort, properties sheet, binary & dotfile filters, shared-storage browsing, multi-tab editor with session restore, live PTY terminal, runtime manager UI |
 | Branding & mascot | Puppy coder mascot (`design/app-icon.png`) on launcher, splash and app bar |
 | Theme & settings | System/Light/Dark, 6 syntax themes, font picker, font size stepper |
@@ -41,6 +42,29 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | T6 native PTY | **PASS** — output, cols=80, exit 7 |
 | T7 applets | INFO — no `unzip`, `git`, `python` |
 
+**Measured on D2 (2026-11-11)** — POCO F1 `beryllium`, LineageOS (`BP1A.250505.005`,
+`lineage_beryllium-user`), Android 15 / SDK 35, patch 2025-09-01, arm64-v8a, **PAGE_SIZE 4096**,
+WebView **156.0.8078.47**, 5.7 GB RAM (heap 256 MB), 99 GB free, SELinux enforcing,
+`ro.debuggable=0`. **`su` is absent: D2 is not rooted as measured.** Serial `e76846f` (USB).
+Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-reports/20261111-141335-device.txt).
+
+| Test | Result |
+|---|---|
+| Install targetSdk-28 APK on Android 15 | **PASS** — no install-floor problem |
+| Old-target warning dialog | **None** — app opened straight to the IDE |
+| T1 shell exec | **PASS** — exit 0, 105 ms |
+| T2 exec from app data (W^X gate) | **PASS** — `exec-from-data-ok` (critical for D-002 on A15) |
+| T2c control build at targetSdk 29 | **FAIL as designed** — `error=13, Permission denied`; reverted to 28 |
+| T3 process-group kill | **PASS** |
+| T4 exit code + stderr | **PASS** — exit 42 |
+| T5 flood, bounded | **PASS** — 25 MB in 206 ms, captured exactly 262 144 B |
+| T6 native PTY | **PASS** — `pty-ok`, `cols=80`, exit 7 |
+| T7 applets | INFO — has `unzip`, `curl`; no `git`, `python`, `su` |
+| S1 shared storage (legacy permissions) | **PASS** — 27 entries, write/read round-trip in Downloads |
+| Cold start → first frame | **0.941 s** (`am start -W`, COLD; 1.088 s on the first run) |
+| Notification prompt (A13+, targetSdk ≤ 32) | **not shown** — no channel yet; `POST_NOTIFICATIONS` not granted (Task 10) |
+| 16 KB hardware | **not measurable** — device page size is 4096; CI/ELF check covers alignment |
+
 **Phase 1 smoke test on D1 (2026-11-08, installed APK)**
 
 | Check | Result |
@@ -60,10 +84,13 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | Run after unsaved edit | PASS — buffer is saved before exec |
 
 **Blocking facts (2026-11-11)**
-- D2 (Android 15, rooted) has not been measured yet. Android 15 gates (install floor, exec from
-  app data, 16 KB pages, WebView ≥ 100) are unproven until Task 3.
+- **D2 is not rooted:** no `su` binary on the LineageOS user build. Phase E (Tasks 17–18) is blocked
+  until a root manager is installed; all non-root behaviour is measurable now.
+- **16 KB hardware is unavailable:** both phones use 4096-byte pages. Alignment is proven by
+  `scripts/check-elf-alignment.sh` (ELF `p_align=0x4000` + `zipalign -P 16`) in CI, not on hardware.
 - Android 10–14 have no hardware; they stay unverified (D-014).
-- Only one USB cable: D1 runs on Wi-Fi ADB (runbook §1).
+- Only one USB cable: D1 runs on Wi-Fi ADB (runbook §1). D1's screen sleeping makes
+  `am start -W` hang; `smoke.sh` now wakes the device first.
 
 **Findings from the first device run**
 - Shell pipeline throughput is 0.5–4 MB/s (thermal/cache dependent): 25 MB took 6–46 s, 50 MB took 69 s cold. Output buffering must stay bounded (it is), and the terminal UI must coalesce.
@@ -72,7 +99,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 - `git`/`python` are absent as expected: JGit and the CPython package are the only paths.
 - 50 MB flood timing is a device property, not a bug — harness now uses 25 MB.
 
-**Verified by unit test** (`./gradlew testDebugUnitTest`, all pass locally; not run in CI yet — Task 2)
+**Verified by unit test** (`./gradlew testDebugUnitTest`, run in CI since Task 2)
 - `WorkspaceJailTest` (5): relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, symlink escape rejection. **Caveat:** production `WebAppBridge.resolve()` does not call `jail()` (Task 4).
 - `WebAppBridgeOriginTest` (6), `DevServerConfigTest` (5).
 
@@ -82,8 +109,8 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 
 ### Phase A — Docs and foundation
 - [x] **Task 1** Write the v9 documentation set (plan v9, D-011…D-016, bridge contract, UX error surfaces + root mode, test matrix D2 column, runbook D2/Wi-Fi ADB, compatibility baseline, this tracker)
-- [ ] **Task 2** Build and CI hygiene, 16 KB alignment
-- [ ] **Task 3** Device tooling (`devices.sh`, `smoke.sh`) and D2 baseline (T1–T7, WebView, page size, install, warning dialog)
+- [x] **Task 2** Build and CI hygiene, 16 KB alignment — *done 2026-11-11* (NDK r28.2 pin, 16 KB ELF/zipalign script + CI, JDK path out of the repo, pinned actions, least-privilege jobs, unit tests + blocking lint with baseline, web ESLint + vitest)
+- [x] **Task 3** Device tooling and D2 baseline — *done 2026-11-11* (`devices.sh`, `smoke.sh`, serial-aware `collect-device-report.sh`, D2 report, T1–T7 + S1 PASS, T2c control build, D2 matrix filled). D2 is unrooted: Phase E blocked
 
 ### Phase B — Android host restructure
 - [ ] **Task 4** Fix the path jail (allowed roots: workspaces + shared storage when granted) and file safety; `HarnessActivity` → debug source set
@@ -162,14 +189,16 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | `App.tsx` `Shell` ≈ 970 lines; `styles.css` 2 488 lines | 13 |
 | Rename and delete not exercised on device | 13 (parity demo) |
 | No external-change detection or autosave | 15 |
-| `org.gradle.java.home` hard-coded in `android/gradle.properties` | 2 |
-| CI: unit tests not run, lint non-blocking, actions unpinned, global `contents: write`, NDK fallback mismatch, system `gradle` instead of `./gradlew` | 2 |
-| No 16 KB page alignment for `libleocodepty.so` | 2 |
-| No web tests or ESLint; no instrumented tests | 2 (tooling), each task (tests) |
+| **D2 has no `su`** (LineageOS user build): Phase E root tests are blocked until a root manager is installed | 17 (blocker) |
+| No instrumented tests (web unit tests now exist) | each task (tests) |
 | JGit / SSHD / Bouncy Castle declared but unused | 19 |
 | `scripts/build-python.sh` custom CPython build | 24 (retired) |
 | Debug APK 28.8 MB, R8 off, release signed with debug key, public debug APK on push | 28 |
 | `targetSdk 28` lint rule intentionally disabled — **do not "fix"** (D-002) | — |
+
+Fixed by Phase A: JDK path moved to `~/.gradle/gradle.properties`; CI pins actions and the NDK,
+runs unit tests and blocking lint (baseline), and enforces 16 KB alignment; web has ESLint +
+vitest. See Task 2 above.
 
 ---
 
@@ -212,3 +241,5 @@ Completed under plan v8; kept for traceability.
 | 2026-11-08 | Runtime Manager UI (Python 3, Node.js, Java OpenJDK, C/C++ toolchain, Shell) with live probe & env inspection; dedicated LeoCode SVG logo brand mark; boot splash styling; file reload & workspace refresh; reinstalled APK to device with MIUI launcher cache reset. |
 | 2026-11-08 | **File Explorer, Editor & CI Release Enhancements**: properties sheet; search and 6-mode sort; binary and dotfile filters; PHP, Rust, SQL, XML, YAML and Shell highlighters; untitled doc flow with unsaved indicator; CRLF/LF dirty tracking; session persistence guard; Run badge; portal sheets; GitHub Actions nightly APK on push to `main`. |
 | 2026-11-11 | **Plan v9** (Task 1): production-readiness audit; v9 replaces v8 (kept as history). New decisions D-011 optional root mode, D-012 official python.org CPython, D-013 local-only diagnostics, D-014 device matrix (D1 Android 9 unrooted + D2 Android 15 rooted, no emulators), D-015 manual DI + Zustand, D-016 JGit version (open). Bridge contract gains error codes, timeouts, root/workspace/git/ssh/runtime methods; UX spec gains error surfaces and root mode; test matrix gains a D2 column and T8–T15; tracker rebuilt around Tasks 1–29. No code changed. |
+| 2026-11-11 | **Task 2 build/CI hygiene**: NDK pinned to r28.2.13676358 (16 KB default + explicit `max-page-size`), JDK path moved to `~/.gradle/gradle.properties`, `scripts/check-elf-alignment.sh` (llvm-readelf + `zipalign -P 16`) in CI, actions pinned to SHAs, least-privilege per-job permissions, `./gradlew` unit tests + blocking lint with baseline, web ESLint + vitest + sample tests, nightly moved to its own least-privilege job. Builds and installs on D1/D2. |
+| 2026-11-11 | **Task 3 D2 baseline**: `scripts/devices.sh` (serial resolution, model/API/page-size/WebView/root), `scripts/smoke.sh` (install + cold start + logcat, wakes the device), serial-aware `collect-device-report.sh`; D2 POCO F1 (LineageOS, Android 15) report captured. T1–T7 and S1 shared-storage PASS on both phones; T2c targetSdk-29 control build fails exec with `error=13` as designed; D2 cold start 0.941 s, WebView 156, PAGE_SIZE 4096, no old-target dialog. **D2 has no `su`** (Phase E blocked). |

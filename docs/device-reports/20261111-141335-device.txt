@@ -1,0 +1,89 @@
+# LeoCode device report
+generated: 2026-11-11T08:43:35Z
+serial:    e76846f
+
+## identity
+ro.product.manufacturer        Xiaomi
+ro.product.model               POCO F1
+ro.product.device              beryllium
+ro.build.version.release       15
+ro.build.version.sdk           35
+ro.build.version.security_patch 2025-09-01
+ro.build.display.id            BP1A.250505.005 release-keys
+ro.build.flavor                lineage_beryllium-user
+ro.boot.selinux                
+ro.miui.ui.version.name        
+ro.miui.ui.version.code        
+
+## cpu / abi
+ro.product.cpu.abi             arm64-v8a
+ro.product.cpu.abilist         arm64-v8a,armeabi-v7a,armeabi
+ro.product.cpu.abilist32       armeabi-v7a,armeabi
+ro.product.cpu.abilist64       arm64-v8a
+
+## memory / storage
+MemTotal:        5764500 kB
+MemFree:          285528 kB
+MemAvailable:    2181844 kB
+Buffers:            3660 kB
+Cached:          2317560 kB
+
+Filesystem       Size Used Avail Use% Mounted on
+/dev/block/sda21 113G  14G   99G  13% /data/user/0
+
+## page size
+4096
+auxv AT_PAGESZ: 4096
+
+## webview
+Current WebView Update Service state
+  Current WebView package (name, version): (com.google.android.webview, 156.0.8078.47)
+  Minimum targetSdkVersion: 33
+  Minimum WebView version code: 661308832
+  Number of relros started: 2
+  Number of relros finished: 2
+  WebView package dirty: false
+  Any WebView package installed: true
+  Preferred WebView package (name, version): (com.google.android.webview, 156.0.8078.47)
+  WebView packages:
+    Valid package com.google.android.webview (versionName: 156.0.8078.47, versionCode: 807804703, targetSdkVersion: 36) is  installed/enabled for all users
+com.google.android.webview             versionName=156.0.8078.47
+com.android.webview                <not installed>
+com.google.android.trichromelibrary <not installed>
+
+## app
+
+## root
+su binary                      <none>
+
+## storage permission state
+
+## system shell
+[ abb abx abx2xml aconfigd-system acpi aflags am apexd app_process app_process32 app_process64 
+appops appwidget atrace audioserver auditctl awk base64 basename bc bcc blank_screen blkdiscard 
+blkid blockdev bmgr bootanimation bootstat bootstrap boringssl_self_test32 boringssl_self_test64 
+bpfloader brctl bu bugreport bugreport_procdump bugreportz bunzip2 bzcat bzip2 cal cameraserver cat 
+chattr chcon chgrp chmod chown chroot chrt cksum clear cmd cmp comm content cp cpio cppreopts.sh 
+cpu-target-features credstore curl cut date dd debuggerd defrag.f2fs device_config devmem df diff 
+dirname dmabuf_dump dmctl dmesg dmesgd dnsmasq dos2unix dpm drmserver du dump.erofs dump.f2fs 
+dumpstate dumpsys e2freefrag e2fsck e2fsdroid echo egrep env ethtool expand expr 
+
+yes setsid
+yes tar
+yes gzip
+yes unzip
+yes sed
+yes awk
+yes grep
+yes find
+yes xxd
+yes curl
+no  git
+no  python
+no  su
+
+## adb
+List of devices attached
+e76846f                device usb:1-2 product:lineage_beryllium model:POCO_F1 device:beryllium transport_id:8
+192.168.29.26:5555     device product:lavender model:Redmi_Note_7S device:lavender transport_id:3
+

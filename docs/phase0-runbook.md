@@ -36,6 +36,8 @@ adb connect <d1-ip>:5555
 # unplug D1, plug in D2
 adb devices -l                               # both listed: <d1-ip>:5555 and D2's serial
 export LEO_D1=<d1-ip>:5555 LEO_D2=<d2-serial>
+scripts/devices.sh                     # model, Android, page size, WebView, root state
+scripts/devices.sh --exports           # ready-to-paste exports
 ```
 
 Re-run `adb tcpip 5555` over USB after every D1 reboot. Always pass `-s "$LEO_D1"` or
@@ -48,7 +50,8 @@ adb devices -l        # must list one device as "device", not "unauthorized"
 ## 2. Capture the device report
 
 ```bash
-scripts/collect-device-report.sh
+scripts/collect-device-report.sh "$LEO_D2"            # one phone
+scripts/collect-device-report.sh "$LEO_D1" docs/device-reports/d1.txt
 ```
 
 Check by hand:
@@ -61,11 +64,13 @@ Check by hand:
 ## 3. Build and install
 
 ```bash
-export JAVA_HOME="$HOME/jdk17"          # JDK 21 here is a JRE: no jlink, AGP fails
+# JDK path lives in ~/.gradle/gradle.properties (org.gradle.java.home), not the repo.
 export ANDROID_HOME="$HOME/Android/Sdk"
 cd android
-./gradlew assembleDebug                # or /tmp/opencode/gradle-8.9/bin/gradle
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleDebug
+bash ../scripts/check-elf-alignment.sh
+cd ..
+scripts/smoke.sh "$LEO_D2"             # install + cold start + logcat
 ```
 
 If install fails with `INSTALL_FAILED_USER_RESTRICTED`, the MIUI "Install via USB" toggle is off.
@@ -76,10 +81,10 @@ Fast path — run everything from the laptop and read it back from logcat:
 
 ```bash
 adb logcat -c
-adb shell am force-stop dev.leocode
-adb shell am start -n dev.leocode/.MainActivity --es run all
+adb -s "$LEO_D2" shell am force-stop dev.leocode
+adb -s "$LEO_D2" shell am start -n dev.leocode/.HarnessActivity --es run all
 sleep 90
-adb logcat -d -s LeoCodeHarness:I | sed 's/^.*LeoCodeHarness: //'
+adb -s "$LEO_D2" logcat -d -s LeoCodeHarness:I | sed 's/^.*LeoCodeHarness: //'
 ```
 
 Single test: `--es run T2` (ids `T1`…`T7`). The UI's **Run all** button does the same and

@@ -1,0 +1,19 @@
+# LeoCode smoke test
+generated: 2026-11-11T08:58:39Z
+serial:    192.168.29.26:5555
+model:     Redmi Note 7S
+api:       28
+apk:       /home/sourav/Desktop/Apps/leocode/android/app/build/outputs/apk/debug/app-debug.apk
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+Activity: dev.leocode/.MainActivity
+ThisTime: 3235
+TotalTime: 3235
+WaitTime: 3606
+Complete
+
+## verdict
+pid:        11666
+logcat:     /home/sourav/Desktop/Apps/leocode/docs/device-reports/20261111-142709-smoke-192.168.29.26_5555.txt
