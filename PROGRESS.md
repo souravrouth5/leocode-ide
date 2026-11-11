@@ -2,8 +2,9 @@
 
 **Last updated:** 2026-11-11
 **Current phase:** Plan v9. Phase A fix-ups A-01…A-10 are done and the local exit gate was green
-(2026-11-11). Phase B has started: **Task 4 (path jail and file safety)** and **Task 5 (typed
-`app.*`/`fs.*` router)** are done; Task 6 is next.
+(2026-11-11). Phase B has started: **Task 4 (path jail and file safety)**, **Task 5 (typed
+`app.*`/`fs.*` router)** and **Task 6 (proc/term/saf/storage/runtime handlers)** are done; Task 7
+is next.
 Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed, but the repo token
 cannot read Actions results, so the owner must confirm the run. D2 is measured but **unrooted**
 (no `su`); the owner will root it before Phase E.
@@ -107,9 +108,10 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 
 **Verified by unit test** (`./gradlew testDebugUnitTest`, run locally; the CI `android` job exists but has never been observed running)
 - `WorkspaceJailTest` (5): relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, symlink escape rejection. `Workspace.jail()` is now test-only; production uses `PathJail` (Task 4).
-- `WebAppBridgeOriginTest` (6), `DevServerConfigTest` (5).
+- `WebAppBridgeOriginTest` (6) → `BridgeHostOriginTest` (6), `DevServerConfigTest` (5).
 - Task 4: `PathJailTest` (11) covers traversal, absolute paths, `dev.leocodeX`, symlink in/out, shared-storage gating, new files; `AtomicWriterTest` (4) covers replacement and concurrent writers; `TrashTest` (6) covers move, shared trash, purge and missing targets.
 - Task 5: `BridgeRouterTest` (9) covers ping, unknown method, version mismatch, missing method, typed errors, redacted `E_INTERNAL` + correlation id, malformed payloads, duplicate registration; `FsHandlerTest` (12) covers the list/read/write/mkdir/rename/delete round-trip, missing parents, traversal and `/system`, `dev.leocodeX`, 2 MB read / 4 MB write limits, binary files, trash deletes and root protection. Suite total: 58.
+- Task 6: `ProcessSupervisorTest` (5) covers exit code, stdout/stderr, timeout, cancel, output cap and unsplit UTF-8; `EventSinkTest` (5) covers text/byte coalescing, ordering, the pending cap and base64 after concatenation; `ChildEnvTest` (3) covers the allowlist and overrides; `BridgeRouterTest` grew to 15 with deferred ok/error replies, one-reply, redacted async failure and streaming-before-reply; `SafHandlerTest` (9) covers storage info, permission, SAF open/save, cancel → `null` and the 4 MB cap. Suite total: 86.
 
 ---
 
@@ -136,7 +138,7 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 ### Phase B — Android host restructure
 - [x] **Task 4** Fix the path jail and file safety — *done 2026-11-11*: `PathJail` (canonical workspace root + shared storage only while granted; `root + separator` prefix; `..`/symlink/`dev.leocodeX` rejection), `AtomicWriter` (unique temp → fsync → rename over target, never delete-first), `Trash` (same-FS move, shared `.leocode-trash`, copy-then-delete fallback, 30-day purge), 256 KB message / 4 MB write / bounded SAF limits, harness moved to the debug source set. Demo on D1 and D2: `/system/build.prop` and `/sdcard/..` → `E_PATH_OUTSIDE_ROOT`; workspace and `/sdcard` reads/writes work; deletes land in trash (`docs/device-reports/20261111-phaseB-task4-*`)
 - [x] **Task 5** Typed error model, `BridgeRouter`, `AppHandler`/`FsHandler`, `AppGraph`/`LeoApp` — *done 2026-11-11*: `ErrorCode` + `BridgeException`, `BridgeRouter` (v check, envelope validation, one reply, typed errors, `E_INTERNAL` = “Something went wrong” + `c-xxxxxx` correlation id logged once), `AppHandler`/`FsHandler` with `@Serializable` DTOs, `AppGraph` + `LeoApp` own the workspace/jail/trash. `app.*` and `fs.*` now go through the router; `proc/term/saf/storage/runtime` stay legacy until Task 6. JSON shapes, limits and trash behaviour unchanged (`docs/device-reports/20261111-phaseB-task5-router-D1.txt`)
-- [ ] **Task 6** Migrate proc/term/saf/storage; `ProcessSupervisor`; `EventSink` + `term.ack`; delete `WebAppBridge.kt`
+- [x] **Task 6** Migrate proc/term/saf/storage; `ProcessSupervisor`; `EventSink` + `term.ack`; delete `WebAppBridge.kt` — *done 2026-11-11*: `ChildEnv` is the single child-environment allowlist; `ProcessSupervisor` caps output per stream, emits `proc.exit` once, and cancels SIGTERM → 2 s → SIGKILL; `EventSink` coalesces at 16 ms / 32 KB with a 256 KB pending cap and concatenates raw bytes before base64; `TermHandler` enforces the 256 KB credit window until `term.ack`; `ProcHandler`/`TermHandler` stream through a request-scoped `StreamSink`. `AsyncBridgeHandler` + `BridgeRouter.dispatchAsync` add one-reply async methods for `SafHandler` (SAF/permission) and `RuntimeHandler`; `BridgeHost` replaces `WebAppBridge.kt` for transport. `MainActivity` implements `SafPort` with one request code per dialog. D1: `yes` stays responsive (timer delay ≤1 ms), credit stops at exactly 262 144 bytes then resumes after ack, no `yes`/`sleep`/`sh` left; async SAF cancel returns `null`, unknown runtime → `E_UNSUPPORTED` (`docs/device-reports/20261111-phaseB-task6-bridge-D1.txt`)
 - [ ] **Task 7** Generated TS types (`generateBridgeTypes`, CI drift check)
 - [ ] **Task 8** `ComponentActivity`, insets, back dispatcher, renderer-gone recovery, crash handler + `RecoveryActivity`, CSP, local fonts
 - [ ] **Task 9** Native PTY correctness (`execve` envp, close fds, signals, `ptsname_r`); harness T8, T9
@@ -196,12 +198,12 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 | `HarnessActivity` exported in the main manifest | 4 — fixed 2026-11-11 |
 | `fs.write` deletes the target before rename; temp name collides; trash falls back to permanent delete | 4 — fixed 2026-11-11 |
 | No message / write / SAF size limits | 4 — fixed 2026-11-11 |
-| `WebAppBridge.kt` 728-line single `when`, untyped payloads, raw threads, unbounded pool | 5 (`app.*`/`fs.*`), 6 (rest) |
+| `WebAppBridge.kt` 728-line single `when`, untyped payloads, raw threads, unbounded pool | 5 (`app.*`/`fs.*`), 6 (rest) — fixed 2026-11-11 |
 | String-literal error codes; `E_INTERNAL` leaks exception text; `v` never checked | 5 — fixed 2026-11-11 |
-| `ProcessHost` and `runProcess` duplicate process launch; PTY child inherits full app env | 6, 9 |
-| No backpressure on process/terminal events | 6 |
-| SIGTERM and SIGKILL sent back to back | 6 |
-| Single-slot SAF / permission callbacks (second request never answered) | 6 |
+| `ProcessHost` and `runProcess` duplicate process launch; PTY child inherits full app env | 6 — fixed 2026-11-11; `pty.c` envp still 9 |
+| No backpressure on process/terminal events | 6 — fixed 2026-11-11 |
+| SIGTERM and SIGKILL sent back to back | 6 — fixed 2026-11-11 |
+| Single-slot SAF / permission callbacks (second request never answered) | 6 — fixed 2026-11-11 |
 | Bridge types hand-written in TS | 7 |
 | Plain `Activity`, deprecated `onBackPressed`, `startActivityForResult`, `systemUiVisibility` | 8 |
 | No `onRenderProcessGone`, no crash handler, no crash reporting | 8 |
