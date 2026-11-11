@@ -211,7 +211,7 @@ Phase A closes when every box is checked. Record each result in `PROGRESS.md`.
 - [x] `./gradlew testDebugUnitTest lintDebug assembleDebug` pass
 - [x] `scripts/check-elf-alignment.sh` passes on the new debug APK
 - [x] Harness T1–T7 + S1 re-run on D1 and D2 with the final APK; logs committed
-- [ ] Working tree clean; one commit per finding group
+- [x] Working tree clean; one commit per finding group
 
 **Exit gate results (2026-11-11).** Web `lint` (0 errors, 11 pre-existing warnings), `test` (4/4),
 `typecheck` and `build` pass. Android `testDebugUnitTest lintDebug assembleDebug` is green on the
