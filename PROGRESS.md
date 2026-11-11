@@ -1,10 +1,9 @@
 # LeoCode — Progress Tracker
 
-**Last updated:** 2026-11-08
-**Current phase:** Phase 1 — the real IDE is wired into the APK and running on device 1
-(Redmi Note 7S, Android 9). Phase 0 gates 0B/0E still PASS. Next: Android 11 repeat,
-then 0C2 CPython, then Git/SSH UI.
-**Plan:** [`docs/LeoCode_Implementation_Plan_v8.md`](docs/LeoCode_Implementation_Plan_v8.md)
+**Last updated:** 2026-11-11
+**Current phase:** Plan v9, Phase A. Task 1 (v9 docs) done. Next: Task 2 (build/CI hygiene, 16 KB
+alignment), then Task 3 (D2 Android 15 baseline). Phase 0 gates 0B/0E still PASS on D1.
+**Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
 
 Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocked · `[~]` deferred
 
@@ -14,22 +13,21 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 
 | Area | State |
 |---|---|
-| Plan + decisions | Done (v8 + Runtime & Editor Experience Plan) |
-| Repository scaffold | Done |
-| Android app (real IDE shell) | **Built and installed** (`app-debug.apk`, versionCode 2, targetSdk 28) |
-| Web IDE shell | **Live on device** — Collapsible File Explorer with instant search, 6-mode sort, file properties sheet, binary & dotfile filters, multi-tab editor with session restore, live PTY terminal, Runtime manager |
-| Branding & Mascot | **Unified** — Authentic Puppy coder mascot (`design/app-icon.png`) on launcher, splash, and app bar |
-| Theme & Settings system | **Live** — System/Light/Dark, 6 syntax themes (Tokyo Night, Dracula, One Dark, Monokai, GitHub Light, Solarized Light), font picker, font size stepper with live preview |
-| Code Formatting | **Live** — In-browser Prettier formatting for JS, TS, HTML, CSS, Markdown, JSON with instant feedback |
-| Syntax Highlighting | **Live** — Multi-language AST highlighters for Python, JavaScript, TypeScript, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, and Shell |
-| Run + undo/redo | **Live** — Redesigned 32x32 emerald Run badge, live output sheet with Stop (process-group kill), editor undo/redo keys |
-| CI / CD & Release | **Live on GitHub** — Automated build + `nightly` release with downloadable debug APK on push to `main` |
-| Launcher icon | **Done** — adaptive + legacy + round, generated from `design/app-icon.png` |
-| Python runtime artifacts | Draft `scripts/build-python.sh`; runtime manager UI wired to device probe |
-| Device validation | **D1 (Android 9) done** — T1–T7 pass + Phase 1 smoke test + Editor & File Tree feature suite. D2/D3 pending |
-| Android 14+ device | **Blocked — hardware not acquired** |
+| Plan + decisions | **v9** (D-001…D-016; D-016 open until Task 19) |
+| Devices | D1 Redmi Note 7S, Android 9, unrooted — measured. D2 custom ROM, Android 15, rooted — **not yet measured** (Task 3) |
+| Android app (real IDE shell) | Built and installed on D1 (`app-debug.apk`, versionCode 2, targetSdk 28). **Not production-grade** — see §2 |
+| Web IDE shell | Live on D1 — collapsible file explorer with search, 6-mode sort, properties sheet, binary & dotfile filters, shared-storage browsing, multi-tab editor with session restore, live PTY terminal, runtime manager UI |
+| Branding & mascot | Puppy coder mascot (`design/app-icon.png`) on launcher, splash and app bar |
+| Theme & settings | System/Light/Dark, 6 syntax themes, font picker, font size stepper |
+| Code formatting | In-browser Prettier for JS, TS, HTML, CSS, Markdown, JSON |
+| Syntax highlighting | Python, JS, TS, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, Shell |
+| Run + undo/redo | Run badge, live output sheet with Stop (process-group kill), undo/redo keys |
+| CI / CD | Builds on push; publishes a **debug** APK as `nightly` (to become a signed prerelease, Task 28) |
+| Python runtime | UI wired to device probe; package build moves to the official python.org build (D-012, Task 24) |
+| Git / SSH | Dependencies declared, not used (Tasks 19–23) |
+| Root mode | Not started (Tasks 17–18) |
 
-**Measured on device 1 (2026-11-08)** — Redmi Note 7S `lavender`, Android 9 / SDK 28, MIUI V11,
+**Measured on D1 (2026-11-08)** — Redmi Note 7S `lavender`, Android 9 / SDK 28, MIUI V11,
 arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free / 51.2 GB,
 3.8 GB RAM, heap cap 256 MB, SELinux enforcing (`untrusted_app`).
 
@@ -43,7 +41,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | T6 native PTY | **PASS** — output, cols=80, exit 7 |
 | T7 applets | INFO — no `unzip`, `git`, `python` |
 
-**Phase 1 smoke test on device 1 (2026-11-08, installed APK)**
+**Phase 1 smoke test on D1 (2026-11-08, installed APK)**
 
 | Check | Result |
 |---|---|
@@ -51,7 +49,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | File list from app storage | PASS — directories first, sizes, hidden `.trash` |
 | Create file → open in editor | PASS (`hello.py`) |
 | Edit → Save | PASS — `print(1+2)` written; dirty dot cleared; "Saved" status |
-| Atomic save | PASS by construction (`tmp` → `fsync` → `rename`); unit-tested jail |
+| Atomic save | PASS by construction (`tmp` → `fsync` → `rename`); note: target is deleted before rename — fixed in Task 4 |
 | Terminal | PASS — real PTY (`/system/bin/sh -i`), prompt, `ls` runs, resize, extra keys |
 | Theme: system / light / dark | PASS — `data-theme` + system bars update together; choice persists |
 | Adaptive launcher icon | PASS — visible in App info (MIUI squircle mask) |
@@ -61,246 +59,141 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | Stop a running script | PASS — EXIT 137 and **no child processes left** (`ps` checked) |
 | Run after unsaved edit | PASS — buffer is saved before exec |
 
-**Blocking facts (2026-11-08)**
-- Android 14+ device still not available; cannot freeze Phase 0 without it.
-- Android 11 phone not yet tested (software is ready).
-- CI has not run on GitHub (no remote yet).
+**Blocking facts (2026-11-11)**
+- D2 (Android 15, rooted) has not been measured yet. Android 15 gates (install floor, exec from
+  app data, 16 KB pages, WebView ≥ 100) are unproven until Task 3.
+- Android 10–14 have no hardware; they stay unverified (D-014).
+- Only one USB cable: D1 runs on Wi-Fi ADB (runbook §1).
 
 **Findings from the first device run**
 - Shell pipeline throughput is 0.5–4 MB/s (thermal/cache dependent): 25 MB took 6–46 s, 50 MB took 69 s cold. Output buffering must stay bounded (it is), and the terminal UI must coalesce.
 - Repeatability: two independent run-all passes (ADB-driven and UI-driven) produced the same PASS set.
-- `unzip` is absent from the system shell on Android 9 → archive extraction moves to Kotlin `ZipFile`, not a shelled-out tool.
-- `git`/`python` are absent as expected: JGit and the NDK CPython build are the only paths.
+- `unzip` is absent from the system shell on Android 9 → archive extraction moves to Kotlin, not a shelled-out tool.
+- `git`/`python` are absent as expected: JGit and the CPython package are the only paths.
 - 50 MB flood timing is a device property, not a bug — harness now uses 25 MB.
 
-**Known debt added by the IDE shell**
-- Debug APK is 28.8 MB: JGit, SSHD and Bouncy Castle are bundled and R8 is off. Wire a release build with shrinker rules before 0.1.
-- Gradle wrapper is committed (8.9); CI still invokes the system `gradle` for speed — switch to `./gradlew` when convenient.
-- `HarnessActivity` is still exported (debug-only by intent). Remove or guard before 0.1.
-- Rename and delete exist in the bridge but have not been exercised on device yet; delete moves to `.trash` first.
-- No external-change detection or autosave yet; closing a dirty tab asks for confirmation.
-- Terminal keystrokes are coalesced per animation frame; sustained 4 MB/s streams still need a stress test in-app.
-- `androidx.webkit` logs a harmless `NoClassDefFoundError` for an API-29 class on Android 9 during class verification; message passing works.
-- `targetSdk 28` lint rule is intentionally disabled; do not "fix" it (D-002).
-
-**Verified by unit test** (`./gradlew testDebugUnitTest`, 5/5 pass)
-- workspace path jail: relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, **symlink escape rejection**. This is the security boundary for every path crossing the bridge.
+**Verified by unit test** (`./gradlew testDebugUnitTest`, all pass locally; not run in CI yet — Task 2)
+- `WorkspaceJailTest` (5): relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, symlink escape rejection. **Caveat:** production `WebAppBridge.resolve()` does not call `jail()` (Task 4).
+- `WebAppBridgeOriginTest` (6), `DevServerConfigTest` (5).
 
 ---
 
-## 1. Gate 0 — decisions and scaffold
+## 1. Plan v9 tasks
 
-- [x] D-001 distribution: direct APK, no Play
-- [x] D-002 targetSdk 28 / compileSdk 34 / minSdk 28
-- [x] D-003 package ID `dev.leocode`
-- [x] D-004 terminal: xterm.js + own JNI PTY (no GPL)
-- [x] D-005 Git/SSH: JGit + MINA SSHD + Bouncy Castle
-- [x] D-006 Python: system shell + NDK CPython (Track C2), userspace rebuild deferred (C1)
-- [x] D-007 WebView minimum Chromium 100, hard gate, degraded mode defined
-- [x] D-008 shared-UID threat model documented
-- [x] D-009 Keystore envelope encryption
-- [x] D-010 preview isolation
-- [x] Decision records in `docs/decisions/`
-- [x] Repo structure (`android/`, `web/`, `runtime-manifests/`, `runtime-packaging/`, `docs/`, `.github/workflows/`)
-- [x] CI workflow definitions
-- [ ] CI run green on GitHub (needs a remote repo + push)
-- [x] `git init` + initial commit
+### Phase A — Docs and foundation
+- [x] **Task 1** Write the v9 documentation set (plan v9, D-011…D-016, bridge contract, UX error surfaces + root mode, test matrix D2 column, runbook D2/Wi-Fi ADB, compatibility baseline, this tracker)
+- [ ] **Task 2** Build and CI hygiene, 16 KB alignment
+- [ ] **Task 3** Device tooling (`devices.sh`, `smoke.sh`) and D2 baseline (T1–T7, WebView, page size, install, warning dialog)
 
-## 2. Phase 0A — device and build environment
+### Phase B — Android host restructure
+- [ ] **Task 4** Fix the path jail (allowed roots: workspaces + shared storage when granted) and file safety; `HarnessActivity` → debug source set
+- [ ] **Task 5** Typed error model, `BridgeRouter`, `AppHandler`/`FsHandler`, `AppGraph`/`LeoApp`
+- [ ] **Task 6** Migrate proc/term/saf/storage; `ProcessSupervisor`; `EventSink` + `term.ack`; delete `WebAppBridge.kt`
+- [ ] **Task 7** Generated TS types (`generateBridgeTypes`, CI drift check)
+- [ ] **Task 8** `ComponentActivity`, insets, back dispatcher, renderer-gone recovery, crash handler + `RecoveryActivity`, CSP, local fonts
+- [ ] **Task 9** Native PTY correctness (`execve` envp, close fds, signals, `ptsname_r`); harness T8, T9
+- [ ] **Task 10** `SessionService` (foreground), `term.attach`, `OrphanReaper`, phantom-process / MIUI guide
 
-- [x] 0A command list documented in plan §6
-- [x] Install SDK/NDK on laptop: `~/Android/Sdk` (platform 34, build-tools 34.0.0, CMake 3.22.1, NDK 27.0.12077973)
-- [x] JDK 17 installed locally (`~/jdk17`) — system JDK 21 is a JRE without `jlink`
-- [x] Verify Gradle build locally — `BUILD SUCCESSFUL`, `app-debug.apk` 17.6 MB
-- [x] Redmi Note 7S: developer options + USB debugging (device visible as `11f98015`)
-- [x] Redmi: capture `abilist`, `PAGE_SIZE`, Android version, MIUI version, storage, RAM
-- [x] Redmi: capture WebView version (Chrome 137.0.7151.115)
-- [ ] Snapdragon 695 / Android 11: same capture
-- [x] **Gate: WebView ≥ 100 on D1** — 137, no degraded mode needed
-- [ ] **Gate: WebView ≥ 100 on D2**
-- [x] Install minimal targetSdk-28 APK on D1
-- [ ] Install APK on D2
-- [ ] **Gate: Android 14+ device acquired**
+### Phase C — Web restructure and error UX
+- [ ] **Task 11** Bridge client: timeouts, `AbortSignal`, disconnect, typed `AppError`
+- [ ] **Task 12** Error UX system: snackbar, banner, error sheet, catalog, ErrorBoundary, CrashScreen; no silent `catch {}`
+- [ ] **Task 13** Split `App.tsx` into `features/*` + Zustand stores; `Shell` < 200 lines
 
-## 3. Phase 0B — process execution
+### Phase D — Workspace and editor completeness
+- [ ] **Task 14** Workspaces, SAF import/export, zip backup, uninstall warning
+- [ ] **Task 15** Drafts + crash recovery, external-change detection, large-file mode, find/replace
+- [ ] **Task 16** Workspace search (`fs.search` streaming)
 
-- [x] `Workspace` (private dirs, file create/list/delete)
-- [x] `ProcessHost` (exec, stream stdout/stderr, exit code, timeout, cancel)
-- [x] Output ring buffer + flood test button
-- [x] Harness UI + `am start --es run all|T1..T7` (logcat tag `LeoCodeHarness`)
-- [x] Process-group kill implementation (JNI `setsid` + `kill(-pgid)`)
-- [x] Compile the APK (Gradle 8.9, AGP 8.5.2, NDK r27)
-- [x] Run T1 `/system/bin/sh` on Redmi (Android 9) — **PASS**
-- [x] Run T2 exec binary from app data on Redmi — **PASS**
-- [x] Run T3 process-group kill on Redmi — **PASS**
-- [x] Run T4 exit-code propagation on Redmi — **PASS**
-- [x] Run T5 output flood (bounded) on Redmi — **PASS**
-- [x] Run T6 native PTY smoke test on Redmi — **PASS**
-- [x] Run T7 applet inventory on Redmi — no unzip/git/python
-- [ ] Repeat T1–T7 on Android 11
-- [ ] Optional: targetSdk 29 control build to document the `execve` block
-- [x] Record results in `docs/test-matrix.md`
-- [ ] **Gate: exec works unrooted at targetSdk 28 on 9 and 11** — 9 PASS, 11 pending
+### Phase E — Root mode
+- [ ] **Task 17** `RootManager` (libsu), Root mode setting, warning, ROOT badge
+- [ ] **Task 18** Root terminal session and Run as root (`su -c`, kill via `su`)
 
-## 4. Phase 0C — Python (Track C2, MVP)
+### Phase F — Git and SSH (parallel with G)
+- [ ] **Task 19** JGit + MINA SSHD spike (T10–T13) → D-016
+- [ ] **Task 20** `SecretStore` (Keystore envelope); harness T14
+- [ ] **Task 21** Local Git operations + Git tab
+- [ ] **Task 22** Remote operations + conflicts
+- [ ] **Task 23** SSH key manager + host-key prompt
 
-- [x] Draft `scripts/build-python.sh` (OpenSSL → expat → libffi → CPython → pip wheel → package)
-- [ ] Iterate `build-python.sh` until it produces a working artifact on CI
-- [ ] 0C1 validate `/system/bin/sh` + toybox applet set on device
-- [ ] 0C1 validate `HOME`, `TMPDIR`, `PATH`, `TERM` wiring
-- [ ] 0C2 CI job: build CPython for `android-aarch64` with NDK
-- [ ] 0C2 set prefix `/data/data/dev.leocode/files/usr`, `PYTHONHOME`
-- [ ] 0C2 `python --version`, run script on device
-- [ ] 0C2 `python -m pip --version`
-- [ ] 0C2 `python -m venv .venv` + activate
-- [ ] 0C2 `pip install requests` + import
-- [ ] 0C2 console-script shebang test with real prefix
-- [ ] 0C2 build one native wheel (`markupsafe`/`ujson`) in CI, install + import
-- [ ] 0C2 wheel index layout + manifest generator
-- [ ] Manifest signing (Ed25519, offline key)
-- [ ] Compatibility matrix started (`docs/compatibility.md`)
-- [ ] **Gate: baseline documented, one native wheel works**
+### Phase G — Python (CI parallel with F)
+- [ ] **Task 24** CI Python artifact (official build + launcher + pip + certs, signed manifest, markupsafe wheel); retire `build-python.sh`
+- [ ] **Task 25** Runtime installer (verify, resumable download, safe extraction, health check)
+- [ ] **Task 26** Python integration, venv, `requirements.txt`, trust prompts; harness T15; `compatibility.md`
 
-## 5. Phase 0C1 — userspace rebuild (deferred, only if needed)
+### Phase H — Hardening and release
+- [ ] **Task 27** Onboarding (3 screens) + Diagnostics screen
+- [ ] **Task 28** Release keystore, R8, signed releases + SBOM, signed nightly prerelease, self-update
+- [ ] **Task 29** Hardening tests, soak, accessibility, performance budgets, full matrix, 0.1 go/no-go
 
-- [ ] Decide whether broad `pip`/npm compatibility is required
-- [~] Fork `termux-packages`, parameterise prefix
-- [~] Bootstrap set: bash, coreutils, python, pip, openssl, ca-certificates, libffi, zlib, sqlite, ncurses, readline, terminfo, make, tar, curl
-- [~] CI image + reproducible build
-- [~] Maintenance budget: 1–3 days/month
-- [~] Licensing pass + source offer
+### Deferred
+- [~] Track C1 userspace rebuild (termux-packages fork)
+- [~] Node.js (npm, Vite, preview), Java, PHP — after 0.1
+- [~] Local web preview (D-010) — post-Node
+- [~] Degraded WebView mode — policy only, built if a device needs it
+- [~] Termux GPL terminal view — only if the app goes GPL
+- [~] Root file browsing (D-011 reopen trigger)
 
-## 6. Phase 0D — Git and SSH
+---
 
-- [x] Gradle dependencies chosen (JGit, MINA SSHD, Bouncy Castle) — declared, not yet exercised
-- [ ] JGit: clone, status, add, commit, diff, log, branch, checkout, pull, push
-- [ ] JGit: conflict detection + readable conflict state
-- [ ] HTTPS token auth
-- [ ] MINA SSHD: Ed25519 + RSA key generation
-- [ ] Import OpenSSH / PEM / PKCS#8 keys
-- [ ] Passphrase-protected keys
-- [ ] Host-key prompt (SHA-256 fingerprint), changed key = hard failure
-- [ ] Keystore envelope encryption for key blobs
-- [ ] Error paths: wrong key, timeout, offline, DNS
-- [ ] Verify no key material in logs/WebView
-- [ ] **Gate: authenticated clone/push works on both phones**
+## 2. Known debt → fixing task
 
-## 7. Phase 0E — PTY and terminal
+| Debt | Task |
+|---|---|
+| `WebAppBridge.resolve()` bypasses the path jail (absolute paths anywhere, no symlink resolution, `dev.leocodeX` prefix bug) | 4 |
+| `HarnessActivity` exported in the main manifest | 4 |
+| `fs.write` deletes the target before rename; temp name collides; trash falls back to permanent delete | 4 |
+| No message / write / SAF size limits | 4 |
+| `WebAppBridge.kt` 728-line single `when`, untyped payloads, raw threads, unbounded pool | 5, 6 |
+| String-literal error codes; `E_INTERNAL` leaks exception text; `v` never checked | 5 |
+| `ProcessHost` and `runProcess` duplicate process launch; PTY child inherits full app env | 6, 9 |
+| No backpressure on process/terminal events | 6 |
+| SIGTERM and SIGKILL sent back to back | 6 |
+| Single-slot SAF / permission callbacks (second request never answered) | 6 |
+| Bridge types hand-written in TS | 7 |
+| Plain `Activity`, deprecated `onBackPressed`, `startActivityForResult`, `systemUiVisibility` | 8 |
+| No `onRenderProcessGone`, no crash handler, no crash reporting | 8 |
+| No CSP; Google Fonts loaded at runtime | 8 |
+| `androidx.webkit` logs a harmless `NoClassDefFoundError` for an API-29 class on Android 9 | 8 (re-check after bump) |
+| `pty.c`: `setenv` after fork, inherited fds, signals not reset, `ptsname` | 9 |
+| Sessions die with the Activity; no foreground service; phantom-process killer | 10 |
+| Bridge requests have no timeouts; `run()` exit promise can hang forever | 11 |
+| Android detected by user agent | 11 |
+| No ErrorBoundary; errors reduced to `e.message`; silent `catch {}` blocks | 12 |
+| `App.tsx` `Shell` ≈ 970 lines; `styles.css` 2 488 lines | 13 |
+| Rename and delete not exercised on device | 13 (parity demo) |
+| No external-change detection or autosave | 15 |
+| `org.gradle.java.home` hard-coded in `android/gradle.properties` | 2 |
+| CI: unit tests not run, lint non-blocking, actions unpinned, global `contents: write`, NDK fallback mismatch, system `gradle` instead of `./gradlew` | 2 |
+| No 16 KB page alignment for `libleocodepty.so` | 2 |
+| No web tests or ESLint; no instrumented tests | 2 (tooling), each task (tests) |
+| JGit / SSHD / Bouncy Castle declared but unused | 19 |
+| `scripts/build-python.sh` custom CPython build | 24 (retired) |
+| Debug APK 28.8 MB, R8 off, release signed with debug key, public debug APK on push | 28 |
+| `targetSdk 28` lint rule intentionally disabled — **do not "fix"** (D-002) | — |
 
-- [x] JNI PTY scaffold (`pty.c`: `openpty`/`fork`/`setsid`/`execvp`, resize, wait, kill group)
-- [x] Kotlin `Pty` wrapper (`ParcelFileDescriptor.adoptFd` + `Os.read/write`)
-- [x] xterm.js terminal component (web)
-- [x] Compile native lib — `libleocodepty.so` built for arm64-v8a, loads on device
-- [x] PTY spawn + output + exit-code smoke test on device — **PASS** (T6)
-- [ ] Interactive shell round-trip on device (write → echo → read)
-- [ ] Resize (SIGWINCH) behaviour
-- [ ] Ctrl+C / Ctrl+D
-- [ ] Process-group kill from UI
-- [ ] Orphan reaping after app death
-- [ ] Long-running script + background/reopen
-- [ ] Output flood: UI stays responsive
-- [ ] xterm.js mobile: keyboard open/close, `visualViewport` resize
-- [ ] xterm.js: extra-keys row (Ctrl/Esc/Tab/arrows)
-- [ ] Selection + copy/paste
-- [ ] OSC 52 disabled, titles sanitised
-- [ ] **Gate: pass/fail criteria in plan §6 (0E)** — spawn/exit proven, IME pending
+---
 
-## 8. Phase 0F — cross-device validation
+## 3. Done before v9 (history)
 
-- [ ] Run 0B/0C/0E on Android 11
-- [ ] Run 0B/0C/0E on Android 14+
-- [ ] MIUI autostart/battery instructions verified
-- [ ] Phantom-process killer behaviour documented
-- [ ] Phase 0 exit criteria reviewed; go/no-go recorded
+Completed under plan v8; kept for traceability.
 
-## 9. Phase 1 — shell and workspace
+**Gate 0** — D-001…D-010 recorded; repo scaffold; CI workflow definitions; `git init`; repo published to GitHub (`souravrouth5/leocode-ide`).
 
-- [x] Mock bridge + browser dev mode
-- [x] Web UI scaffold: files, editor tabs, terminal, Git placeholder, status bar
-- [x] Bridge contract v1 drafted (`docs/bridge-contract.md`)
-- [x] Commit Gradle wrapper (`./gradlew`, Gradle 8.9)
-- [x] Code-split bundled: xterm deferred to the terminal tab (initial bundle ~550 KB raw / ~184 KB gzip)
-- [x] Copy `web/dist` into `android/app/src/main/assets/web` (`scripts/sync-web.sh`)
-- [x] WebView host activity + `WebViewAssetLoader` (`MainActivity`)
-- [x] `addWebMessageListener` bridge (Kotlin side, `WebAppBridge`) with strict origin check
-- [x] File CRUD + path jail (canonicalise + symlink check) — list/read/write/mkdir/rename/delete
-- [x] File/Folder Properties Action Sheet (metadata inspection: Name, Type, Size, Directory, Full Path, Last Modified)
-- [x] File Explorer instant search with clear button
-- [x] File Explorer 6-mode sorting (Name A-Z, Name Z-A, Size Largest, Size Smallest, Date Newest, Extension)
-- [x] Binary/media file hiding filter (.apk, .mp4, .zip, .so, etc.) and hidden dotfile (.*) toggle
-- [x] Action Sheets & Modals rendered via React Portal (`createPortal` to `document.body`, `z-index: 141`) to escape sidebar CSS transform clipping
-- [x] Navigation + settings (files/editor/terminal tabs, appearance + about sheet)
-- [x] Permission and error surfaces (bridge error → status bar + error sheet)
-- [x] Theme manager (system/light/dark) shared by WebView, system bars and window background
-- [x] Launcher icon set generated from the new artwork
-- [ ] Generated TS types from Kotlin models
-- [ ] Workspace create/open, recent list, project metadata
-- [ ] SAF import/export (copy-in/copy-out)
-- [ ] Zip export/backup + uninstall warning
+**0A** — SDK/NDK (`~/Android/Sdk`: platform 34, build-tools 34.0.0, CMake 3.22.1, NDK 27.0.12077973) and JDK 17 (`~/jdk17`) installed; local Gradle build; D1 developer options + USB debugging; D1 device report and WebView 137 captured; WebView gate PASS on D1; targetSdk-28 APK installed on D1.
 
-## 10. Phase 2 — editor and terminal
+**0B** — `Workspace`, `ProcessHost`, output ring buffer, harness UI + `am start --es run`, JNI `setsid` + group kill; T1–T7 run on D1 (all PASS / INFO); results in `docs/test-matrix.md`.
 
-- [x] CodeMirror 6 editor with Python, JS/TS, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, and Shell mode syntax highlighting
-- [x] Mobile keyboard accessory row (editor keys + terminal keys, keep-keyboard-open)
-- [x] Bracket matching, close-brackets, syntax trees
-- [x] Undo/redo buttons in the mobile key row
-- [x] Redesigned 32x32 emerald Run badge (`PlayIcon`, emerald styling, no terminal clash)
-- [x] Run sheet: save-before-run, live stdout/stderr, Stop, bounded scrollback
-- [x] Normalized CRLF/LF dirty tracking (opening saved files starts clean; only modifications trigger unsaved indicator `•`)
-- [x] `+` new untitled document flow (`Untitled-X`, unsaved indicator `•`, Save As dialog workflow)
-- [x] Robust multi-tab session restoration across restarts (guarded against initial empty render overwrite)
-- [x] Atomic save (temp → fsync → rename)
-- [x] Terminal wired to native PTY in-app (base64 byte stream, resize, restart)
-- [x] Terminal tab lifecycle (close on unmount/activity destroy; no leaks observed)
-- [ ] Find/replace UI (keymap exists)
-- [ ] Draft autosave + crash recovery
-- [ ] External-change detection
-- [ ] Native workspace search with streaming + ignores
-- [ ] Large-file tests (>1 MB)
+**0C** — draft `scripts/build-python.sh` (to be replaced, D-012).
 
-## 11. Phase 3 — Git and SSH UI
+**0D** — dependencies chosen and declared (JGit, MINA SSHD, Bouncy Castle).
 
-- [ ] Repository screen (status, staged/unstaged)
-- [ ] Diff viewer
-- [ ] Commit box
-- [ ] Branch chip + create/switch
-- [ ] Pull/push with progress
-- [ ] Conflict state UI
-- [ ] SSH key manager UI (generate/import/fingerprint/passphrase)
-- [ ] Host-key prompt UI
-- [ ] HTTPS token storage UI
+**0E** — `pty.c` scaffold, Kotlin `Pty` wrapper, xterm.js component, `libleocodepty.so` built for arm64-v8a, PTY smoke test PASS on D1.
 
-## 12. Phase 4 — Python runtime manager
+**Phase 1** — mock bridge + browser dev mode; web UI scaffold; bridge contract v1 draft; Gradle wrapper 8.9; code-split bundle (xterm and CodeMirror lazy); `scripts/sync-web.sh`; `MainActivity` + `WebViewAssetLoader`; `addWebMessageListener` bridge with origin check; file CRUD; properties sheet; explorer search, 6-mode sort, binary/dotfile filters; React-portal sheets; navigation + settings; error sheet + status bar; theme manager with system bars; launcher icons.
 
-- [x] Runtime catalogue UI (size, version, disk used)
-- [ ] Install/uninstall/update with resumable progress
-- [ ] Health check + repair
-- [ ] Run current file
-- [ ] Run project command
-- [ ] venv create/select per project
-- [ ] `requirements.txt` workflow + trust prompt
-- [ ] Output/cancel/errors
-- [ ] Compatibility matrix published in-app
+**Phase 2 (partial)** — CodeMirror 6 with 12 language modes; keyboard accessory rows; bracket matching / close-brackets; undo/redo keys; Run badge; run sheet with save-before-run, live output, Stop, bounded scrollback; CRLF/LF-normalised dirty tracking; `+` untitled documents with Save As; multi-tab session restore; terminal wired to native PTY (base64, resize, restart); terminal lifecycle with no leaks observed.
 
-## 13. Hardening and release 0.1
-
-- [ ] Threat-model tests (bridge fuzz, path traversal, zip bomb, OSC 52)
-- [ ] Process lifecycle soak test (24 h)
-- [ ] Low-memory + storage-pressure tests
-- [ ] Crash reporting (opt-in, local export only)
-- [ ] Onboarding (MIUI steps, trust warning, storage model)
-- [ ] Self-update flow + signature check
-- [ ] Release signing key generated and backed up
-- [ ] Signed APK on GitHub Releases
-- [ ] SBOM + pinned actions audit
-- [ ] Accessibility pass (48 dp, font scaling, descriptions)
-- [ ] Performance budget measured on Redmi
-
-## 14. Later runtimes
-
-- [~] Phase 5 Node.js (npm, Vite, preview)
-- [~] Phase 6 Java (JDK, javac, then Maven/Gradle)
-- [~] Phase 7 PHP (CLI, dev server, then Composer)
+**Phase 4 (partial)** — runtime catalogue UI (size, version, disk used).
 
 ---
 
@@ -317,4 +210,5 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | 2026-11-08 | New launcher artwork; generated adaptive, round and legacy icons plus `design/app-icon.png` source. |
 | 2026-11-08 | Repository published to GitHub (`souravrouth5/leocode-ide`); CI becomes runnable. |
 | 2026-11-08 | Runtime Manager UI (Python 3, Node.js, Java OpenJDK, C/C++ toolchain, Shell) with live probe & env inspection; dedicated LeoCode SVG logo brand mark; boot splash styling; file reload & workspace refresh; reinstalled APK to device with MIUI launcher cache reset. |
-| 2026-11-08 | **File Explorer, Editor & CI Release Enhancements**: File/folder properties inspection sheet; file search and 6-mode sorting; binary extension and dotfile filters; AST syntax highlighters for PHP, Rust, SQL, XML, YAML, and Shell; in-memory untitled doc flow (`+` tab) with unsaved indicator; normalized CRLF/LF dirty tracking; session persistence safety guard; sleek 32x32 emerald Run badge; React portal modal sheets; automated GitHub Actions CI release workflow publishing nightly APK on push to `main`. |
+| 2026-11-08 | **File Explorer, Editor & CI Release Enhancements**: properties sheet; search and 6-mode sort; binary and dotfile filters; PHP, Rust, SQL, XML, YAML and Shell highlighters; untitled doc flow with unsaved indicator; CRLF/LF dirty tracking; session persistence guard; Run badge; portal sheets; GitHub Actions nightly APK on push to `main`. |
+| 2026-11-11 | **Plan v9** (Task 1): production-readiness audit; v9 replaces v8 (kept as history). New decisions D-011 optional root mode, D-012 official python.org CPython, D-013 local-only diagnostics, D-014 device matrix (D1 Android 9 unrooted + D2 Android 15 rooted, no emulators), D-015 manual DI + Zustand, D-016 JGit version (open). Bridge contract gains error codes, timeouts, root/workspace/git/ssh/runtime methods; UX spec gains error surfaces and root mode; test matrix gains a D2 column and T8–T15; tracker rebuilt around Tasks 1–29. No code changed. |

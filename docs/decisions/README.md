@@ -45,6 +45,7 @@ Aggregated record of the frozen decisions. Each entry: context → decision → 
 **Decision** MVP uses the system shell (`/system/bin/sh` + toybox) with a CPython built by us using the NDK, plus our own wheel index for native extensions (**Track C2**). A Termux-style userspace rebuild (**Track C1**) is optional and only if broad `pip`/npm compatibility is required.
 **Alternatives** Full userspace first (rejected: too slow to validate the product), Chaquopy (rejected: build-time only).
 **Reopen if** device tests show the system shell is unusable, or users need packages we cannot wheel.
+**Amended by D-012 (2026-11-11):** the CPython itself now comes from the official python.org Android build instead of our own NDK build of the interpreter. The two-track structure and the C1 deferral are unchanged.
 
 ## D-007 — WebView minimum: Chromium 100
 
@@ -73,3 +74,49 @@ Aggregated record of the frozen decisions. Each entry: context → decision → 
 **Decision** Bind `127.0.0.1` only, random port, per-session token, strict `Host`/`Origin`; separate WebView with no bridge, no file access, own storage partition.
 **Alternatives** Same WebView with CSP (rejected).
 **Reopen if** preview needs to call IDE APIs — it must not.
+
+---
+
+Decisions added by plan v9 (2026-11-11).
+
+## D-011 — Optional root mode
+
+**Context** Users run LeoCode on rooted and unrooted phones. Root can make terminal work more useful (system inspection, disabling the phantom-process monitor), but a prompt at startup or root-wide file access would surprise unrooted users and widen the attack surface.
+**Decision** Root is opt-in from Settings › Advanced › Root mode. Detection only checks for an `su` binary and never prompts. Enabling shows a warning sheet, then requests the grant through [libsu](https://github.com/topjohnwu/libsu) `core` (Apache-2.0). Root features: a root terminal session (PTY running `su`) and a "Run as root" toggle (`su -c` with argv quoting). A ROOT badge is shown while root processes are alive. Because the app UID cannot signal root processes, cancel kills the recorded process group through `su`. The bridge path jail stays: no file API accepts root paths. Lost grants end sessions with `E_ROOT_DENIED`.
+**Alternatives** No root support (rejected: user requirement); root file browsing via libsu `nio` (rejected for 0.1: breaks the path-jail model); raw `Runtime.exec("su")` without a library (rejected: fragile across Magisk/KernelSU/ROM `su` variants).
+**Reopen if** users need root file browsing, or a ROM's `su` breaks libsu.
+
+## D-012 — CPython from the official python.org Android build
+
+**Context** CPython supports Android as a tier-3 platform (PEP 738) and python.org publishes Android builds designed for embedding (`libpython3.x.so` + stdlib). cibuildwheel can build Android wheels. Maintaining our own OpenSSL/libffi/expat/CPython cross-build (`scripts/build-python.sh`) costs time we do not need to spend.
+**Decision** CI downloads the official `aarch64` Android build (pinned version + sha256), adds a small NDK-built `python3` launcher calling `Py_BytesMain`, the certifi CA bundle and pip, checks 16 KB alignment, and publishes a signed package. Native wheels come from cibuildwheel. The prefix is computed from `filesDir` at runtime. `scripts/build-python.sh` is retired in Task 24. Amends D-006.
+**Alternatives** Keep the custom build (rejected: more maintenance, older 3.11); Chaquopy (rejected: build-time only); Termux packages (rejected: GPL prefix/userspace track, C1).
+**Reopen if** the official build cannot run as a standalone interpreter, lacks a needed module, or its libraries are not 16 KB aligned.
+
+## D-013 — Local-only diagnostics
+
+**Context** Production needs crash visibility, but uploading data needs a server, a privacy policy and consent flows.
+**Decision** Crashes are written to a local `CrashStore`. The next launch opens a native `RecoveryActivity` (Restart, Share diagnostics). Settings › About › Diagnostics offers Copy/Share. All output passes through `Redactor` (no tokens, keys, env values, or paths outside allowed roots). No network upload.
+**Alternatives** Opt-in upload to a crash service such as self-hosted Sentry (rejected for 0.1: server + privacy work); no crash reporting (rejected: unsupportable).
+**Reopen if** the user base grows beyond what manual reports can cover.
+
+## D-014 — Device matrix: two real phones, no emulators
+
+**Context** The laptop cannot run emulators. Two phones are available, with one USB cable. The Android 11 and stock Android 14+ phones from v8 are not available.
+**Decision** D1: Redmi Note 7S, Android 9, unrooted, MIUI (Wi-Fi ADB). D2: custom ROM, Android 15, rooted, no device integrity (USB). Unrooted Android 15 is approximated by denying `su` to LeoCode on D2. Android 10–14 are documented as unverified on hardware. Heavy builds run on GitHub Actions.
+**Alternatives** Emulators (rejected: hardware); cloud device farms (rejected for now: cost, and unrooted only).
+**Reopen if** another phone becomes available (add it as a column) or a user reports a 10–14-specific failure.
+
+## D-015 — Manual DI and Zustand
+
+**Context** `WebAppBridge.kt` (728 lines) and `App.tsx` `Shell` (≈ 970 lines) hold most of the logic. The app needs clear ownership without slowing builds on a weak laptop.
+**Decision** Android: an `AppGraph` built once in `LeoApp` constructs every service (≈ 15); handlers and Activities receive dependencies. Web: Zustand feature stores replace `Shell`'s local state.
+**Alternatives** Hilt/Dagger (rejected: annotation processing cost, little gain at this size); Koin (acceptable, but another runtime dependency); Redux Toolkit (rejected: more boilerplate than needed); React context only (rejected: re-render churn in the editor).
+**Reopen if** the service count passes ~40 or tests need scoped graphs that manual wiring makes awkward.
+
+## D-016 — JGit version (open)
+
+**Context** JGit 6.x targets Java 11 and uses APIs that may be missing on Android API 28. JGit 5.13.x targets Java 8.
+**Decision** *Pending.* The Task 19 spike tries 6.x first on D1 and D2 (HTTPS clone, SSH clone, push) and falls back to 5.13.x. The result, with the failing APIs if any, is recorded here.
+**Alternatives** libgit2 via JNI (rejected: native code and licensing work); native git from a userspace (deferred with Track C1).
+**Reopen if** the chosen version blocks a required workflow.
