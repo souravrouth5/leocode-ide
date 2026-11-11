@@ -7,20 +7,20 @@ Device policy: [plan v9 §Devices](LeoCode_Implementation_Plan_v9.md#devices) an
 
 | # | Model | Android | Root | SELinux | ABI | Userspace | PAGE_SIZE | WebView | ROM / skin | Storage free | RAM |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| **D1** | Redmi Note 7S (`lavender`) | 9 (SDK 28, patch 2020-02-05) | No | enforcing, `untrusted_app` | arm64-v8a (+v7a,abi) | toybox, no unzip/git/python | **4096** | Chrome **137.0.7151.115** | MIUI V11 (code 9) | 15 786 MB / 51 205 MB | 3.8 GB (heap 256 MB) |
-| **D2** | POCO F1 (`beryllium`, SD845) | 15 (SDK 35, patch 2025-09-01) | **No `su`** (LineageOS user build; Magisk/KernelSU not installed) | enforcing, `untrusted_app_27` | arm64-v8a (+v7a) | toybox incl. unzip/curl; no git/python/su | **4096** | WebView **156.0.8078.47** | LineageOS, build `BP1A.250505.005`, `lineage_beryllium-user` | 101 021 MB free / 115 797 MB | 5.7 GB (heap 256 MB) |
+| **D1** | Redmi Note 7S (`lavender`) | 9 (SDK 28, patch 2020-02-05) | No | enforcing, `untrusted_app` | arm64-v8a (+v7a,abi) | toybox, no unzip/git/python | **4096** | Chrome **137.0.7151.115** | MIUI V11 (code 9) | 15 786 MB / 51 205 MB | 3.8 GB (heap 256 MB, `docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:13`) |
+| **D2** | POCO F1 (`beryllium`) | 15 (SDK 35, patch 2025-09-01) | **No `su`** (LineageOS user build; Magisk/KernelSU not installed) | enforcing, `untrusted_app_27` | arm64-v8a (+v7a) | toybox incl. unzip/curl; no git/python/su | **4096** | WebView **156.0.8078.47** | LineageOS, build `BP1A.250505.005`, `lineage_beryllium-user` | 101 021 MB free / 115 797 MB | 5.7 GB (heap 256 MB, `docs/device-reports/20261111-harness-D2-e76846f.txt:11`) |
 | X1 | SD695 phone (optional, unavailable) | 11 | No | | | | | | | | |
 | X2 | Stock Android 14+ (optional, unavailable) | 14+ | No | | | | | | | | |
 
 Raw reports: D1 [`device-reports/20261108-131918-device.txt`](device-reports/20261108-131918-device.txt); D2 [`device-reports/20261111-141335-device.txt`](device-reports/20261111-141335-device.txt). Smoke logs: `docs/device-reports/*-smoke-*.txt`.
 
 **D2 root status (2026-11-11).** `su` is absent and `ro.debuggable=0`, so D2 is **unrooted** as
-measured. D-014/Phase E expect a rooted D2: install a root manager (Magisk or KernelSU) and record
+measured. D-014/Phase E expect root on D2: install a root manager (Magisk or KernelSU) and record
 it here before Task 17. Until then root-mode rows stay blocked, and unrooted Android 15 is exactly
 the state Task 3 needs.
 
-**D2 page size.** 4096 B, so 16 KB hardware behaviour is not measurable here. The APK check
-(`scripts/check-elf-alignment.sh`) plus CI cover alignment.
+**D2 page size.** 4096 B, so 16 KB hardware behaviour is not measurable here. The local APK check
+(`scripts/check-elf-alignment.sh`; CI has not run yet) covers static alignment.
 
 **Connection:** D2 on USB, D1 on Wi-Fi ADB (plan v9 §12). Record the serial used in each run's notes.
 **Unrooted Android 15:** measured on D2 with `su` denied to LeoCode; mark such cells `PASS (su denied)`.
@@ -31,22 +31,29 @@ the state Task 3 needs.
 D1 measured 2026-11-08, `app-debug.apk` targetSdk 28, driven by
 `adb shell am start -n dev.leocode/.HarnessActivity --es run all`.
 
-| Test | D1 (A9) | D2 (A15, rooted) | Notes |
+| Test | D1 (A9) | D2 (A15, unrooted) | Notes |
 |---|---|---|---|
 | Install targetSdk-28 APK | **PASS** | **PASS** | D2: Android 15 floor is targetSdk 24 |
-| Old-target warning dialog at launch | not recorded | **No dialog** | D2 screenshot `20261111` run; app opened straight to the IDE |
-| T1 `/system/bin/sh -c echo` | **PASS** | **PASS** — exit 0, 105 ms | D1: 403 ms; D2 uid `u0_a554`, SELinux `untrusted_app_27` |
+| Old-target warning dialog at launch | not recorded | **No dialog** (observed manually; no screenshot) | D2 app opened straight to the IDE on the `20261111` run |
+| T1 `/system/bin/sh -c echo` | **PASS** — 271 ms | **PASS** — exit 0, 104 ms | D1 271 ms (`docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:21`); D2 104 ms (`docs/device-reports/20261111-harness-D2-e76846f.txt:17`), T2 105 ms (`:24`). D2 uid `u0_a554`, SELinux `untrusted_app_27`. Timings vary per run |
 | T2 exec binary from app data | **PASS** | **PASS** — `exec-from-data-ok` | D2: targetSdk 28 still allows `execve()` from app data on Android 15 |
-| T2c control: targetSdk 29 build must fail T2 | not run | **PASS (blocked as designed)** | D2: `error=13, Permission denied`; documents the W^X gate. Rebuilt at 28 afterwards |
+| T2c control: targetSdk 29 build must fail T2 | not run | **BLOCKED (expected)** | D2 `error=13, Permission denied` — see `docs/device-reports/20261111-T2c-e76846f.txt`; documents the W^X gate. Rebuilt at 28 afterwards |
 | T3 process-group kill (`setsid` + `kill(-pgid)`) | **PASS** | **PASS** — exited in <5 s | |
 | T4 exit-code propagation | **PASS** | **PASS** — exit 42, stderr captured | |
-| T5 output flood, bounded | **PASS** | **PASS** — 25 MB in 206 ms, 262 144 B captured | D2 `rate=121359KB/s`; D1 16.6 s (`1506KB/s`) |
+| T5 output flood, bounded | **PASS** — 138.8 s, `180KB/s` | **PASS** — 25 MB in 312 ms, 262 144 B captured | D2 312 ms, `rate=80128KB/s` (`docs/device-reports/20261111-harness-D2-e76846f.txt:38`); D1 138 861 ms, `180KB/s` (`docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:46`). Timings vary per run |
 | T6 native PTY (`fork`/`setsid`/`TIOCSCTTY`) | **PASS** | **PASS** — `pty-ok`, `cols=80`, exit 7 | page size 4096 on both |
 | T7 shell applet inventory | **INFO** | **INFO** | D2 has `unzip` and `curl`; **no** git/python/su (D1 also lacks unzip) |
 | T8 PTY child env contains only allowlisted keys | | | Task 9 |
 | T9 PTY child has no fds > 2 | | | Task 9 |
 
 > Renumbering note: v8's "T8 control build" is now **T2c**. T8–T15 are the v9 harness tests.
+
+> **Final Phase A re-run (2026-11-11)** on the shipped targetSdk-28 APK: T1–T7 and S1 pass again on
+> both phones, with the same PASS set and different timings (D2 T1 107 ms, T5 211 ms /
+> `118483KB/s`; D1 T1 258 ms, T5 7.8 s / `3219KB/s`). Raw logs:
+> [`device-reports/20261111-harness-final-D2-e76846f.txt`](device-reports/20261111-harness-final-D2-e76846f.txt),
+> [`device-reports/20261111-harness-final-D1-192.168.29.26_5555.txt`](device-reports/20261111-harness-final-D1-192.168.29.26_5555.txt).
+> The values in the table above stay tied to the earlier logs they cite; timings vary per run.
 
 **Throughput finding.** `yes | head -c` moves 0.5–4 MB/s through the system shell on D1
 (cold 50 MB: 69 s; 25 MB: 46 s cold, 13 s, then 6 s warm). Real compiler/test output is far
@@ -72,10 +79,15 @@ supplied by JGit and the CPython package respectively.
 
 ## 16 KB pages and native code (Task 2, 24)
 
+**No tested device runs 16 KB pages.** Both D1 and D2 use 4096-byte pages
+(`docs/device-reports/20261111-harness-D2-e76846f.txt:9,41`;
+`docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:11,50`), so the
+D1/D2 cells below are static-check-only placeholders, not runtime evidence.
+
 | Check | CI | D1 | D2 |
 |---|---|---|---|
-| `libleocodepty.so` all `LOAD` align ≥ `2**14` | **PASS** (`0x4000`) | **PASS** (4 KB) | **PASS** (4 KB device, r28 build) |
-| `zipalign -c -P 16 -v 4` on APK | **PASS** | — | — |
+| `libleocodepty.so` all `LOAD` align ≥ `2**14` | **PASS** (local `scripts/check-elf-alignment.sh`: `0x4000`; CI not yet run) | n/a (device uses 4 KB pages; static check only) | n/a (device uses 4 KB pages; static check only) |
+| `zipalign -c -P 16 -v 4` on APK | **PASS** (local static check) | — | — |
 | Python package `.so` files aligned | | — | — |
 | PTY library loads (T6) | — | **PASS** | **PASS** |
 | Device page size | — | 4096 | **4096** |
@@ -145,23 +157,23 @@ supplied by JGit and the CPython package respectively.
 
 | Test | D1 | D2 |
 |---|---|---|
-| No `su` prompt at startup | **N/A** (no `su`) | |
-| Toggle shows "Root not available" | | N/A |
-| Enable → warning sheet → grant | N/A | |
-| Grant denied → `E_ROOT_DENIED` sheet | N/A | |
-| Grant revoked in root manager mid-session → session ends + banner | N/A | |
-| Root session `id` shows `uid=0` | N/A | |
-| Run as root: output + exit code | N/A | |
-| Stop root job leaves no process (`su -c ps`) | N/A | |
-| ROOT badge visible while root process alive | N/A | |
-| `su` denied: all non-root features unchanged | N/A | |
+| No `su` prompt at startup | **N/A** (no `su`) | blocked: D2 not rooted |
+| Toggle shows "Root not available" | | blocked: D2 not rooted |
+| Enable → warning sheet → grant | N/A | blocked: D2 not rooted |
+| Grant denied → `E_ROOT_DENIED` sheet | N/A | blocked: D2 not rooted |
+| Grant revoked in root manager mid-session → session ends + banner | N/A | blocked: D2 not rooted |
+| Root session `id` shows `uid=0` | N/A | blocked: D2 not rooted |
+| Run as root: output + exit code | N/A | blocked: D2 not rooted |
+| Stop root job leaves no process (`su -c ps`) | N/A | blocked: D2 not rooted |
+| ROOT badge visible while root process alive | N/A | blocked: D2 not rooted |
+| `su` denied: all non-root features unchanged | N/A | blocked: D2 not rooted |
 
 ## Background survival and lifecycle (Task 10)
 
 | Test | D1 | D2 |
 |---|---|---|
 | Foreground notification "N processes running" + Stop all | | |
-| Notification permission prompt (A13+, targetSdk ≤ 32 behaviour) | N/A | **not shown** — no channel yet (`POST_NOTIFICATIONS` granted=false, app importance NONE); Task 10 creates the first channel |
+| Notification permission prompt (A13+, targetSdk ≤ 32 behaviour) | N/A | **not shown** — no channel yet; permission grant and app importance not measured; Task 10 creates the first channel |
 | `sleep 600; echo done` survives 10 min in background | | |
 | Terminal reattaches with scrollback (`term.attach`) | | |
 | Survives rotation / theme change | | |
@@ -193,13 +205,13 @@ Measured 2026-11-08 on D1, debug APK with the real IDE (no harness).
 | Cold start → first frame | **2.77 s** (2026-11-08); 3.309 s (2026-11-11, after reinstall) | **0.941 s** (2026-11-11) | `am start -W` TotalTime; D2 `LaunchState: COLD`. A sleeping screen on D1 makes `-W` report tens of seconds; `smoke.sh` wakes it first |
 | Splash before JS runs | **PASS** | **PASS** | static markup in `index.html`, correct theme from URL |
 | Bridge attach (`addWebMessageListener`) | **PASS** | **PASS** | origin `https://appassets.androidplatform.net` only |
-| List workspace | **PASS** | **PASS** (IDE shell boots) | dirs first, sizes, `.trash` hidden |
+| List workspace | **PASS** | **PASS** (observed: IDE shell boots — visual observation, not harness evidence) | dirs first, sizes, `.trash` hidden |
 | Create file | **PASS** | not exercised | prompt sheet → `fs.write` |
 | Open + edit | **PASS** | not exercised | CodeMirror, Python highlight, dirty dot |
 | Save | **PASS** | not exercised | `print(1+2)` on disk; tmp → fsync → rename (rename-over fix in Task 4) |
 | Terminal PTY | **PASS** | not exercised | prompt, `ls` runs, live resize, restart button |
 | Terminal keystroke batching | **PASS** | not exercised | one bridge message per animation frame |
-| Theme: system / light / dark | **PASS** | **PASS** (dark rendered) | `data-theme` + status/nav bars update together |
+| Theme: system / light / dark | **PASS** | **PASS** (observed: dark rendered — visual observation, not harness evidence) | `data-theme` + status/nav bars update together |
 | No first-paint theme flash | **PASS** | **PASS** | mode + resolved theme passed in the page URL |
 | Keyboard accessory rows | **PASS** | not exercised | keeps soft keyboard open |
 | Adaptive launcher icon | **PASS** | not exercised | MIUI squircle mask, art visible |
