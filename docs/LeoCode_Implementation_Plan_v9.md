@@ -88,8 +88,8 @@ What blocks production:
 
 | Area | Finding | Fixed by |
 |---|---|---|
-| Security | `WebAppBridge.resolve()` uses `File.normalize()` and a `startsWith` check instead of `Workspace.jail()`. Any absolute path is accepted (`/system`, `/proc`), symlinks are not resolved, `/data/data/dev.leocodeX` passes. Tests cover `jail()`, which production never calls. | Task 4 |
-| Security | `HarnessActivity` is exported with no permission in the main manifest. | Task 4 |
+| Security | `WebAppBridge.resolve()` uses `File.normalize()` and a `startsWith` check instead of `Workspace.jail()`. Any absolute path is accepted (`/system`, `/proc`), symlinks are not resolved, `/data/data/dev.leocodeX` passes. Tests cover `jail()`, which production never calls. | Task 4 (fixed 2026-11-11) |
+| Security | `HarnessActivity` is exported with no permission in the main manifest. | Task 4 (fixed 2026-11-11) |
 | Security | No CSP; Google Fonts loaded at runtime. | Task 8 |
 | Release | Release build signed with the debug key; R8 off; public debug APK on every push to `main`. | Task 28 |
 | Structure | `WebAppBridge.kt` 728 lines: one `when` over 20 methods, untyped `JsonObject` payloads, raw threads, unbounded cached pool, no backpressure. | Tasks 5–6 |

@@ -30,6 +30,7 @@ the state Task 3 needs.
 
 D1 measured 2026-11-08, `app-debug.apk` targetSdk 28, driven by
 `adb shell am start -n dev.leocode/.HarnessActivity --es run all`.
+The harness lives in the debug source set only; release builds do not contain it (Task 4).
 
 | Test | D1 (A9) | D2 (A15, unrooted) | Notes |
 |---|---|---|---|

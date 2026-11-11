@@ -133,8 +133,8 @@ Remove or back each one:
 | A-11 | Lint baseline hides `RequiresFeature` for `postMessage` without a `WebViewFeature.WEB_MESSAGE_LISTENER` check; verify it is a real gap or a false positive, remove from baseline if fixed | `android/app/lint-baseline.xml`, `WebAppBridge.kt` | Task 6 / 8 |
 | A-12 | `TrustAllX509TrustManager` ×3 baselined; all are inside bundled JGit/Bouncy Castle jars. Review when JGit/SSHD are wired in | `lint-baseline.xml` | Task 19 |
 | A-13 | `/* ignore */` empty catch blocks pass `no-empty` because they contain a comment, but violate plan §7.4 | `web/src/components/TerminalPane.tsx:230,242` and 11 other `catch {}` sites | Task 12 |
-| A-14 | `HarnessActivity` is `exported="true"` in the main manifest | `android/app/src/main/AndroidManifest.xml:34–35`, `HarnessActivity.kt` | Task 4 |
-| A-15 | `fs.write` deletes the target before rename; `WebAppBridge.resolve()` ignores `Workspace.jail()` | `WebAppBridge.kt` | Task 4 |
+| A-14 | `HarnessActivity` is `exported="true"` in the main manifest | `android/app/src/main/AndroidManifest.xml:34–35`, `HarnessActivity.kt` | Task 4 (fixed 2026-11-11) |
+| A-15 | `fs.write` deletes the target before rename; `WebAppBridge.resolve()` ignores `Workspace.jail()` | `WebAppBridge.kt` | Task 4 (fixed 2026-11-11) |
 | A-16 | Release build is signed with the debug key and R8 is off | `android/app/build.gradle.kts:48–49` | Task 28 |
 | A-17 | Nightly job publishes a public **debug** APK on every push to `main` | `.github/workflows/ci.yml` job `nightly` | Task 28 |
 | A-18 | `python-runtime` CI job is a stub (`if: false`) | `ci.yml` | Task 24 |

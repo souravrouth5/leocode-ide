@@ -1,10 +1,10 @@
 # LeoCode — Progress Tracker
 
 **Last updated:** 2026-11-11
-**Current phase:** Plan v9. Phase A **fix-ups A-01…A-10 are done** and the local exit gate is green
-(2026-11-11). Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the owner keeps the branch local,
-so the workflow is YAML-parse-checked only. Then Phase B (Task 4, path jail), Phase C, then **Python
-(Phase G, D-017)** before workspaces, Git/SSH and root mode. D2 is measured but **unrooted**
+**Current phase:** Plan v9. Phase A fix-ups A-01…A-10 are done and the local exit gate was green
+(2026-11-11). Phase B has started: **Task 4 (path jail and file safety) is done**; Task 5 is next.
+Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed, but the repo token
+cannot read Actions results, so the owner must confirm the run. D2 is measured but **unrooted**
 (no `su`); the owner will root it before Phase E.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
 
@@ -104,9 +104,10 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 - `git`/`python` are absent as expected: JGit and the CPython package are the only paths.
 - 50 MB flood timing is a device property, not a bug — harness now uses 25 MB.
 
-**Verified by unit test** (`./gradlew testDebugUnitTest`, run locally; the CI `android` job exists but has never run on GitHub)
-- `WorkspaceJailTest` (5): relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, symlink escape rejection. **Caveat:** production `WebAppBridge.resolve()` does not call `jail()` (Task 4).
+**Verified by unit test** (`./gradlew testDebugUnitTest`, run locally; the CI `android` job exists but has never been observed running)
+- `WorkspaceJailTest` (5): relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, symlink escape rejection. `Workspace.jail()` is now test-only; production uses `PathJail` (Task 4).
 - `WebAppBridgeOriginTest` (6), `DevServerConfigTest` (5).
+- Task 4: `PathJailTest` (11) covers traversal, absolute paths, `dev.leocodeX`, symlink in/out, shared-storage gating, new files; `AtomicWriterTest` (4) covers replacement and concurrent writers; `TrashTest` (6) covers move, shared trash, purge and missing targets.
 
 ---
 
@@ -131,7 +132,7 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 - [x] Evidence added by the reviewer: harness logs for D1 and D2, S1 on D2, read-only verification of root/SELinux/debuggable state (`docs/device-reports/20261111-*`)
 
 ### Phase B — Android host restructure
-- [ ] **Task 4** Fix the path jail (allowed roots: workspaces + shared storage when granted) and file safety; `HarnessActivity` → debug source set
+- [x] **Task 4** Fix the path jail and file safety — *done 2026-11-11*: `PathJail` (canonical workspace root + shared storage only while granted; `root + separator` prefix; `..`/symlink/`dev.leocodeX` rejection), `AtomicWriter` (unique temp → fsync → rename over target, never delete-first), `Trash` (same-FS move, shared `.leocode-trash`, copy-then-delete fallback, 30-day purge), 256 KB message / 4 MB write / bounded SAF limits, harness moved to the debug source set. Demo on D1 and D2: `/system/build.prop` and `/sdcard/..` → `E_PATH_OUTSIDE_ROOT`; workspace and `/sdcard` reads/writes work; deletes land in trash (`docs/device-reports/20261111-phaseB-task4-*`)
 - [ ] **Task 5** Typed error model, `BridgeRouter`, `AppHandler`/`FsHandler`, `AppGraph`/`LeoApp`
 - [ ] **Task 6** Migrate proc/term/saf/storage; `ProcessSupervisor`; `EventSink` + `term.ack`; delete `WebAppBridge.kt`
 - [ ] **Task 7** Generated TS types (`generateBridgeTypes`, CI drift check)
@@ -189,10 +190,10 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 
 | Debt | Task |
 |---|---|
-| `WebAppBridge.resolve()` bypasses the path jail (absolute paths anywhere, no symlink resolution, `dev.leocodeX` prefix bug) | 4 |
-| `HarnessActivity` exported in the main manifest | 4 |
-| `fs.write` deletes the target before rename; temp name collides; trash falls back to permanent delete | 4 |
-| No message / write / SAF size limits | 4 |
+| `WebAppBridge.resolve()` bypasses the path jail (absolute paths anywhere, no symlink resolution, `dev.leocodeX` prefix bug) | 4 — fixed 2026-11-11 |
+| `HarnessActivity` exported in the main manifest | 4 — fixed 2026-11-11 |
+| `fs.write` deletes the target before rename; temp name collides; trash falls back to permanent delete | 4 — fixed 2026-11-11 |
+| No message / write / SAF size limits | 4 — fixed 2026-11-11 |
 | `WebAppBridge.kt` 728-line single `when`, untyped payloads, raw threads, unbounded pool | 5, 6 |
 | String-literal error codes; `E_INTERNAL` leaks exception text; `v` never checked | 5 |
 | `ProcessHost` and `runProcess` duplicate process launch; PTY child inherits full app env | 6, 9 |

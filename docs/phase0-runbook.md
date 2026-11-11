@@ -90,6 +90,9 @@ adb -s "$LEO_D2" logcat -d -s LeoCodeHarness:I | sed 's/^.*LeoCodeHarness: //'
 Single test: `--es run T2` (ids `T1`…`T7`). The UI's **Run all** button does the same and
 writes the same logcat lines.
 
+The harness is a debug-only component (both the source and the manifest entry live in `src/debug`).
+Install `app-debug.apk`; a release APK does not expose `dev.leocode/.HarnessActivity`.
+
 | Button | Pass condition |
 |---|---|
 | T1 sh | exit 0, prints `hello-from-android` |

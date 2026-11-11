@@ -116,7 +116,7 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `workspace.delete` | `{ id }` → `{}` | planned (Task 14) | Confirmation in UI; moves to trash |
 | `fs.list` | `{ path }` → `[{ name, path, kind, size, mtime }]` | live | No recursion |
 | `fs.read` | `{ path, offset?, maxBytes? }` → `{ content, nextOffset, mtime, hash }` | live (chunking + hash in Task 15) | UTF-8 only; binaries → `E_BINARY` |
-| `fs.write` | `{ path, content, expectedHash? }` → `{ mtime, hash }` | live (atomic fix Task 4, `expectedHash` Task 15) | temp → fsync → rename; mismatch → `E_CONFLICT` |
+| `fs.write` | `{ path, content, expectedHash? }` → `{ mtime, hash }` | live (atomic since Task 4; `expectedHash` Task 15) | temp → fsync → rename; mismatch → `E_CONFLICT` |
 | `fs.mkdir` | `{ path }` → `{}` | live | |
 | `fs.rename` | `{ from, to }` → `{}` | live | |
 | `fs.delete` | `{ path }` → `{}` | live | Moves to trash, never silent permanent delete |
