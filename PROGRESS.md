@@ -1,9 +1,11 @@
 # LeoCode — Progress Tracker
 
 **Last updated:** 2026-11-11
-**Current phase:** Plan v9, Phase A **complete**. Tasks 1–3 done. Next: Phase B, Task 4 (path jail
-and file safety). All Phase 0B runnable gates pass on D1 and D2; D2 is measured but **unrooted**
-(no `su`), so Phase E waits for a root manager.
+**Current phase:** Plan v9, Phase A **implemented but not closed**. Tasks 2 and 3 are in progress
+until the fix-ups in [`docs/reports/phase-a-analysis.md`](docs/reports/phase-a-analysis.md) (A-01…A-10) are
+done and its exit checklist is green. Then Phase B (Task 4, path jail), Phase C, then **Python
+(Phase G, D-017)** before workspaces, Git/SSH and root mode. D2 is measured but **unrooted**
+(no `su`); the owner will root it before Phase E.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
 
 Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocked · `[~]` deferred
@@ -14,7 +16,7 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 
 | Area | State |
 |---|---|
-| Plan + decisions | **v9** (D-001…D-016; D-016 open until Task 19) |
+| Plan + decisions | **v9** (D-001…D-017; D-016 open until Task 19; **D-017 Python is the primary language**) |
 | Devices | D1 Redmi Note 7S, Android 9, unrooted — measured. D2 POCO F1, Android 15, **unrooted (no `su`)** — measured 2026-11-11 (Task 3) |
 | Android app (real IDE shell) | Built and installed on D1 and D2 (`app-debug.apk`, versionCode 2, targetSdk 28). CI builds with NDK r28, runs unit tests + blocking lint, checks 16 KB alignment. **Not production-grade** — see §2 |
 | Web IDE shell | Live on D1 — collapsible file explorer with search, 6-mode sort, properties sheet, binary & dotfile filters, shared-storage browsing, multi-tab editor with session restore, live PTY terminal, runtime manager UI |
@@ -24,7 +26,7 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 | Syntax highlighting | Python, JS, TS, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, Shell |
 | Run + undo/redo | Run badge, live output sheet with Stop (process-group kill), undo/redo keys |
 | CI / CD | Builds on push; publishes a **debug** APK as `nightly` (to become a signed prerelease, Task 28) |
-| Python runtime | UI wired to device probe; package build moves to the official python.org build (D-012, Task 24) |
+| Python runtime | **Prototype only** (commit `1a279a2`): installer, launcher, bundled manifest; builds and passes tests, no on-device install run, does not meet D-012 (defects P-01…P-10 in the Phase A report). Python is the primary language (D-017): Tasks 24–26 and 30–33 follow Phase C |
 | Git / SSH | Dependencies declared, not used (Tasks 19–23) |
 | Root mode | Not started (Tasks 17–18) |
 
@@ -109,8 +111,21 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 
 ### Phase A — Docs and foundation
 - [x] **Task 1** Write the v9 documentation set (plan v9, D-011…D-016, bridge contract, UX error surfaces + root mode, test matrix D2 column, runbook D2/Wi-Fi ADB, compatibility baseline, this tracker)
-- [x] **Task 2** Build and CI hygiene, 16 KB alignment — *done 2026-11-11* (NDK r28.2 pin, 16 KB ELF/zipalign script + CI, JDK path out of the repo, pinned actions, least-privilege jobs, unit tests + blocking lint with baseline, web ESLint + vitest)
-- [x] **Task 3** Device tooling and D2 baseline — *done 2026-11-11* (`devices.sh`, `smoke.sh`, serial-aware `collect-device-report.sh`, D2 report, T1–T7 + S1 PASS, T2c control build, D2 matrix filled). D2 is unrooted: Phase E blocked
+- [-] **Task 2** Build and CI hygiene, 16 KB alignment — *implemented 2026-11-11, not accepted*: NDK r28.2 pin, 16 KB ELF/zipalign script + CI, JDK path out of the repo, pinned actions (all 13 SHAs verified against their tags), least-privilege jobs, unit tests + blocking lint with baseline, web ESLint + vitest. **Open:** CI has never run on GitHub (branch not pushed; YAML parse-checked only); `check-elf-alignment.sh` can pass while checking nothing (A-03)
+- [-] **Task 3** Device tooling and D2 baseline — *implemented 2026-11-11, not accepted*: `devices.sh`, `smoke.sh`, serial-aware `collect-device-report.sh`; T1–T7 + S1 PASS on both phones with committed harness logs. **Open:** scripts run `su -c id` (A-01), lone-phone slot bug (A-02), some matrix claims lack raw evidence and T2c has no saved log (A-07/A-08/A-09). D2 is unrooted: Phase E blocked
+
+#### Phase A fix-ups (from [`docs/reports/phase-a-analysis.md`](docs/reports/phase-a-analysis.md))
+- [ ] A-01 remove `su -c` from `scripts/` (High)
+- [ ] A-02 single-phone D1/D2 slot assignment (Medium)
+- [ ] A-03 `check-elf-alignment.sh`: `set -e`, readelf failures, zero-`.so`, pinned NDK first, RELRO, scan `assets/`, fixture tests (High)
+- [ ] A-04 smoke/report script defaults, exit codes, harness logcat tag (Low)
+- [ ] A-05 S1 treats an empty readable root as PASS (Low)
+- [ ] A-06 no "rooted" label on D2 in `test-matrix.md` (High)
+- [ ] A-07 matrix numbers match committed logs (Medium)
+- [ ] A-08 back or soften unsupported claims; re-run and log T2c; one label (Medium)
+- [ ] A-09 16 KB rows say "static check only" (Medium)
+- [ ] A-10 Task 2/3 status honest until CI has run (High)
+- [x] Evidence added by the reviewer: harness logs for D1 and D2, S1 on D2, read-only verification of root/SELinux/debuggable state (`docs/device-reports/20261111-*`)
 
 ### Phase B — Android host restructure
 - [ ] **Task 4** Fix the path jail (allowed roots: workspaces + shared storage when granted) and file safety; `HarnessActivity` → debug source set
@@ -135,17 +150,22 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 - [ ] **Task 17** `RootManager` (libsu), Root mode setting, warning, ROOT badge
 - [ ] **Task 18** Root terminal session and Run as root (`su -c`, kill via `su`)
 
-### Phase F — Git and SSH (parallel with G)
+### Phase F — Git and SSH (after Python, D-017)
 - [ ] **Task 19** JGit + MINA SSHD spike (T10–T13) → D-016
 - [ ] **Task 20** `SecretStore` (Keystore envelope); harness T14
 - [ ] **Task 21** Local Git operations + Git tab
 - [ ] **Task 22** Remote operations + conflicts
 - [ ] **Task 23** SSH key manager + host-key prompt
 
-### Phase G — Python (CI parallel with F)
-- [ ] **Task 24** CI Python artifact (official build + launcher + pip + certs, signed manifest, markupsafe wheel); retire `build-python.sh`
-- [ ] **Task 25** Runtime installer (verify, resumable download, safe extraction, health check)
+### Phase G — Python, the primary language (D-017; do right after Phase C)
+- [-] **Prototype** committed as-is in `1a279a2` (installer, launcher, runtime bridge methods, UI). Not accepted; replaced task by task. Defects P-01…P-10 in the Phase A report
+- [ ] **Task 24** CI Python artifact (official build + launcher + pip + certs, signed manifest, markupsafe wheel); retire `build-python.sh`. Can start any time after Task 2 is green
+- [ ] **Task 25** Runtime installer (verify, resumable download, safe extraction, health check). Needs Task 4 first
 - [ ] **Task 26** Python integration, venv, `requirements.txt`, trust prompts; harness T15; `compatibility.md`
+- [ ] **Task 30** `LanguageProvider` interface + Python provider (nothing outside it hard-codes `python`)
+- [ ] **Task 31** Python run experience: `input()`, tappable tracebacks, plain-language error summaries, run configs
+- [ ] **Task 32** Python REPL, per-project `.venv`, `requirements.txt` install, pip failure explanations
+- [ ] **Task 33** Python editor experience (indentation, snippets, formatter decision), project template, in-app compatibility page
 
 ### Phase H — Hardening and release
 - [ ] **Task 27** Onboarding (3 screens) + Diagnostics screen
@@ -154,7 +174,7 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 
 ### Deferred
 - [~] Track C1 userspace rebuild (termux-packages fork)
-- [~] Node.js (npm, Vite, preview), Java, PHP — after 0.1
+- [~] Node.js (npm, Vite, preview), Java, PHP — after 0.1, added as language providers (D-017) only once Python meets plan §9.1
 - [~] Local web preview (D-010) — post-Node
 - [~] Degraded WebView mode — policy only, built if a device needs it
 - [~] Termux GPL terminal view — only if the app goes GPL
@@ -193,6 +213,8 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 | No instrumented tests (web unit tests now exist) | each task (tests) |
 | JGit / SSHD / Bouncy Castle declared but unused | 19 |
 | `scripts/build-python.sh` custom CPython build | 24 (retired) |
+| Python prototype defects P-01…P-10 (unsigned install, laptop-built launcher, unsafe extraction, non-atomic swap, staging shebangs, global `LD_LIBRARY_PATH`, no on-device run) — see Phase A report §4 | 24, 25, 26, 30 |
+| Phase A script/evidence defects A-01…A-10 — see Phase A report §3 | Phase A fix-ups |
 | Debug APK 28.8 MB, R8 off, release signed with debug key, public debug APK on push | 28 |
 | `targetSdk 28` lint rule intentionally disabled — **do not "fix"** (D-002) | — |
 
@@ -244,3 +266,4 @@ Completed under plan v8; kept for traceability.
 | 2026-11-11 | **Task 2 build/CI hygiene**: NDK pinned to r28.2.13676358 (16 KB default + explicit `max-page-size`), JDK path moved to `~/.gradle/gradle.properties`, `scripts/check-elf-alignment.sh` (llvm-readelf + `zipalign -P 16`) in CI, actions pinned to SHAs, least-privilege per-job permissions, `./gradlew` unit tests + blocking lint with baseline, web ESLint + vitest + sample tests, nightly moved to its own least-privilege job. Builds and installs on D1/D2. |
 | 2026-11-11 | **Task 3 D2 baseline**: `scripts/devices.sh` (serial resolution, model/API/page-size/WebView/root), `scripts/smoke.sh` (install + cold start + logcat, wakes the device), serial-aware `collect-device-report.sh`; D2 POCO F1 (LineageOS, Android 15) report captured. T1–T7 and S1 shared-storage PASS on both phones; T2c targetSdk-29 control build fails exec with `error=13` as designed; D2 cold start 0.941 s, WebView 156, PAGE_SIZE 4096, no old-target dialog. **D2 has no `su`** (Phase E blocked). |
 | 2026-11-11 | **Runtime tab honest empty state**: the old "Install / Setup" stub opened a modal that implied an install and offered "Open Terminal", which only changed tabs. The card is now "Setup info" and opens an "Installation unavailable" notice explaining that no runtime package/installer ships in this build, that nothing was changed on-device, and offering the system shell. Runtime probe failures now show an error badge and a retry banner instead of masquerading as "Not installed". Real install remains Tasks 24–25 (manifest is still a placeholder). |
+| 2026-11-11 | **Phase A review.** Full web + Android checks pass; harness T1–T7 + S1 pass on D1 and D2 (logs committed). D2 verified unrooted (no `su`, no root manager). Findings A-01…A-19 and P-01…P-10 written up in `docs/reports/phase-a-analysis.md`; Tasks 2 and 3 reopened until fixed. Python installer prototype committed as-is (`1a279a2`). **Plan change:** D-017 makes Python the primary language; Phase G moves ahead of D/E/F; Tasks 30–33 added (language provider, run experience, REPL + packages, editor + template). |
