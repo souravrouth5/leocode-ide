@@ -109,3 +109,33 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
 }
+
+/**
+ * Task 7: regenerate web/src/bridge/types.gen.ts from the Kotlin DTO descriptors.
+ *
+ * The generator lives in the unit-test source set so it can reuse the app's
+ * compiled classes and serialization runtime without a second Gradle module.
+ * CI runs this and `git diff --exit-code` to catch contract drift.
+ */
+tasks.register<JavaExec>("generateBridgeTypes") {
+    group = "bridge"
+    description = "Regenerate web/src/bridge/types.gen.ts from Kotlin serial descriptors"
+    dependsOn("compileDebugUnitTestKotlin")
+
+    val target = project.rootProject.projectDir.parentFile.resolve("web/src/bridge/types.gen.ts")
+    val testRuntime = configurations.named("debugUnitTestRuntimeClasspath")
+
+    classpath = files(
+        layout.buildDirectory.dir("tmp/kotlin-classes/debugUnitTest"),
+        testRuntime
+    )
+    mainClass.set("dev.leocode.bridge.types.GenerateBridgeTypesKt")
+    args(target.absolutePath)
+
+    inputs.files(fileTree("src/main/java/dev/leocode/bridge") { include("Contract.kt", "ErrorCode.kt") })
+    outputs.file(target)
+
+    doFirst {
+        target.parentFile.mkdirs()
+    }
+}
