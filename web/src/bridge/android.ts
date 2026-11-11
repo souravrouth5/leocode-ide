@@ -1,5 +1,6 @@
 import {
   BridgeError,
+  isErrorCode,
   type AppInfo,
   type Bridge,
   type FileEntry,
@@ -95,9 +96,11 @@ export class AndroidBridge implements Bridge {
       pending.resolve(message.payload)
     } else {
       this.streams.delete(message.id)
+      // An unknown code from the host is a contract mismatch, not a user error.
+      const code = message.error?.code
       pending.reject(
         new BridgeError(
-          message.error?.code ?? "E_INTERNAL",
+          isErrorCode(code) ? code : "E_INTERNAL",
           message.error?.message ?? "unknown bridge error"
         )
       )

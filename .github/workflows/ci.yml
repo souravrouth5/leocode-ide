@@ -95,6 +95,16 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
+      - name: Generated bridge types are up to date (Task 7 drift check)
+        working-directory: android
+        run: |
+          ./gradlew --no-daemon generateBridgeTypes
+          if [ -n "$(git status --porcelain -- ../web/src/bridge/types.gen.ts)" ]; then
+            echo "::error::web/src/bridge/types.gen.ts is stale or untracked. Run ./gradlew generateBridgeTypes and commit the result."
+            git --no-pager diff -- ../web/src/bridge/types.gen.ts || true
+            exit 1
+          fi
+
       - name: 16 KB page-size check
         run: bash scripts/check-elf-alignment.sh
 

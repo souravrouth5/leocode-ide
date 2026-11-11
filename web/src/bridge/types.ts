@@ -8,6 +8,7 @@ import type {
 } from "./types.gen"
 
 export type { ErrorCode } from "./types.gen"
+export { isErrorCode } from "./types.gen"
 
 export type EntryKind = "file" | "dir"
 
@@ -122,7 +123,7 @@ export interface Bridge {
 
 export class BridgeError extends Error {
   constructor(
-    readonly code: string,
+    readonly code: ErrorCode,
     message: string
   ) {
     super(message)
