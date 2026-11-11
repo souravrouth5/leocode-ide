@@ -174,6 +174,8 @@ All under `docs/device-reports/`:
 | `20261111-harness-D2-e76846f.txt` | **New.** Full harness run on D2: T1 exit 0, T2 `exec-from-data-ok`, T3 pass, T4 exit 42, T5 25 MB bounded, T6 `pty-ok exit=7`, T7 inventory; S1 skipped (permission not granted at that time) |
 | `20261111-harness-D2-S1-e76846f.txt` | **New.** S1 on D2 after granting storage: `entries=27 read=true write=true`, PASS |
 | `20261111-harness-D1-192.168.29.26_5555.txt` | **New.** Full harness run on D1: T1–T7 and S1 all PASS (`entries=56`) |
+| `20261111-T2c-e76846f.txt` | **New.** targetSdk-29 control build on D2: T2 fails with `error=13, Permission denied`; outcome labelled `BLOCKED (expected)`; phone restored to targetSdk 28 |
+| `20261111-harness-final-D1-192.168.29.26_5555.txt`, `…-final-D2-e76846f.txt` | **New.** Final T1–T7 + S1 re-run on both phones with the shipped targetSdk-28 APK |
 | `20261111-*-smoke-*.txt` | Cold-start measurements (D2 about 1.0 s median, 0.941 s best of five; D1 about 3.3 s) |
 
 CI action hashes: all 13 `uses:` lines carry 40-character SHAs; every one matches its `# vN` tag when checked with `git ls-remote` (including `gradle/actions/setup-gradle@ed40850…`, which is the peeled commit of tag `v4`). The workflow parses as valid YAML.
@@ -195,21 +197,29 @@ CI action hashes: all 13 `uses:` lines carry 40-character SHAs; every one matche
 
 Phase A closes when every box is checked. Record each result in `PROGRESS.md`.
 
-- [ ] A-01: no `su -c` anywhere under `scripts/`
-- [ ] A-02: single-phone slot assignment correct for D1 and D2
-- [ ] A-03: `check-elf-alignment.sh` fails on the three bad fixtures and passes on the real APK; `scripts/tests/` or CI covers it
-- [ ] A-04: smoke/report script defaults and exit codes fixed (Low, may batch)
-- [ ] A-05: S1 treats an empty readable root as PASS
-- [ ] A-06: no "rooted" label left on D2
-- [ ] A-07: matrix numbers match committed logs, or are footnoted as run-to-run variation
-- [ ] A-08: every unsupported claim is backed by a log/screenshot or softened; T2c re-run and logged, one label used everywhere
-- [ ] A-09: 16 KB rows say "static check only"
-- [ ] A-10: Tasks 2 and 3 show `[-]` with open items, or `[x]` only after CI has run
-- [ ] `npm run typecheck && npm run lint && npm test && npm run build` pass
-- [ ] `./gradlew testDebugUnitTest lintDebug assembleDebug` pass
-- [ ] `scripts/check-elf-alignment.sh` passes on the new debug APK
-- [ ] Harness T1–T7 + S1 re-run on D1 and D2 with the final APK; logs committed
+- [x] A-01: no `su -c` anywhere under `scripts/`
+- [x] A-02: single-phone slot assignment correct for D1 and D2
+- [x] A-03: `check-elf-alignment.sh` fails on the three bad fixtures and passes on the real APK; `scripts/tests/` or CI covers it
+- [x] A-04: smoke/report script defaults and exit codes fixed (Low, may batch)
+- [x] A-05: S1 treats an empty readable root as PASS
+- [x] A-06: no "rooted" label left on D2
+- [x] A-07: matrix numbers match committed logs, or are footnoted as run-to-run variation
+- [x] A-08: every unsupported claim is backed by a log/screenshot or softened; T2c re-run and logged, one label used everywhere
+- [x] A-09: 16 KB rows say "static check only"
+- [x] A-10: Tasks 2 and 3 show `[-]` with open items, or `[x]` only after CI has run
+- [x] `npm run typecheck && npm run lint && npm test && npm run build` pass
+- [x] `./gradlew testDebugUnitTest lintDebug assembleDebug` pass
+- [x] `scripts/check-elf-alignment.sh` passes on the new debug APK
+- [x] Harness T1–T7 + S1 re-run on D1 and D2 with the final APK; logs committed
 - [ ] Working tree clean; one commit per finding group
+
+**Exit gate results (2026-11-11).** Web `lint` (0 errors, 11 pre-existing warnings), `test` (4/4),
+`typecheck` and `build` pass. Android `testDebugUnitTest lintDebug assembleDebug` is green on the
+final APK (`versionCode 2`, `targetSdk 28`). The ELF checker passes on `app-debug.apk`
+(`libleocodepty.so` and `assets/runtime/python3-launcher`, both `LOAD p_align 0x4000`) and its
+fixture suite passes 8/8. Final harness runs on D1 and D2 (T1–T7 + S1) are committed as
+`docs/device-reports/20261111-harness-final-*.txt`; both phones were left on the targetSdk-28 build.
+CI has still never run on GitHub — Tasks 2 and 3 stay in progress for that reason.
 
 ---
 

@@ -1,9 +1,9 @@
 # LeoCode — Progress Tracker
 
 **Last updated:** 2026-11-11
-**Current phase:** Plan v9, Phase A **implemented but not closed**. Tasks 2 and 3 are in progress
-until the fix-ups in [`docs/reports/phase-a-analysis.md`](docs/reports/phase-a-analysis.md) (A-01…A-10) are
-done and its exit checklist is green. Then Phase B (Task 4, path jail), Phase C, then **Python
+**Current phase:** Plan v9. Phase A **fix-ups A-01…A-10 are done** and the local exit gate is green
+(2026-11-11). Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the owner keeps the branch local,
+so the workflow is YAML-parse-checked only. Then Phase B (Task 4, path jail), Phase C, then **Python
 (Phase G, D-017)** before workspaces, Git/SSH and root mode. D2 is measured but **unrooted**
 (no `su`); the owner will root it before Phase E.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
@@ -18,7 +18,7 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 |---|---|
 | Plan + decisions | **v9** (D-001…D-017; D-016 open until Task 19; **D-017 Python is the primary language**) |
 | Devices | D1 Redmi Note 7S, Android 9, unrooted — measured. D2 POCO F1, Android 15, **unrooted (no `su`)** — measured 2026-11-11 (Task 3) |
-| Android app (real IDE shell) | Built and installed on D1 and D2 (`app-debug.apk`, versionCode 2, targetSdk 28). CI builds with NDK r28, runs unit tests + blocking lint, checks 16 KB alignment. **Not production-grade** — see §2 |
+| Android app (real IDE shell) | Built and installed on D1 and D2 (`app-debug.apk`, versionCode 2, targetSdk 28). The CI workflow (NDK r28, unit tests + blocking lint, 16 KB alignment check) **has never run on GitHub** — it is YAML-parse-checked only. **Not production-grade** — see §2 |
 | Web IDE shell | Live on D1 — collapsible file explorer with search, 6-mode sort, properties sheet, binary & dotfile filters, shared-storage browsing, multi-tab editor with session restore, live PTY terminal, runtime manager UI |
 | Branding & mascot | Puppy coder mascot (`design/app-icon.png`) on launcher, splash and app bar |
 | Theme & settings | System/Light/Dark, 6 syntax themes, font picker, font size stepper |
@@ -26,7 +26,7 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 | Syntax highlighting | Python, JS, TS, HTML, CSS, JSON, PHP, Rust, SQL, XML, YAML, Shell |
 | Run + undo/redo | Run badge, live output sheet with Stop (process-group kill), undo/redo keys |
 | CI / CD | Builds on push; publishes a **debug** APK as `nightly` (to become a signed prerelease, Task 28) |
-| Python runtime | **Prototype only** (commit `1a279a2`): installer, launcher, bundled manifest; builds and passes tests, no on-device install run, does not meet D-012 (defects P-01…P-10 in the Phase A report). Python is the primary language (D-017): Tasks 24–26 and 30–33 follow Phase C |
+| Python runtime | **Prototype only** (commit `1a279a2`): installer, launcher, bundled manifest; builds and passes tests. Manual install runs on D1 and D2 succeeded, but no raw log is committed under `docs/device-reports/`, so P-10 stays open. Does not meet D-012 (defects P-01…P-10 in the Phase A report). Python is the primary language (D-017): Tasks 24–26 and 30–33 follow Phase C |
 | Git / SSH | Dependencies declared, not used (Tasks 19–23) |
 | Root mode | Not started (Tasks 17–18) |
 
@@ -40,7 +40,7 @@ arm64-v8a, **PAGE_SIZE 4096**, WebView Chrome **137.0.7151.115**, 15.8 GB free /
 | T2 exec from app data (W^X gate) | **PASS** — `exec-from-data-ok` |
 | T3 process-group kill | **PASS** |
 | T4 exit code + stderr | **PASS** — exit 42 |
-| T5 flood, bounded | **PASS** — 25 MB in 6–46 s (warm/cold), captured exactly 256 KB |
+| T5 flood, bounded | **PASS** — 25 MB in 138.8 s / `180KB/s` (cold, Wi-Fi ADB; varies per run), captured exactly 256 KB |
 | T6 native PTY | **PASS** — output, cols=80, exit 7 |
 | T7 applets | INFO — no `unzip`, `git`, `python` |
 
@@ -53,18 +53,18 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 | Test | Result |
 |---|---|
 | Install targetSdk-28 APK on Android 15 | **PASS** — no install-floor problem |
-| Old-target warning dialog | **None** — app opened straight to the IDE |
-| T1 shell exec | **PASS** — exit 0, 105 ms |
+| Old-target warning dialog | **None** — observed manually (no screenshot captured); app opened straight to the IDE |
+| T1 shell exec | **PASS** — exit 0, 104 ms (varies per run) |
 | T2 exec from app data (W^X gate) | **PASS** — `exec-from-data-ok` (critical for D-002 on A15) |
-| T2c control build at targetSdk 29 | **FAIL as designed** — `error=13, Permission denied`; reverted to 28 |
+| T2c control build at targetSdk 29 | **BLOCKED (expected)** — `error=13, Permission denied`; reverted to 28 |
 | T3 process-group kill | **PASS** |
 | T4 exit code + stderr | **PASS** — exit 42 |
-| T5 flood, bounded | **PASS** — 25 MB in 206 ms, captured exactly 262 144 B |
+| T5 flood, bounded | **PASS** — 25 MB in 312 ms / `80128KB/s` (varies per run), captured exactly 262 144 B |
 | T6 native PTY | **PASS** — `pty-ok`, `cols=80`, exit 7 |
 | T7 applets | INFO — has `unzip`, `curl`; no `git`, `python`, `su` |
 | S1 shared storage (legacy permissions) | **PASS** — 27 entries, write/read round-trip in Downloads |
 | Cold start → first frame | **0.941 s** (`am start -W`, COLD; 1.088 s on the first run) |
-| Notification prompt (A13+, targetSdk ≤ 32) | **not shown** — no channel yet; `POST_NOTIFICATIONS` not granted (Task 10) |
+| Notification prompt (A13+, targetSdk ≤ 32) | **not measured** — no channel yet (Task 10); `POST_NOTIFICATIONS` state and app importance were not captured in any report |
 | 16 KB hardware | **not measurable** — device page size is 4096; CI/ELF check covers alignment |
 
 **Phase 1 smoke test on D1 (2026-11-08, installed APK)**
@@ -86,6 +86,9 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 | Run after unsaved edit | PASS — buffer is saved before exec |
 
 **Blocking facts (2026-11-11)**
+- **CI has never run:** the branch is local by owner decision; the workflow is YAML-parse-checked only
+  (jobs `web`, `android`, `nightly`, `python-runtime`; all 13 `uses:` pinned to SHAs that match their
+  version tags). Do not claim green CI. When the owner pushes, run it once and paste the result.
 - **D2 is not rooted:** no `su` binary on the LineageOS user build. Phase E (Tasks 17–18) is blocked
   until a root manager is installed; all non-root behaviour is measurable now.
 - **16 KB hardware is unavailable:** both phones use 4096-byte pages. Alignment is proven by
@@ -101,7 +104,7 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 - `git`/`python` are absent as expected: JGit and the CPython package are the only paths.
 - 50 MB flood timing is a device property, not a bug — harness now uses 25 MB.
 
-**Verified by unit test** (`./gradlew testDebugUnitTest`, run in CI since Task 2)
+**Verified by unit test** (`./gradlew testDebugUnitTest`, run locally; the CI `android` job exists but has never run on GitHub)
 - `WorkspaceJailTest` (5): relative resolve, absolute-inside-root, `..` rejection, absolute-outside rejection, symlink escape rejection. **Caveat:** production `WebAppBridge.resolve()` does not call `jail()` (Task 4).
 - `WebAppBridgeOriginTest` (6), `DevServerConfigTest` (5).
 
@@ -111,20 +114,20 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 
 ### Phase A — Docs and foundation
 - [x] **Task 1** Write the v9 documentation set (plan v9, D-011…D-016, bridge contract, UX error surfaces + root mode, test matrix D2 column, runbook D2/Wi-Fi ADB, compatibility baseline, this tracker)
-- [-] **Task 2** Build and CI hygiene, 16 KB alignment — *implemented 2026-11-11, not accepted*: NDK r28.2 pin, 16 KB ELF/zipalign script + CI, JDK path out of the repo, pinned actions (all 13 SHAs verified against their tags), least-privilege jobs, unit tests + blocking lint with baseline, web ESLint + vitest. **Open:** CI has never run on GitHub (branch not pushed; YAML parse-checked only); `check-elf-alignment.sh` can pass while checking nothing (A-03)
-- [-] **Task 3** Device tooling and D2 baseline — *implemented 2026-11-11, not accepted*: `devices.sh`, `smoke.sh`, serial-aware `collect-device-report.sh`; T1–T7 + S1 PASS on both phones with committed harness logs. **Open:** scripts run `su -c id` (A-01), lone-phone slot bug (A-02), some matrix claims lack raw evidence and T2c has no saved log (A-07/A-08/A-09). D2 is unrooted: Phase E blocked
+- [-] **Task 2** Build and CI hygiene, 16 KB alignment — *implemented 2026-11-11, not accepted*: NDK r28.2 pin, hardened 16 KB ELF/zipalign checker with fixture tests (`scripts/tests/run-elf-alignment-tests.sh`, 8/8) + CI, JDK path out of the repo, pinned actions (all 13 SHAs verified against their tags), least-privilege jobs, unit tests + blocking lint with baseline, web ESLint + vitest. **Open:** CI has never run on GitHub (branch not pushed; YAML parse-checked only)
+- [-] **Task 3** Device tooling and D2 baseline — *implemented 2026-11-11, not accepted*: `devices.sh`, `smoke.sh`, serial-aware `collect-device-report.sh`; T1–T7 + S1 PASS on both phones with committed harness logs, incl. a final run on the shipped APK. Fix-ups A-01, A-02, A-04…A-09 are done and evidenced. **Open:** CI has never run on GitHub; D2 is unrooted, so Phase E is blocked
 
 #### Phase A fix-ups (from [`docs/reports/phase-a-analysis.md`](docs/reports/phase-a-analysis.md))
-- [ ] A-01 remove `su -c` from `scripts/` (High)
-- [ ] A-02 single-phone D1/D2 slot assignment (Medium)
-- [ ] A-03 `check-elf-alignment.sh`: `set -e`, readelf failures, zero-`.so`, pinned NDK first, RELRO, scan `assets/`, fixture tests (High)
-- [ ] A-04 smoke/report script defaults, exit codes, harness logcat tag (Low)
-- [ ] A-05 S1 treats an empty readable root as PASS (Low)
-- [ ] A-06 no "rooted" label on D2 in `test-matrix.md` (High)
-- [ ] A-07 matrix numbers match committed logs (Medium)
-- [ ] A-08 back or soften unsupported claims; re-run and log T2c; one label (Medium)
-- [ ] A-09 16 KB rows say "static check only" (Medium)
-- [ ] A-10 Task 2/3 status honest until CI has run (High)
+- [x] A-01 remove `su -c` from `scripts/` (High)
+- [x] A-02 single-phone D1/D2 slot assignment (Medium)
+- [x] A-03 `check-elf-alignment.sh`: `set -e`, readelf failures, zero-`.so`, pinned NDK first, RELRO, scan `assets/`, fixture tests (High)
+- [x] A-04 smoke/report script defaults, exit codes, harness logcat tag (Low)
+- [x] A-05 S1 treats an empty readable root as PASS (Low)
+- [x] A-06 no "rooted" label on D2 in `test-matrix.md` (High)
+- [x] A-07 matrix numbers match committed logs (Medium)
+- [x] A-08 back or soften unsupported claims; re-run and log T2c; one label (Medium)
+- [x] A-09 16 KB rows say "static check only" (Medium)
+- [x] A-10 Task 2/3 status honest until CI has run (High)
 - [x] Evidence added by the reviewer: harness logs for D1 and D2, S1 on D2, read-only verification of root/SELinux/debuggable state (`docs/device-reports/20261111-*`)
 
 ### Phase B — Android host restructure
