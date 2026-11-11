@@ -120,3 +120,10 @@ Decisions added by plan v9 (2026-11-11).
 **Decision** *Pending.* The Task 19 spike tries 6.x first on D1 and D2 (HTTPS clone, SSH clone, push) and falls back to 5.13.x. The result, with the failing APIs if any, is recorded here.
 **Alternatives** libgit2 via JNI (rejected: native code and licensing work); native git from a userspace (deferred with Track C1).
 **Reopen if** the chosen version blocks a required workflow.
+
+## D-017 — Python is the primary language
+
+**Context** LeoCode exists to write and run code on a phone. Spreading effort across Python, Node.js, Java and PHP at once would leave none of them usable. Python is already the first runtime in the plan (D-006, D-012) and has the lowest packaging risk because an official Android build exists.
+**Decision** Python is supported first and supported well, defined by the acceptance suite in plan v9 §9.1 (install, run with `input()`, tappable tracebacks, REPL, pip and per-project venv, Python-aware editor, project template). Python tasks (24–26, 30–33) are built right after the web restructure, before workspaces, Git/SSH and root mode. Other languages are added later through a `LanguageProvider` interface (Task 30); nothing outside the provider hard-codes `python`.
+**Alternatives** Several languages shallowly in parallel (rejected: none usable); Python after Git (rejected: the product is not a coding tool until code runs); Python hard-coded without an interface (rejected: forces a rewrite for the second language).
+**Reopen if** Python cannot meet §9.1 on both devices (see the plan-B tree), or a different language becomes the product's main audience.

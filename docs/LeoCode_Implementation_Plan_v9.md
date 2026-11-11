@@ -13,6 +13,8 @@ Android coding IDE. **Source of truth.** Supersedes [v8](LeoCode_Implementation_
 6. **Device matrix changed** (D-014): real phones only, no emulators. D1 Android 9 unrooted, D2 Android 15 rooted.
 7. **Code structure fixed**: manual DI (`AppGraph`), per-domain bridge handlers, Zustand feature stores (D-015).
 8. 16 KB page-size support, a foreground session service, and Android 12+ process-killer handling are now explicit tasks.
+9. **Python is the primary language (D-017, added 2026-11-11).** LeoCode's main purpose is writing and running code, so one language must work end to end before any other is added. Python is that language. Python tasks (24–26 plus new 30–33) move ahead of Git/SSH and root mode, and "well supported" is defined by an acceptance suite (§9.1). Node.js, Java and PHP stay deferred behind a language-provider interface.
+10. **D2 is not rooted yet** (verified 2026-11-11: no `su`, no root manager). The owner will root it (Magisk) before Phase E. Everything else treats D2 as an unrooted Android 15 phone until then.
 
 **Reading order:** §1 decisions → §4 execution model → §5–7 architecture and errors → §15 tasks.
 
@@ -23,12 +25,13 @@ Android coding IDE. **Source of truth.** Supersedes [v8](LeoCode_Implementation_
 | ID | Device | Android | Root | Role | Connection |
 |---|---|---|---|---|---|
 | **D1** | Redmi Note 7S (`lavender`), 4 GB, MIUI V11 | 9 (API 28) | No | Old-Android, low-RAM, MIUI reference; regression baseline | Wi-Fi ADB |
-| **D2** | Custom ROM, no device integrity | 15 (API 35) | Yes (Magisk or similar) | New-Android behaviour, 16 KB check, root mode | USB |
+| **D2** | POCO F1 (`beryllium`), LineageOS build `lineage_beryllium-user` | 15 (API 35) | **Not yet.** Owner will root (Magisk) before Phase E | New-Android behaviour, 16 KB check; root mode once rooted | USB |
 | X1 | Snapdragon 695 phone | 11 | No | Optional, not available | — |
 | X2 | Stock Android 14+ phone | 14+ | No | Optional, not available | — |
 
 - "No device integrity" does not matter: LeoCode uses no Play Integrity or SafetyNet.
-- **Unrooted Android 15** is approximated on D2 by denying `su` to LeoCode (Magisk DenyList / revoke).
+- **D2 is unrooted today** (checked with read-only `adb` commands: no `su`, no Magisk/KernelSU/APatch package). Until it is rooted, D2 is the unrooted Android 15 reference. After rooting, unrooted behaviour is re-checked by denying `su` to LeoCode (Magisk DenyList / revoke).
+- Both phones report 4096-byte pages. **No device exercises 16 KB pages at runtime**; 16 KB support is verified only by the static ELF/`zipalign` check in CI.
 - **Android 10–14 are not verified on hardware.** They sit between D1 and D2; release notes say so (§4.2).
 - **No emulators.** The laptop is too weak. Heavy builds (CPython, wheels, signed releases) run on GitHub Actions.
 
@@ -58,6 +61,7 @@ D-001…D-010 are unchanged from v8 unless noted. Full records: [`decisions/READ
 | **D-014** | Device matrix | D1 (A9 unrooted) + D2 (A15 rooted), real devices only, 10–14 unverified | **New** |
 | **D-015** | Structure | Manual DI (`AppGraph`) on Android; Zustand stores on the web | **New** |
 | **D-016** | JGit version | 6.x vs 5.13.x — decided by the Task 19 spike | **Open** |
+| **D-017** | Primary language | **Python first.** One language is supported end to end before any other; others plug in later through a language-provider interface | **New** |
 
 ---
 
@@ -70,8 +74,9 @@ D-001…D-010 are unchanged from v8 unless noted. Full records: [`decisions/READ
 5. **Diagnostics are local only:** crash recovery screen plus "Copy / Share diagnostics" with secrets and outside paths redacted.
 6. **Real devices only** (§Devices, §12). One phone on USB, the other on Wi-Fi ADB.
 7. **Python:** official python.org Android build + our NDK launcher; native wheels via cibuildwheel.
-8. **Parallel work:** Git/SSH (app side) and the CPython CI job run in parallel; Python is integrated after Git.
-9. **Docs:** v9 replaces v8; `PROGRESS.md` follows the v9 tasks.
+8. **Python is the primary language (D-017).** It is supported first and supported well (§9.1). Other languages are added later and must not delay it.
+9. **Order of work:** Python (Phase G) comes right after the web restructure (Phase C), before workspaces, Git/SSH and root mode. The Python CI artifact job (Task 24) can start at any time because it needs no app changes.
+10. **Docs:** v9 replaces v8; `PROGRESS.md` follows the v9 tasks.
 
 ---
 
@@ -200,6 +205,7 @@ android/app/src/main/java/dev/leocode/
   ssh/         KeyManager, HostKeyStore, SshSessionFactory
   secrets/     SecretStore (Keystore envelope)
   runtime/     ManifestVerifier, Downloader, SafeExtractor, RuntimeStore, TrustStore
+  language/    LanguageProvider, PythonProvider (D-017), TracebackParser
   diagnostics/ CrashStore, Redactor, DiagnosticsReport
 android/app/src/debug/java/dev/leocode/
   HarnessActivity            Phase 0 tests T1–T15, debug builds only
@@ -295,6 +301,25 @@ Kotlin `ErrorCode` enum is the single source; the TS union is generated (Task 7)
 - **Integrity:** Ed25519-signed manifest (offline key, protected GitHub environment), rollback counter, verify before extraction (§11).
 - **Limits:** no compiler on device; sdists with C code fail; manylinux wheels never install. Published in [`compatibility.md`](compatibility.md).
 
+### 9.1 What "Python is supported well" means (D-017)
+
+Python is the first and, for 0.1, the only language with first-class support. The acceptance suite below is the bar; Tasks 24–26 and 30–33 deliver it. Each line is tested on D1 and D2 and recorded in `test-matrix.md`.
+
+| Area | Must work |
+|---|---|
+| Install | One-tap install from the Runtime tab or the "Python not installed" banner; resumable; signed; health check; repair/uninstall |
+| Run | Run the current `.py` file, a module (`python -m pkg`) or a project entry point; stdout/stderr streamed; exit code shown; Stop kills the whole process group |
+| Input | `input()` works in the run sheet (stdin field) and in the terminal |
+| Errors | Python tracebacks become tappable `file:line` links that jump to the line in the editor; `SyntaxError` and runtime errors show a short plain-language summary above the raw output |
+| REPL | "Python REPL" session opens `python3 -i` in the terminal with history and Ctrl+C/Ctrl+D |
+| Packages | `pip install` from the terminal or a `requirements.txt` prompt; per-project `.venv` created and selected automatically; pure-Python packages and published Android wheels install; failures explain *why* (no wheel, needs a compiler) |
+| Editor | Python highlighting, 4-space auto-indent after `:`, dedent on `return`/`pass`, bracket closing, comment toggle, indent guides, Python-aware snippets (`def`, `class`, `if __name__`) |
+| Project | "New Python project" template (`main.py`, `requirements.txt`, `.gitignore`, `.venv` created on first run) |
+| Safety | Trust prompt before running a project's code, `pip install` or activating a venv (§11) |
+| Limits | Documented in-app (Runtime tab → Compatibility): no compiler, no manylinux wheels, which popular packages work (from `compatibility.md`) |
+
+**Language-provider interface.** A `LanguageProvider` (Kotlin) and matching web descriptor define what a language contributes: runtime id, file extensions, run command builder, REPL command, environment, project template, trust-prompt triggers, traceback parser. Python is the first implementation. Adding Node.js, Java or PHP later means writing a provider and a runtime package, not changing the bridge or the UI shell. Nothing outside the provider may hard-code `python`.
+
 ---
 
 ## 10. Git and SSH
@@ -382,6 +407,19 @@ Root mode unstable on a ROM?           → root mode stays off for that ROM; cor
 ---
 
 ## 15. Task breakdown
+
+**Execution order (D-017: Python first).** Phase letters group tasks; they are not the order of work. Build in this order:
+
+1. **A** (1–3), fixing the Phase A findings first ([`reports/phase-a-analysis.md`](reports/phase-a-analysis.md))
+2. **B** (4–10) host restructure
+3. **C** (11–13) web restructure and error UX
+4. **G** Python (24–26, 30–33): the primary language, so it comes *before* D, E and F
+5. **D** (14–16) workspaces, crash-safe editing, search
+6. **F** Git/SSH (19–23)
+7. **E** root mode (17–18), once D2 is rooted
+8. **H** (27–29) hardening and release
+
+Task 24 (CI artifact) needs no app changes, so it can start as soon as Task 2 is green. Task 4 (path jail) must land before any Python installer code is accepted, since the installer touches the file system.
 
 Every task ends with a demo on the phones it names. A task is done only when its tests pass and its demo is recorded in [`test-matrix.md`](test-matrix.md) or [`PROGRESS.md`](../PROGRESS.md).
 
@@ -529,7 +567,7 @@ Every task ends with a demo on the phones it names. A task is done only when its
 - Tests: quoting unit tests (spaces, quotes, `$`, backticks, newlines).
 - Demo: on D2, `id` in a root session shows `uid=0`; stopping a root `sleep` leaves no process.
 
-### Phase F — Git and SSH (parallel with Phase G)
+### Phase F — Git and SSH (after Python, D-017)
 
 **Task 19: JGit + MINA SSHD spike**
 - Objective: choose the JGit version on evidence.
@@ -560,7 +598,9 @@ Every task ends with a demo on the phones it names. A task is done only when its
 - Tests: key import/parse tests; host-key store tests; a script that greps logcat for key material.
 - Demo: on D1, first connection prompts; a tampered `known_hosts` entry is blocked.
 
-### Phase G — Python (CI parallel with Phase F)
+### Phase G — Python, the primary language (D-017; build right after Phase C)
+
+> **Prototype already on this branch.** Commit `phase-g prototype` contains an early installer (`core/RuntimeInstaller.kt`), a launcher (`cpp/python_launcher.c`, `scripts/build-python-launcher.sh`), bundled assets (`assets/runtime/`) and `runtime.install` / `runtime.cancel` bridge methods. It was committed as-is on request and does **not** meet D-012 or §11 (no signature, laptop-built launcher, extraction gaps, non-atomic swap, global `LD_LIBRARY_PATH`). Its defects are listed in [`reports/phase-a-analysis.md`](reports/phase-a-analysis.md) (findings P-01…P-10). Tasks 24–26 must replace or fix each of them; reuse the launcher source, the resumable download and the progress UI where they hold up.
 
 **Task 24: CI Python artifact**
 - Objective: a signed, verifiable runtime package.
@@ -578,6 +618,30 @@ Every task ends with a demo on the phones it names. A task is done only when its
 - Guidance: `ChildEnv` adds `PYTHONHOME`, `SSL_CERT_FILE`, `PATH` from `filesDir`; run `.py` files; `python` and `pip` in the terminal; per-project venv create/select; `requirements.txt` workflow; trust-prompt framework (hash of relevant files) covering scripts, pip, venv activation, Git hooks; fill `compatibility.md`.
 - Tests: trust-store tests; harness T15 (`venv`, `pip install requests`, import `markupsafe`).
 - Demo: on D2, create a venv, install `requests`, run a script that fetches a URL.
+
+**Task 30: Language-provider interface and Python provider**
+- Objective: Python is one implementation of a general interface, so other languages can be added later without touching the shell (D-017).
+- Guidance: Kotlin `LanguageProvider` (runtime id, extensions, run/REPL command builders, `ChildEnv` contribution, project template, trust triggers, traceback parser) registered in `AppGraph`; matching web descriptor served by a `language.list` bridge method; Python provider is the first and only one for 0.1. Move every hard-coded `python`/`.py` reference (run sheet, runtime manager, editor mode, harness) behind the provider. Node.js, Java and PHP get *no* code, only the empty extension point.
+- Tests: provider contract tests; a fake second provider proves the UI renders and runs it.
+- Demo: remove the Python provider in a debug build and the run button, REPL and runtime tab degrade to "no language" without errors.
+
+**Task 31: Python run experience**
+- Objective: running a program feels like a real IDE (§9.1 Run, Input, Errors).
+- Guidance: run current file / module / project entry; stdin field in the run sheet and `input()` support; stdout and stderr streamed through the backpressured `EventSink`; exit code and duration shown; Stop kills the process group; traceback parser turns `File "x.py", line N` into tappable links that open the file at that line; short plain-language summary for `SyntaxError`, `ModuleNotFoundError` (offers `pip install`), `FileNotFoundError`; run configurations remembered per project.
+- Tests: traceback parser tests (nested frames, relative and absolute paths, paths outside the workspace are not linkified); run-sheet store tests.
+- Demo: on D1 and D2, run a script that reads input, raises an exception three frames deep, and tap each frame to jump to the line.
+
+**Task 32: Python REPL and packages**
+- Objective: interactive Python and package management (§9.1 REPL, Packages).
+- Guidance: "Python REPL" terminal session (`python3 -i`, history, Ctrl+C/Ctrl+D); per-project `.venv` created on first run and selected automatically; `requirements.txt` detected with a one-tap "Install requirements" after the trust prompt; `pip install` failures classified (`no matching wheel`, `needs a compiler`, `offline`, `disk full`) with a plain-language explanation and the right error code; installed-packages list with uninstall.
+- Tests: pip-output classifier tests (fixture logs); venv path tests.
+- Demo: on D2, open a REPL, `import sys`; create a project with `requirements.txt` listing `requests` and `rich`; install; run a script using both; try `numpy` and see a clear "no Android wheel" explanation.
+
+**Task 33: Python editor experience and project template**
+- Objective: writing Python on a phone is pleasant (§9.1 Editor, Project).
+- Guidance: Python indentation rules (auto-indent after `:`, dedent on `return`/`pass`/`break`/`continue`/`raise`, tab = 4 spaces), indent guides, comment toggle, bracket/quote closing tuned for Python, snippets (`def`, `class`, `if __name__ == "__main__"`, `for`, `try`) in the keyboard accessory row; formatter decision recorded (a pure-JS or WASM formatter in the WebView, or none, with the trade-off); "New Python project" template (`main.py`, `requirements.txt`, `.gitignore`, `README.md`); compatibility page in the Runtime tab fed by `compatibility.md`.
+- Tests: indentation rule tests (CodeMirror state tests); template creation test.
+- Demo: on D1, create a new Python project, write a class with a method by typing only, run it, and see correct indentation without manual spaces.
 
 ### Phase H — Hardening and release
 
@@ -603,17 +667,17 @@ Every task ends with a demo on the phones it names. A task is done only when its
 
 | Phase | Tasks | Estimate | Notes |
 |---|---|---|---|
-| A Docs + foundation | 1–3 | 3–5 days | Task 3 needs D2 on USB |
+| A Docs + foundation | 1–3 + findings | 3–5 days + 2–3 days fixes | Phase A report first |
 | B Host restructure | 4–10 | 2–3 weeks | Task 4 first: security fix |
 | C Web restructure + errors | 11–13 | 1.5–2 weeks | Can overlap late Phase B after Task 7 |
+| **G Python (primary language)** | 24–26, 30–33 | **3.5–5 weeks** | Right after C; Task 24 (CI) can start earlier |
 | D Workspace + editor | 14–16 | 1.5–2 weeks | |
-| E Root mode | 17–18 | 3–5 days | D2 only |
-| F Git/SSH | 19–23 | 2.5–3.5 weeks | Parallel with G |
-| G Python | 24–26 | 2–3 weeks | Task 24 is CI-only, start alongside Task 19 |
+| F Git/SSH | 19–23 | 2.5–3.5 weeks | After Python |
+| E Root mode | 17–18 | 3–5 days | Needs D2 rooted |
 | H Hardening + release | 27–29 | 2–3 weeks | |
-| **Total to 0.1** | | **≈ 12–17 weeks** | |
+| **Total to 0.1** | | **≈ 14–20 weeks** | |
 
-Order constraints: 4 → 5 → 6 → 7 before 11–13; 10 before 18; 20 before 22–23; 24 before 25 → 26; 28 before 29.
+Order constraints: 4 → 5 → 6 → 7 before 11–13; 4 before 25; 24 before 25 → 26; 26 before 30 → 31 → 32 → 33; 10 before 18; 20 before 22–23; 28 before 29. Python is usable end to end (Tasks 24–26, 30–32) before any Git or root work starts.
 
 ---
 
@@ -623,7 +687,8 @@ A user can, on D1 and D2:
 - create, open, switch, import, export and back up a workspace;
 - browse and edit code with syntax highlighting without losing work after a crash or force-stop;
 - use the terminal, including after backgrounding the app;
-- install Python, run a file, use pip and a venv;
+- install Python, run a file with `input()`, tap a traceback line to jump to it, use a REPL, pip and a per-project venv (acceptance suite in §9.1);
+- create a new Python project from a template and write code with correct auto-indentation;
 - clone via SSH and HTTPS and run everyday Git, including resolving a conflict;
 - authenticate without exposing keys (none in logs, WebView or plaintext files);
 - on a rooted phone, opt into root mode, run a root session and stop it cleanly; on an unrooted phone, never see a root prompt;
@@ -632,7 +697,7 @@ A user can, on D1 and D2:
 - close and reopen without corrupting state;
 - update to a newer signed release from inside the app.
 
-Node.js, Java, PHP and preview are out of 0.1.
+Node.js, Java, PHP and preview are out of 0.1. They are added later as language providers (D-017, Task 30), only after Python meets §9.1.
 
 ---
 
@@ -711,7 +776,7 @@ Every v8 item is either covered by a v9 task, already done, or explicitly deferr
 | Hardening: crash reporting (local) | Tasks 8, 27 (D-013) |
 | Hardening: onboarding | Task 27 |
 | Hardening: self-update, release key, signed APK, SBOM, pinned actions | Tasks 2, 28 |
-| Phase 5 Node.js, Phase 6 Java, Phase 7 PHP | **Deferred** (after 0.1) |
+| Phase 5 Node.js, Phase 6 Java, Phase 7 PHP | **Deferred** (after 0.1; added as language providers, D-017) |
 | §8 local web preview | **Deferred** (post-Node) |
 | Degraded WebView mode | **Retained as policy**, not built unless a device needs it |
 | Termux GPL terminal view | **Deferred** (only if the app goes GPL) |

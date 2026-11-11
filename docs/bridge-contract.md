@@ -150,7 +150,10 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `runtime.catalog` | `{}` → `[{ id, version, size, installed, healthy }]` | planned (Task 25) | Manifest-verified |
 | `runtime.install` | `{ id }` → event stream `runtime.progress`, then `{}` | planned (Task 25) | Resumable; `E_DISK_FULL`, `E_OFFLINE` |
 | `runtime.uninstall` / `runtime.repair` | `{ id }` → `{}` | planned (Task 25) | |
+| `language.list` | `{}` → `[{ id, name, extensions[], runtimeId, hasRepl, template }]` | planned (Task 30) | Language providers (D-017); Python is the first |
 | `trust.check` / `trust.grant` | `{ project, action }` → `{ trusted }` | planned (Task 26) | Scripts, pip, venv, Git hooks |
+
+> **Runtime prototype codes.** The Python installer prototype (commit `1a279a2`) emits `E_BAD_MANIFEST`, `E_INTEGRITY` and `E_HEALTH_CHECK`. They are not in the table above yet. Task 25 decides whether to add `E_INTEGRITY` and `E_HEALTH_CHECK` to the `ErrorCode` enum (and the catalog) or map them onto existing codes. `runtime.install` must reply within 10 s and then stream `runtime.progress` events (see Timeouts).
 
 ## Events
 
