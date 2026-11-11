@@ -354,7 +354,7 @@ class HarnessActivity : Activity() {
         }
         runCatching { probe.delete() }
 
-        val canList = entries > 0
+        val canList = entries >= 0
         val canWrite = wrote && roundTrip == "leocode-shared-storage-ok"
         return "  root=${root.absolutePath} entries=$entries\n" +
             "  read=$readGranted write=$writeGranted writeTest=$wrote\n" +
