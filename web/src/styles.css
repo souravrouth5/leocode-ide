@@ -1467,6 +1467,12 @@ ul {
   border: 1px solid rgba(111, 157, 255, 0.28);
 }
 
+.status-badge.error {
+  background: rgba(255, 176, 32, 0.14);
+  color: #d98e00;
+  border: 1px solid rgba(255, 176, 32, 0.3);
+}
+
 .runtime-path {
   font-size: 11px;
   color: var(--muted);
@@ -1673,6 +1679,35 @@ ul {
   border-radius: 8px;
   font-size: 12.5px;
   color: var(--text);
+  line-height: 1.45;
+}
+
+.install-notice.warning {
+  background: rgba(255, 176, 32, 0.1);
+  border-color: rgba(255, 176, 32, 0.35);
+}
+
+.install-notice strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.install-notice p {
+  margin: 0;
+}
+
+.probe-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 176, 32, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.1);
+  color: var(--text);
+  font-size: 12.5px;
   line-height: 1.45;
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import type { AppInfo, Bridge } from "../bridge"
+import { BridgeError, type AppInfo, type Bridge } from "../bridge"
 import { CheckIcon, CpuIcon, RefreshIcon, TerminalIcon, XIcon } from "./Icons"
 
 interface Props {
@@ -130,10 +130,18 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
   const [lastProbed, setLastProbed] = useState<Date | null>(null)
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeCardData | null>(null)
   const [installMsg, setInstallMsg] = useState<string | null>(null)
+  const [probeError, setProbeError] = useState<string | null>(null)
+
+  const closeModal = () => {
+    setSelectedRuntime(null)
+    setInstallMsg(null)
+  }
 
   const probeAll = useCallback(async () => {
     setProbing(true)
+    setProbeError(null)
     const updated = [...DEFAULT_RUNTIMES]
+    let failed = 0
 
     // Probe environment variables
     try {
@@ -202,14 +210,27 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
           item.status = "missing"
           item.version = undefined
         }
-      } catch {
-        item.status = "missing"
+      } catch (err) {
+        // A missing binary makes ProcessBuilder.start() fail with E_IO. Any other
+        // error is the bridge itself failing, which must not look like "not installed".
+        if (err instanceof BridgeError && (err.code === "E_IO" || err.code === "E_NOT_FOUND")) {
+          item.status = "missing"
+        } else {
+          item.status = "error"
+          failed += 1
+        }
+        item.version = undefined
       }
       updated[i] = item
     }
 
     setRuntimes(updated)
     setLastProbed(new Date())
+    setProbeError(
+      failed > 0
+        ? `Couldn't check ${failed} runtime${failed === 1 ? "" : "s"}. The bridge did not answer; the list may be incomplete.`
+        : null
+    )
     setProbing(false)
   }, [bridge])
 
@@ -221,11 +242,11 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
     setSelectedRuntime(rt)
     if (rt.id === "python") {
       setInstallMsg(
-        "CPython 3.11 bundle manifest loaded. Run 'scripts/build-python.sh' or use terminal to install into usr/."
+        "The CPython 3.11 package and the runtime installer are not included in this build yet. Nothing was downloaded or changed on your device. You can use the Android system shell and its built-in applets now."
       )
     } else {
       setInstallMsg(
-        `${rt.name} packaging is planned for ${rt.category}. Use Terminal for current system tools.`
+        `${rt.name} is not bundled with this build yet. The runtime installer arrives in a future update; nothing was downloaded or changed on your device. You can use the Android system shell now.`
       )
     }
   }
@@ -260,6 +281,15 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
         </div>
       )}
 
+      {probeError && (
+        <div className="probe-error" role="alert">
+          <span>{probeError}</span>
+          <button className="btn ghost small" onClick={() => void probeAll()} disabled={probing}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Runtimes Grid */}
       <section className="runtime-cards">
         {runtimes.map((rt) => {
@@ -274,7 +304,13 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
                 <span
                   className={
                     "status-badge " +
-                    (isReady ? "ready" : rt.status === "probing" ? "probing" : "missing")
+                    (isReady
+                      ? "ready"
+                      : rt.status === "probing"
+                        ? "probing"
+                        : rt.status === "error"
+                          ? "error"
+                          : "missing")
                   }
                 >
                   {isReady ? (
@@ -284,6 +320,8 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
                     </>
                   ) : rt.status === "probing" ? (
                     "Checking…"
+                  ) : rt.status === "error" ? (
+                    "Check failed"
                   ) : (
                     <>
                       <XIcon size={13} />
@@ -320,13 +358,17 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
                   <button
                     className="btn primary small"
                     onClick={() => triggerInstall(rt)}
+                    title="Runtime installation is not available in this build yet"
                   >
-                    <span>Install / Setup</span>
+                    <span>Setup info</span>
                   </button>
                 )}
                 <button
                   className="btn ghost small"
-                  onClick={() => setSelectedRuntime(rt)}
+                  onClick={() => {
+                    setInstallMsg(null)
+                    setSelectedRuntime(rt)
+                  }}
                 >
                   Details
                 </button>
@@ -376,7 +418,7 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
 
       {/* Runtime Detail / Setup Modal Dialog */}
       {selectedRuntime && (
-        <div className="modal-backdrop" onClick={() => setSelectedRuntime(null)}>
+        <div className="modal-backdrop" onClick={closeModal}>
           <div
             className="modal-card"
             role="dialog"
@@ -387,7 +429,7 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
               <h3 className="modal-title">{selectedRuntime.name} Details</h3>
               <button
                 className="icon-btn small"
-                onClick={() => setSelectedRuntime(null)}
+                onClick={closeModal}
                 aria-label="Close"
               >
                 <XIcon size={16} />
@@ -423,30 +465,25 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
               )}
 
               {installMsg && (
-                <div className="install-notice">
-                  {installMsg}
+                <div className="install-notice warning" role="alert">
+                  <strong>Installation unavailable</strong>
+                  <p>{installMsg}</p>
                 </div>
               )}
             </div>
             <div className="modal-actions">
-              <button
-                className="btn ghost"
-                onClick={() => {
-                  setSelectedRuntime(null)
-                  setInstallMsg(null)
-                }}
-              >
+              <button className="btn ghost" onClick={closeModal}>
                 Close
               </button>
-              {onOpenTerminal && (
+              {installMsg && onOpenTerminal && (
                 <button
                   className="btn primary"
                   onClick={() => {
-                    setSelectedRuntime(null)
+                    closeModal()
                     onOpenTerminal()
                   }}
                 >
-                  Open Terminal
+                  Open system shell
                 </button>
               )}
             </div>
