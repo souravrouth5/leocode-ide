@@ -5,6 +5,8 @@ import {
   type FileEntry,
   type ProcessEvent,
   type RunHandle,
+  type RuntimeInstallHandle,
+  type RuntimeInstallProgress,
   type SafDocument,
   type StorageInfo,
   type TerminalHandle,
@@ -246,6 +248,34 @@ export class AndroidBridge implements Bridge {
         this.streams.delete(id)
         void this.send("term.close", { sessionId }).result.catch(() => {})
       }
+    }
+  }
+
+  // --------------------------------------------------------------- runtimes
+
+  async installRuntime(
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart?: (handle: RuntimeInstallHandle) => void
+  ): Promise<void> {
+    const { id: requestId, result } = this.send<{ installed: boolean }>(
+      "runtime.install",
+      { id },
+      (event, payload) => {
+        if (event === "runtime.progress") onProgress(payload as RuntimeInstallProgress)
+      }
+    )
+
+    onStart?.({
+      cancel: () => {
+        void this.send("runtime.cancel", { id }).result.catch(() => {})
+      }
+    })
+
+    try {
+      await result
+    } finally {
+      this.streams.delete(requestId)
     }
   }
 

@@ -4,6 +4,8 @@ import type {
   FileEntry,
   ProcessEvent,
   RunHandle,
+  RuntimeInstallHandle,
+  RuntimeInstallProgress,
   SafDocument,
   StorageInfo,
   TerminalHandle,
@@ -11,8 +13,7 @@ import type {
   ThemeMode,
   ThemeState
 } from "./types"
-import { isThemeMode } from "./types"
-
+import { BridgeError, isThemeMode } from "./types"
 interface Node {
   kind: "file" | "dir"
   content: string
@@ -252,6 +253,39 @@ export class MockBridge implements Bridge {
 
     emit(`${cmd}: command not found (mock bridge)\n`, "stderr")
     return 127
+  }
+
+  // --------------------------------------------------------------- runtimes
+
+  async installRuntime(
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart?: (handle: RuntimeInstallHandle) => void
+  ): Promise<void> {
+    if (id !== "python") {
+      throw new BridgeError("E_UNSUPPORTED", `${id} has no package in the mock bridge`)
+    }
+
+    let cancelled = false
+    onStart?.({ cancel: () => { cancelled = true } })
+
+    // Mirror the real phase sequence so the UI can be exercised in a browser.
+    const steps: RuntimeInstallProgress[] = [
+      { phase: "preparing", bytes: 0, total: 0, message: "Preparing python 3.14.10" },
+      { phase: "download", bytes: 0, total: 23_027_305, message: "Downloading 0.0 MB of 22.0 MB" },
+      { phase: "download", bytes: 23_027_305, total: 23_027_305, message: "Downloaded 22.0 MB" },
+      { phase: "verify", bytes: 0, total: 23_027_305, message: "Verifying SHA-256" },
+      { phase: "extract", bytes: 0, total: 0, message: "Extracting package" },
+      { phase: "configure", bytes: 0, total: 0, message: "Bootstrapping pip" },
+      { phase: "health", bytes: 0, total: 0, message: "Health check passed: 3.14.10" },
+      { phase: "done", bytes: 0, total: 0, message: "python 3.14.10 installed" }
+    ]
+
+    for (const step of steps) {
+      if (cancelled) throw new BridgeError("E_CANCELLED", "install cancelled")
+      onProgress(step)
+      await new Promise((resolve) => setTimeout(resolve, 220))
+    }
   }
 
   private themeState(): ThemeState {

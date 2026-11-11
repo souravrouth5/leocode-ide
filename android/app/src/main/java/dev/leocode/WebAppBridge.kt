@@ -15,6 +15,8 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import dev.leocode.core.ProcessHost
 import dev.leocode.core.PtySession
+import dev.leocode.core.RuntimeInstallException
+import dev.leocode.core.RuntimeInstaller
 import dev.leocode.core.Workspace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -36,6 +38,7 @@ import java.io.InputStreamReader
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -133,6 +136,7 @@ class WebAppBridge(
 
     private val sessions = ConcurrentHashMap<String, PtySession>()
     private val jobs = ConcurrentHashMap<String, Process>()
+    private val runtimeJobs = ConcurrentHashMap<String, AtomicBoolean>()
 
     // ------------------------------------------------------------ WebMessageListener
 
@@ -200,6 +204,11 @@ class WebAppBridge(
                 }
                 "proc.run" -> runProcess(payload, proxy, id)
                 "proc.cancel" -> cancelProcess(payload)
+                "runtime.install" -> {
+                    installRuntime(payload, proxy, id)
+                    return
+                }
+                "runtime.cancel" -> cancelRuntime(payload)
                 "term.open" -> openTerminal(payload, proxy, id)
                 "term.write" -> writeTerminal(payload)
                 "term.resize" -> resizeTerminal(payload)
@@ -422,6 +431,56 @@ class WebAppBridge(
         runCatching { process.destroy() }
         runCatching { process.destroyForcibly() }
         return buildJsonObject { put("cancelled", true) }
+    }
+
+    private fun installRuntime(payload: JsonObject, proxy: JavaScriptReplyProxy, id: String?) {
+        val runtimeId = payload.str("id")
+            ?: throw BridgeError("E_BAD_ENVELOPE", "id is required")
+        val cancelled = AtomicBoolean(false)
+        if (runtimeJobs.putIfAbsent(runtimeId, cancelled) != null) {
+            throw BridgeError("E_BUSY", "$runtimeId is already being installed")
+        }
+
+        try {
+            RuntimeInstaller(activity.applicationContext, workspace).install(
+                runtimeId,
+                onProgress = { progress ->
+                    sendEvent(
+                        proxy,
+                        id,
+                        "runtime.progress",
+                        buildJsonObject {
+                            put("phase", progress.phase)
+                            put("bytes", progress.bytes)
+                            put("total", progress.total)
+                            put("message", progress.message)
+                        }
+                    )
+                },
+                isCancelled = { cancelled.get() }
+            )
+            sendOk(
+                proxy,
+                id,
+                buildJsonObject {
+                    put("id", runtimeId)
+                    put("installed", true)
+                }
+            )
+        } catch (e: RuntimeInstallException) {
+            Log.w(TAG, "runtime.install($runtimeId) failed: ${e.code}: ${e.message}")
+            sendError(proxy, id, e.code, e.message)
+        } finally {
+            runtimeJobs.remove(runtimeId)
+        }
+    }
+
+    private fun cancelRuntime(payload: JsonObject): JsonObject {
+        val runtimeId = payload.str("id")
+            ?: throw BridgeError("E_BAD_ENVELOPE", "id is required")
+        val flag = runtimeJobs[runtimeId]
+        flag?.set(true)
+        return buildJsonObject { put("cancelling", flag != null) }
     }
 
     private fun openTerminal(payload: JsonObject, proxy: JavaScriptReplyProxy, id: String?): JsonObject {

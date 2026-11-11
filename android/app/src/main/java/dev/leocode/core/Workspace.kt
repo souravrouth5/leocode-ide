@@ -48,6 +48,11 @@ class Workspace(rootDir: File) {
         "TMP" to tmp.absolutePath,
         "PATH" to listOf(File(usr, "bin").absolutePath, "/system/bin", "/system/xbin")
             .joinToString(":"),
+        // Installed runtimes (D-006): the launcher dlopen()s libpython from usr/lib
+        // and OpenSSL reads the bundled CA file. Harmless when usr/ is empty.
+        "PYTHONHOME" to usr.absolutePath,
+        "LD_LIBRARY_PATH" to File(usr, "lib").absolutePath,
+        "SSL_CERT_FILE" to File(usr, "etc/ca-certificates.pem").absolutePath,
         "TERM" to "xterm-256color",
         "LANG" to "en_US.UTF-8",
         "PWD" to defaultWorkspace.absolutePath

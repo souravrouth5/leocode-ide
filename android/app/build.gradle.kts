@@ -104,5 +104,8 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
+    // Safe tar.gz extraction for runtime packages (SafeExtractor, Task 25).
+    implementation("org.apache.commons:commons-compress:1.27.1")
+
     testImplementation("junit:junit:4.13.2")
 }

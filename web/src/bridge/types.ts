@@ -74,6 +74,29 @@ export interface SafDocument {
   size: number
 }
 
+export type RuntimeInstallPhase =
+  | "preparing"
+  | "download"
+  | "verify"
+  | "extract"
+  | "configure"
+  | "health"
+  | "done"
+
+export interface RuntimeInstallProgress {
+  phase: RuntimeInstallPhase | string
+  /** Bytes done in the current phase. */
+  bytes: number
+  /** Expected bytes, or 0 when the phase has no fixed size. */
+  total: number
+  /** Human-readable detail suitable for direct display. */
+  message: string
+}
+
+export interface RuntimeInstallHandle {
+  cancel: () => void
+}
+
 /**
  * v1 bridge surface. Only methods listed here may cross the WebView boundary.
  * The Android implementation mirrors docs/bridge-contract.md; keep them in sync.
@@ -98,6 +121,17 @@ export interface Bridge {
   onThemeChanged(listener: (state: ThemeState) => void): () => void
   /** Real PTY. Returns null when the bridge has no terminal (browser mock). */
   openTerminal(options: TerminalOptions): Promise<TerminalHandle | null>
+  /**
+   * Download and install a runtime package. Progress arrives as the install
+   * advances; the returned promise resolves once the runtime is healthy and
+   * active. Rejects with a BridgeError code (E_OFFLINE, E_DISK_FULL, ...).
+   * Absent on bridges that cannot install (browser mock only).
+   */
+  installRuntime?(
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart?: (handle: RuntimeInstallHandle) => void
+  ): Promise<void>
   /** Device Storage & SAF capabilities */
   getStorageInfo?(): Promise<StorageInfo>
   requestStoragePermission?(): Promise<boolean>

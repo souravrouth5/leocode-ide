@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { BridgeError, type AppInfo, type Bridge } from "../bridge"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { BridgeError, type AppInfo, type Bridge, type RuntimeInstallProgress } from "../bridge"
 import { CheckIcon, CpuIcon, RefreshIcon, TerminalIcon, XIcon } from "./Icons"
 
 interface Props {
@@ -42,12 +42,12 @@ const DEFAULT_RUNTIMES: RuntimeCardData[] = [
     category: "Phase 0 / Phase 4",
     status: "probing",
     path: "/data/data/dev.leocode/files/usr/bin/python3",
-    description: "CPython 3.11 runtime bundled for Android Bionic arm64-v8a.",
+    description: "CPython 3.14.10 from python.org, built for Android arm64-v8a.",
     guidance:
-      "Self-contained userspace runtime bundled in usr/bin. Includes standard library, pip, and SQLite3. Tested with W^X execution on Android 9/11.",
+      "Installed on demand. Includes the full standard library, pip, SQLite, zlib and OpenSSL with a bundled CA file. Native PyPI wheels that target manylinux/musllinux will not load on Android; pure-Python packages work.",
     envVars: {
       PYTHONHOME: "/data/data/dev.leocode/files/usr",
-      PYTHONPATH: "/data/data/dev.leocode/files/usr/lib/python3.11",
+      LD_LIBRARY_PATH: "/data/data/dev.leocode/files/usr/lib",
       SSL_CERT_FILE: "/data/data/dev.leocode/files/usr/etc/ca-certificates.pem"
     },
     checkCommands: {
@@ -117,6 +117,37 @@ const DEFAULT_RUNTIMES: RuntimeCardData[] = [
   }
 ]
 
+const PHASE_LABELS: Record<string, string> = {
+  preparing: "Preparing",
+  download: "Downloading",
+  verify: "Verifying",
+  extract: "Extracting",
+  configure: "Configuring",
+  health: "Health check",
+  done: "Done"
+}
+
+const INSTALL_DETAILS: Record<string, { version: string; download: string; disk: string }> = {
+  python: { version: "3.14.10", download: "22 MB", disk: "~45 MB" }
+}
+
+function installErrorHint(code: string, message: string): string {
+  switch (code) {
+    case "E_OFFLINE":
+      return "The package could not be downloaded. Check the connection and retry; an interrupted download resumes where it stopped."
+    case "E_DISK_FULL":
+      return `${message} Free up space, then retry.`
+    case "E_INTEGRITY":
+      return "The downloaded package did not match its pinned checksum and was discarded. Retry the install."
+    case "E_HEALTH_CHECK":
+      return `${message} The runtime was not activated; retry the install.`
+    case "E_TIMEOUT":
+      return `${message} Retry when the device is idle.`
+    default:
+      return message
+  }
+}
+
 export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
   const [runtimes, setRuntimes] = useState<RuntimeCardData[]>(DEFAULT_RUNTIMES)
   const [env, setEnv] = useState<EnvState>({
@@ -129,12 +160,17 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
   const [probing, setProbing] = useState(false)
   const [lastProbed, setLastProbed] = useState<Date | null>(null)
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeCardData | null>(null)
-  const [installMsg, setInstallMsg] = useState<string | null>(null)
   const [probeError, setProbeError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<RuntimeInstallProgress | null>(null)
+  const [installing, setInstalling] = useState(false)
+  const [installError, setInstallError] = useState<{ code: string; message: string } | null>(null)
+  const cancelRef = useRef<(() => void) | null>(null)
 
   const closeModal = () => {
+    if (installing) return
     setSelectedRuntime(null)
-    setInstallMsg(null)
+    setProgress(null)
+    setInstallError(null)
   }
 
   const probeAll = useCallback(async () => {
@@ -240,16 +276,56 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
 
   const triggerInstall = (rt: RuntimeCardData) => {
     setSelectedRuntime(rt)
-    if (rt.id === "python") {
-      setInstallMsg(
-        "The CPython 3.11 package and the runtime installer are not included in this build yet. Nothing was downloaded or changed on your device. You can use the Android system shell and its built-in applets now."
+    setProgress(null)
+    setInstallError(null)
+  }
+
+  const startInstall = async () => {
+    const rt = selectedRuntime
+    if (!rt || !bridge.installRuntime) return
+
+    setInstalling(true)
+    setInstallError(null)
+    setProgress({ phase: "preparing", bytes: 0, total: 0, message: "Starting…" })
+
+    try {
+      await bridge.installRuntime(
+        rt.id,
+        (next) => setProgress(next),
+        (handle) => {
+          cancelRef.current = handle.cancel
+        }
       )
-    } else {
-      setInstallMsg(
-        `${rt.name} is not bundled with this build yet. The runtime installer arrives in a future update; nothing was downloaded or changed on your device. You can use the Android system shell now.`
-      )
+      setProgress({ phase: "done", bytes: 0, total: 0, message: `${rt.name} installed` })
+      await probeAll()
+    } catch (err) {
+      const code = err instanceof BridgeError ? err.code : "E_INTERNAL"
+      if (code === "E_CANCELLED") {
+        setProgress(null)
+      } else {
+        setInstallError({
+          code,
+          message: err instanceof Error ? err.message : "installation failed"
+        })
+        setProgress(null)
+      }
+    } finally {
+      setInstalling(false)
+      cancelRef.current = null
     }
   }
+
+  const cancelInstall = () => {
+    cancelRef.current?.()
+  }
+
+  const isPython = selectedRuntime?.id === "python"
+  const details = selectedRuntime ? INSTALL_DETAILS[selectedRuntime.id] : undefined
+  const installedNow = progress?.phase === "done"
+  const percent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.max(0, Math.round((progress.bytes / progress.total) * 100)))
+      : null
 
   return (
     <div className="runtime-manager">
@@ -356,17 +432,29 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
                   </button>
                 ) : (
                   <button
-                    className="btn primary small"
+                    className={"btn primary small" + (installing && selectedRuntime?.id === rt.id ? " loading" : "")}
                     onClick={() => triggerInstall(rt)}
-                    title="Runtime installation is not available in this build yet"
+                    disabled={installing}
+                    title={
+                      rt.id === "python"
+                        ? "Download and install Python 3.14.10"
+                        : "See what this runtime needs"
+                    }
                   >
-                    <span>Setup info</span>
+                    <span>
+                      {installing && selectedRuntime?.id === rt.id
+                        ? "Installing…"
+                        : rt.id === "python"
+                          ? "Install"
+                          : "Setup info"}
+                    </span>
                   </button>
                 )}
                 <button
                   className="btn ghost small"
                   onClick={() => {
-                    setInstallMsg(null)
+                    setProgress(null)
+                    setInstallError(null)
                     setSelectedRuntime(rt)
                   }}
                 >
@@ -438,8 +526,10 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
             <div className="modal-body">
               <div className="modal-field">
                 <span className="field-label">Status</span>
-                <span className={"status-badge " + (selectedRuntime.status === "ready" || selectedRuntime.status === "installed" ? "ready" : "missing")}>
-                  {selectedRuntime.status.toUpperCase()}
+                <span className={"status-badge " + (installedNow || selectedRuntime.status === "ready" || selectedRuntime.status === "installed" ? "ready" : "missing")}>
+                  {installedNow
+                    ? "INSTALLED"
+                    : selectedRuntime.status.toUpperCase()}
                 </span>
               </div>
               <div className="modal-field">
@@ -464,18 +554,113 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
                 </div>
               )}
 
-              {installMsg && (
+              {installedNow && (
+                <div className="install-notice success" role="status">
+                  <strong>Installed</strong>
+                  <p>
+                    {details
+                      ? `Python ${details.version} is ready.`
+                      : `${selectedRuntime.name} is ready.`}{" "}
+                    {isPython && (
+                      <>
+                        Run <code>python3 --version</code>, <code>pip --version</code>, or open the
+                        terminal to use it.
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {installError && (
+                <div className="install-notice warning" role="alert">
+                  <strong>Install failed ({installError.code})</strong>
+                  <p>{installErrorHint(installError.code, installError.message)}</p>
+                </div>
+              )}
+
+              {progress && !installedNow && (
+                <div className="install-progress" role="status" aria-live="polite">
+                  <div className="install-progress-top">
+                    <strong>{PHASE_LABELS[progress.phase] ?? progress.phase}</strong>
+                    {percent !== null && <span>{percent}%</span>}
+                  </div>
+                  <div className={"progress-track" + (percent === null ? " indeterminate" : "")}>
+                    <div
+                      className="progress-fill"
+                      style={percent !== null ? { width: `${percent}%` } : undefined}
+                    />
+                  </div>
+                  <p>{progress.message}</p>
+                </div>
+              )}
+
+              {!progress && !installError && isPython && details && (
+                <div className="install-info">
+                  <div className="install-facts">
+                    <span>
+                      Version <strong>{details.version}</strong>
+                    </span>
+                    <span>
+                      Download <strong>{details.download}</strong>
+                    </span>
+                    <span>
+                      On disk <strong>{details.disk}</strong>
+                    </span>
+                  </div>
+                  <p className="install-note">
+                    Downloads from python.org and verifies SHA-256 before installing into app
+                    storage. An interrupted download resumes. Pure-Python packages and Android
+                    wheels work; manylinux/musllinux wheels do not.
+                  </p>
+                  {!bridge.installRuntime && (
+                    <p className="install-note">
+                      Installation requires the Android app. This browser preview cannot install
+                      runtimes.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {!progress && !installError && !isPython && (
                 <div className="install-notice warning" role="alert">
                   <strong>Installation unavailable</strong>
-                  <p>{installMsg}</p>
+                  <p>
+                    {selectedRuntime.name} has no package or installer in this build. Nothing was
+                    downloaded or changed on your device.
+                  </p>
                 </div>
               )}
             </div>
             <div className="modal-actions">
-              <button className="btn ghost" onClick={closeModal}>
+              <button className="btn ghost" onClick={closeModal} disabled={installing}>
                 Close
               </button>
-              {installMsg && onOpenTerminal && (
+              {installing && progress && !installedNow && (
+                <button className="btn ghost" onClick={cancelInstall}>
+                  Cancel install
+                </button>
+              )}
+              {installedNow && onOpenTerminal && (
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    closeModal()
+                    onOpenTerminal()
+                  }}
+                >
+                  Open shell
+                </button>
+              )}
+              {!installedNow && !progress && isPython && (
+                <button
+                  className="btn primary"
+                  onClick={() => void startInstall()}
+                  disabled={!bridge.installRuntime}
+                >
+                  {installError ? "Retry install" : `Install Python ${details?.version ?? "3"}`}
+                </button>
+              )}
+              {!installedNow && !progress && !isPython && onOpenTerminal && (
                 <button
                   className="btn primary"
                   onClick={() => {
