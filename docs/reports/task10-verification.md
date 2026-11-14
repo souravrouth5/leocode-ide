@@ -35,7 +35,7 @@
 | `OrphanReaperTest` | **PASS** — SIGTERM, SIGKILL, recycled pid ignored, unreadable file removed |
 | `ProcessSupervisorTest` | **PASS** — pidfile written while running and removed on exit |
 | `BridgeTypesCoverageTest` | **PASS** — new DTOs are in the generator seeds |
-| `testDebugUnitTest` | **PASS** — 94 tests, 0 failures |
+| `testDebugUnitTest` | **PASS** — 108 tests, 0 failures at the Task 10 commit (194 at HEAD after Tasks 11–13 and the review fixes) |
 | `lintDebug` | **PASS** (blocking) |
 | `assembleDebug` | **PASS** — APK includes the synced web bundle |
 | 16 KB check (`scripts/check-elf-alignment.sh`) | **PASS** — 2 ELF files, LOAD `p_align 0x4000` |
