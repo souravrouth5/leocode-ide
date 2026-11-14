@@ -1,6 +1,7 @@
 package dev.leocode.workspace
 
 import java.io.File
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -78,6 +79,61 @@ class SearchEngineTest {
     }
 
     @Test
+    fun `exactly the cap is not truncated`() {
+        file("many.txt", "needle\n".repeat(5))
+
+        val result = engine.search(root, "needle", maxResults = 5)
+
+        assertEquals(5, result.count)
+        assertFalse(result.truncated)
+    }
+
+    @Test
+    fun `zero means the default cap`() {
+        file("many.txt", "needle\n".repeat(SearchEngine.DEFAULT_MAX_RESULTS + 1))
+
+        val result = engine.search(root, "needle", maxResults = 0)
+
+        assertEquals(SearchEngine.DEFAULT_MAX_RESULTS, result.count)
+        assertTrue(result.truncated)
+    }
+
+    @Test
+    fun `columns are computed on the original line even when case folding changes length`() {
+        file("dot.txt", "İ file\n")
+        val default = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.ROOT)
+            val matches = mutableListOf<SearchMatch>()
+
+            engine.search(root, "file") { matches.add(it) }
+
+            // "İ" lowercases to two codepoints; the column must still be 3.
+            assertEquals(SearchMatch("dot.txt", 1, 3, "İ file"), matches.single())
+        } finally {
+            Locale.setDefault(default)
+        }
+    }
+
+    @Test
+    fun `matching is locale independent and columns refer to the original line`() {
+        file("tr.txt", "FILE\nİ file\n")
+        val default = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+            val matches = mutableListOf<SearchMatch>()
+
+            val result = engine.search(root, "file") { matches.add(it) }
+
+            assertEquals(2, result.count)
+            assertEquals(SearchMatch("tr.txt", 1, 1, "FILE"), matches[0])
+            assertEquals(SearchMatch("tr.txt", 2, 3, "İ file"), matches[1])
+        } finally {
+            Locale.setDefault(default)
+        }
+    }
+
+    @Test
     fun `small files are capped and long previews trimmed`() {
         val long = "needle " + "x".repeat(300)
         file("a.txt", long)
@@ -91,7 +147,7 @@ class SearchEngineTest {
     }
 
     @Test
-    fun `cancellation stops the walk`() {
+    fun `cancellation stops the walk and is not truncation`() {
         repeat(50) { file("f$it.txt", "needle\n".repeat(10)) }
         var seen = 0
         val result = engine.search(
@@ -101,6 +157,7 @@ class SearchEngineTest {
         ) { seen += 1 }
 
         assertTrue(result.count <= 5)
+        assertFalse(result.truncated)
     }
 
     @Test

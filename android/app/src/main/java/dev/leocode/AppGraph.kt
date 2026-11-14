@@ -121,7 +121,7 @@ class AppGraph(private val app: Application) {
     fun fsHandler(): FsHandler =
         FsHandler(workspace, jail, trash, json) { workspaceStore.activeDirectory() }
 
-    fun workspaceHandler(): WorkspaceHandler = WorkspaceHandler(workspaceStore, json)
+    fun workspaceHandler(): WorkspaceHandler = WorkspaceHandler(workspaceStore, json, drafts)
 
     fun draftHandler(): DraftHandler = DraftHandler(drafts, json)
 

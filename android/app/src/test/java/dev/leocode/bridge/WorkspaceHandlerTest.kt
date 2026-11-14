@@ -2,6 +2,7 @@ package dev.leocode.bridge
 
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
+import dev.leocode.workspace.Drafts
 import dev.leocode.workspace.WorkspaceStore
 import java.io.File
 import kotlinx.serialization.json.JsonArray
@@ -11,6 +12,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -82,6 +84,28 @@ class WorkspaceHandlerTest {
 
         assertEquals("true", reply["ok"]!!.jsonPrimitive.content)
         assertTrue(store.list().none { it.id == id })
+    }
+
+    @Test
+    fun `deleting a workspace purges its drafts`() {
+        var current = WorkspaceStore.DEFAULT_ID
+        val draftsRoot = createTempDir("workspace-handler-drafts")
+        val drafts = Drafts(draftsRoot, workspaceId = { current })
+        val withDrafts = WorkspaceHandler(store, BridgeJson.value, drafts)
+        val id = (call(
+            "workspace.create",
+            buildJsonObject { put("name", "Draft project") }
+        ).jsonObject)["id"]!!.jsonPrimitive.content
+        current = id
+        drafts.save("src/main.py", "print('unsaved')")
+        val draftDir = File(File(draftsRoot, "drafts"), id)
+        assertTrue(draftDir.isDirectory)
+
+        withDrafts.handle("workspace.delete", buildJsonObject { put("id", id) })
+
+        assertFalse("workspace drafts were not purged", draftDir.exists())
+        assertFalse(store.list().any { it.id == id })
+        assertEquals(0, drafts.list().size)
     }
 
     @Test

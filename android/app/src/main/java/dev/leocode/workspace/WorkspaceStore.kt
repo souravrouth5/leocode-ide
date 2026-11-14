@@ -4,6 +4,8 @@ import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -61,20 +63,23 @@ class WorkspaceStore(
     @Volatile
     private var activeId: String = DEFAULT_ID
 
-    /** Loads the index, creates the default workspace and repairs missing dirs. */
+    /**
+     * Loads the index, creates the default workspace, rewrites missing dirs and
+     * adopts directories that exist on disk but not in the index.
+     *
+     * A corrupt index is never overwritten: it is moved aside as
+     * `workspaces.json.corrupt-<epochMillis>` and the directories under the
+     * workspaces root are registered again, so a bad write cannot hide a user's
+     * projects.
+     */
     fun ensure() {
         synchronized(lock) {
             val loaded = readIndex()
-            index = if (loaded.workspaces.isEmpty()) {
-                WorkspaceIndex(
-                    active = DEFAULT_ID,
-                    workspaces = listOf(
-                        WorkspaceRecord(DEFAULT_ID, DEFAULT_NAME, now(), now())
-                    )
-                )
-            } else {
-                loaded
+            index = loaded ?: run {
+                quarantineCorruptIndex()
+                WorkspaceIndex()
             }
+            index = index.copy(workspaces = adoptOrphanDirectories(index.workspaces))
             if (index.workspaces.none { it.id == DEFAULT_ID }) {
                 index = index.copy(
                     workspaces = index.workspaces + WorkspaceRecord(
@@ -127,6 +132,8 @@ class WorkspaceStore(
             }
         }
         val allocated = id ?: throw IllegalArgumentException("cannot allocate a workspace id")
+        val dir = directory(allocated)
+        val existed = dir.exists()
         ensureDirectory(allocated)
         val record = WorkspaceRecord(
             id = allocated,
@@ -134,13 +141,23 @@ class WorkspaceStore(
             createdAt = now(),
             lastOpened = now()
         )
+        val previous = index
         index = index.copy(workspaces = index.workspaces + record)
-        persist()
+        try {
+            persist()
+        } catch (e: Exception) {
+            // Roll back the record and the directory a failed persist would otherwise orphan.
+            index = previous
+            if (!existed) dir.delete()
+            throw e
+        }
         record
     }
 
     fun open(id: String): WorkspaceRecord = synchronized(lock) {
         val record = find(id) ?: throw NoSuchElementException("no such workspace")
+        val previousIndex = index
+        val previousActive = activeId
         val opened = record.copy(lastOpened = now())
         index = index.copy(
             active = opened.id,
@@ -148,7 +165,13 @@ class WorkspaceStore(
         )
         activeId = opened.id
         ensureDirectory(opened.id)
-        persist()
+        try {
+            persist()
+        } catch (e: Exception) {
+            index = previousIndex
+            activeId = previousActive
+            throw e
+        }
         opened
     }
 
@@ -221,15 +244,69 @@ class WorkspaceStore(
         return id
     }
 
-    private fun readIndex(): WorkspaceIndex {
-        if (!indexFile.isFile) return WorkspaceIndex()
+    /** Returns null when a present index file cannot be parsed; missing is an empty index. */
+    private fun readIndex(): WorkspaceIndex? {
+        if (!indexFile.exists()) return WorkspaceIndex()
         return try {
             json.decodeFromString(WorkspaceIndex.serializer(), indexFile.readText())
         } catch (_: SerializationException) {
-            WorkspaceIndex()
+            null
         } catch (_: IOException) {
-            WorkspaceIndex()
+            null
         }
+    }
+
+    /**
+     * Moves an unparseable index aside. Throws instead of falling back to an
+     * overwrite: losing the user's registry is worse than failing to start.
+     */
+    private fun quarantineCorruptIndex() {
+        if (!indexFile.exists()) return
+        val stamp = System.currentTimeMillis()
+        var target = File(indexFile.parentFile, "${indexFile.name}.corrupt-$stamp")
+        var attempt = 1
+        while (target.exists()) {
+            target = File(indexFile.parentFile, "${indexFile.name}.corrupt-$stamp-$attempt")
+            attempt += 1
+        }
+        if (!indexFile.renameTo(target)) {
+            throw IllegalStateException("cannot quarantine the corrupt workspace index")
+        }
+    }
+
+    /**
+     * Registers every real directory under [Workspace.workspacesRoot] whose name
+     * is a valid workspace id but which has no record yet. This recovers a
+     * quarantined index and adopts directories created outside the registry.
+     */
+    private fun adoptOrphanDirectories(
+        records: List<WorkspaceRecord>
+    ): List<WorkspaceRecord> {
+        val dirs = try {
+            workspace.workspacesRoot.listFiles()
+        } catch (_: SecurityException) {
+            null
+        } ?: return records
+        val known = records.mapTo(mutableSetOf()) { it.id }
+        val adopted = records.toMutableList()
+        for (dir in dirs.sortedBy { it.name }) {
+            // A symlink is not a workspace directory: following one would point
+            // the jail at a tree outside the app's private storage.
+            if (!Files.isDirectory(dir.toPath(), LinkOption.NOFOLLOW_LINKS)) continue
+            val id = try {
+                sanitizeId(dir.name)
+            } catch (_: IllegalArgumentException) {
+                continue
+            }
+            if (id != dir.name || !known.add(id)) continue
+            adopted += WorkspaceRecord(
+                id = id,
+                name = if (id == DEFAULT_ID) DEFAULT_NAME else dir.name,
+                createdAt = dir.lastModified(),
+                lastOpened = dir.lastModified()
+            )
+        }
+        return adopted
     }
 
     private fun persist() {

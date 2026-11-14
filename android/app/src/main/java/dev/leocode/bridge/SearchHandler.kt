@@ -7,16 +7,19 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /**
  * `fs.search` and `fs.search.cancel` (Task 16).
  *
- * Matches stream as `search.match` events while the request is running; the reply
- * arrives last with `{ count, truncated }`. Cancellation is a second bridge method
- * that flips the flag the engine polls, so an abandoned search stops walking the
- * tree instead of finishing and flooding the WebView.
+ * Matches stream as `search.matches` events while the request is running; the
+ * reply arrives last with `{ count, truncated }`. Events are batched (64 matches
+ * per event) because one WebView message per match floods the renderer on a
+ * broad search. Cancellation is a second bridge method that flips the flag the
+ * engine polls, so an abandoned search stops walking the tree instead of
+ * finishing and flooding the WebView.
  */
 class SearchHandler(
     private val engine: SearchEngine,
@@ -26,6 +29,7 @@ class SearchHandler(
 
     companion object {
         val METHODS = setOf("fs.search", "fs.search.cancel")
+        const val MATCH_BATCH_SIZE = 64
     }
 
     /** One flag per running search; `cancelled` is true only while it runs. */
@@ -54,6 +58,12 @@ class SearchHandler(
         if (active.putIfAbsent(searchId, flag) != null) {
             throw BridgeException(ErrorCode.E_BUSY, "a search with this id is already running")
         }
+        val batch = ArrayList<JsonElement>(MATCH_BATCH_SIZE)
+        fun flush() {
+            if (batch.isEmpty()) return
+            sink.event("search.matches", JsonArray(batch.toList()))
+            batch.clear()
+        }
         try {
             val result = engine.search(
                 root = root(),
@@ -63,20 +73,19 @@ class SearchHandler(
                 caseSensitive = request.caseSensitive,
                 isCancelled = { flag.get() },
                 onMatch = { match ->
-                    sink.event(
-                        "search.match",
-                        json.encodeToJsonElement(
-                            SearchMatch.serializer(),
-                            SearchMatch(
-                                path = match.path,
-                                line = match.line,
-                                col = match.col,
-                                preview = match.preview
-                            )
+                    batch += json.encodeToJsonElement(
+                        SearchMatch.serializer(),
+                        SearchMatch(
+                            path = match.path,
+                            line = match.line,
+                            col = match.col,
+                            preview = match.preview
                         )
                     )
+                    if (batch.size >= MATCH_BATCH_SIZE) flush()
                 }
             )
+            flush()
             return json.encodeToJsonElement(
                 SearchDone.serializer(),
                 SearchDone(result.count, result.truncated)

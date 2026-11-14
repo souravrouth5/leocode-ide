@@ -44,6 +44,7 @@ class SafHandlerTest {
         var exportedZip: ByteArray? = null
         var archiveToOpen: java.io.File? = null
         var openArchiveFailure: Throwable? = null
+        var openArchiveCalls = 0
 
         override fun openDocument(mime: String, onResult: (Result<SafDocument?>) -> Unit) {
             lastMime = mime
@@ -78,11 +79,12 @@ class SafHandlerTest {
         ) {
             exportName = name
             exportedZip = archive.readBytes()
-            onProgress(1, 1)
+            onProgress(1, 0)
             onResult(exportFailure?.let { Result.failure(it) } ?: Result.success("content://backup"))
         }
 
         override fun openArchive(onResult: (Result<java.io.File?>) -> Unit) {
+            openArchiveCalls += 1
             onResult(
                 openArchiveFailure?.let { Result.failure(it) } ?: Result.success(archiveToOpen)
             )
@@ -96,9 +98,11 @@ class SafHandlerTest {
 
     private class Recorder : StreamSink {
         val events = mutableListOf<String>()
+        val payloads = mutableListOf<Pair<String, kotlinx.serialization.json.JsonElement>>()
 
         override fun event(name: String, payload: kotlinx.serialization.json.JsonElement) {
             events += name
+            payloads += name to payload
         }
 
         override fun text(name: String, text: String) = Unit
@@ -321,6 +325,7 @@ class SafHandlerTest {
     fun `saf exportWorkspace zips the workspace and copies it out`() {
         val workspace = createTempDir("export-workspace")
         java.io.File(workspace, "main.py").writeText("print(1)")
+        java.io.File(workspace, "util.py").writeText("x = 1")
         val scratch = createTempDir("export-scratch")
         val port = FakePort()
         val handler = SafHandler(port, workspaceRoot = { workspace }, scratchRoot = { scratch })
@@ -332,10 +337,17 @@ class SafHandlerTest {
         assertTrue(port.exportedZip!!.isNotEmpty())
         assertTrue(sink.events.isNotEmpty())
         assertTrue(sink.events.all { it == "saf.progress" })
+        // The copy-out progress reports the archived file count, not 0 (PD-21).
+        val copyOut = sink.payloads
+            .filter { it.first == "saf.progress" }
+            .map { it.second.jsonObject }
+            .filter { it["bytes"]!!.jsonPrimitive.content.toLong() == 0L }
+        assertEquals(1, copyOut.size)
+        assertEquals(2, copyOut.single()["files"]!!.jsonPrimitive.content.toInt())
         val payload = ok(replies.single())
         assertEquals("backup.zip", payload["name"]!!.jsonPrimitive.content)
         assertEquals("content://backup", payload["uri"]!!.jsonPrimitive.content)
-        assertEquals(1, payload["files"]!!.jsonPrimitive.content.toInt())
+        assertEquals(2, payload["files"]!!.jsonPrimitive.content.toInt())
     }
 
     @Test
@@ -386,8 +398,9 @@ class SafHandlerTest {
         val zip = java.io.File(createTempDir("restore-zip"), "backup.zip")
         dev.leocode.workspace.ZipBackup().export(source, zip)
         val destination = createTempDir("restore-dest")
+        val scratch = java.io.File(createTempDir("restore-scratch-root"), "tmp")
         val port = FakePort().apply { archiveToOpen = zip }
-        val handler = SafHandler(port, workspaceRoot = { destination })
+        val handler = SafHandler(port, workspaceRoot = { destination }, scratchRoot = { scratch })
         val sink = Recorder()
 
         asyncCall(handler, "saf.restoreArchive", buildJsonObject { put("confirm", true) }, sink)
@@ -396,13 +409,71 @@ class SafHandlerTest {
         assertEquals(1, payload["files"]!!.jsonPrimitive.content.toInt())
         assertEquals("print('restored')", java.io.File(destination, "app.py").readText())
         assertTrue(sink.events.all { it == "saf.progress" })
+        assertFalse(
+            destination.walkTopDown().any { it.isFile && it.name.endsWith(".tmp") }
+        )
+    }
+
+    @Test
+    fun `saf restoreArchive requires confirmation before opening a picker`() {
+        val port = FakePort()
+        val handler = SafHandler(port, scratchRoot = { createTempDir("restore-unconfirmed") })
+
+        try {
+            asyncCall(handler, "saf.restoreArchive", buildJsonObject { put("confirm", false) })
+            fail("unconfirmed restore was accepted")
+        } catch (e: BridgeException) {
+            assertEquals(ErrorCode.E_BAD_ENVELOPE, e.errorCode)
+        }
+        assertEquals(0, port.openArchiveCalls)
+        assertTrue(replies.isEmpty())
+
+        asyncCall(handler, "saf.restoreArchive", buildJsonObject { put("confirm", true) })
+
+        assertEquals(1, port.openArchiveCalls)
+    }
+
+    @Test
+    fun `a heavy backup operation holds the lock until it replies`() {
+        val port = FakePort()
+        var pending: ((Result<SafTreeResult?>) -> Unit)? = null
+        val deferring = object : SafPort by port {
+            override fun importTree(
+                dest: String?,
+                onProgress: (files: Int, bytes: Long) -> Unit,
+                onResult: (Result<SafTreeResult?>) -> Unit
+            ) {
+                pending = onResult
+            }
+        }
+        val handler = SafHandler(deferring, scratchRoot = { createTempDir("lock-scratch") })
+        val payload = buildJsonObject { put("dest", "imports") }
+
+        asyncCall(handler, "saf.importTree", payload)
+        assertTrue(replies.isEmpty())
+
+        try {
+            asyncCall(handler, "saf.importTree", payload)
+            fail("a second backup operation was accepted")
+        } catch (e: BridgeException) {
+            assertEquals(ErrorCode.E_BUSY, e.errorCode)
+        }
+        assertTrue(replies.isEmpty())
+
+        pending!!(Result.success(SafTreeResult("dest", 1, 1)))
+        assertTrue(replies.single() is AsyncReply.Ok)
+
+        asyncCall(handler, "saf.importTree", payload)
+        assertEquals(1, replies.size)
+        pending!!(Result.success(SafTreeResult("dest", 1, 1)))
+        assertEquals(2, replies.size)
     }
 
     @Test
     fun `saf restoreArchive cancel is a null reply`() {
         val handler = SafHandler(FakePort())
 
-        asyncCall(handler, "saf.restoreArchive")
+        asyncCall(handler, "saf.restoreArchive", buildJsonObject { put("confirm", true) })
 
         assertEquals("null", (replies.single() as AsyncReply.Ok).payload.toString())
     }
@@ -412,7 +483,7 @@ class SafHandlerTest {
         val port = FakePort().apply { openArchiveFailure = SecurityException("denied") }
         val handler = SafHandler(port)
 
-        asyncCall(handler, "saf.restoreArchive")
+        asyncCall(handler, "saf.restoreArchive", buildJsonObject { put("confirm", true) })
 
         val reply = replies.single()
         assertEquals(ErrorCode.E_PERMISSION, (reply as AsyncReply.Error).code)
