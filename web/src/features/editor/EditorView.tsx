@@ -4,6 +4,7 @@ import { useStores } from "../../app/stores"
 import { CodeIcon, XIcon } from "../../components/Icons"
 import { PaneError } from "../../errors/CrashScreen"
 import { ErrorBoundary } from "../../errors/ErrorBoundary"
+import { InlineBanner } from "../../errors/InlineBanner"
 import { lazyWithRetry } from "../../errors/lazyWithRetry"
 import { useTheme } from "../../theme/ThemeProvider"
 import { baseName, isDirty } from "./model"
@@ -11,6 +12,11 @@ import { baseName, isDirty } from "./model"
 const EditorPane = lazyWithRetry(() =>
   import("../../components/EditorPane").then((module) => ({ default: module.EditorPane }))
 )
+
+const formatBytes = (bytes: number): string =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`
 
 export function EditorView() {
   const { editor, shell, settings } = useStores()
@@ -67,6 +73,65 @@ export function EditorView() {
 
       {docs.length > 0 ? (
         <div className="editor-body">
+          {activeDoc?.large && (
+            <InlineBanner
+              tone="info"
+              title="Large file mode"
+              message={
+                activeDoc.truncated
+                  ? `Showing the first ${formatBytes(activeDoc.content.length)} of this file. Editing is disabled.`
+                  : "This file is open read-only to avoid rewriting it by accident."
+              }
+            />
+          )}
+          {activeDoc?.draft && (
+            <InlineBanner
+              tone="warning"
+              title="Unsaved draft found"
+              message={`A draft from ${new Date(activeDoc.draft.mtime).toLocaleString()} is newer than the file on disk.`}
+            >
+              <div className="banner-actions">
+                <button
+                  className="btn primary small"
+                  onClick={() => editor.getState().restoreDraft(activeDoc.path)}
+                >
+                  Restore draft
+                </button>
+                <button
+                  className="btn ghost small"
+                  onClick={() => editor.getState().discardDraft(activeDoc.path)}
+                >
+                  Discard
+                </button>
+              </div>
+            </InlineBanner>
+          )}
+          {activeDoc?.externalChange && (
+            <InlineBanner
+              tone="warning"
+              title="File changed on disk"
+              message={
+                isDirty(activeDoc)
+                  ? "Someone else saved this file while you were editing. Reload theirs, or keep your version."
+                  : "This file was changed by another app. Reload it to see the new contents."
+              }
+            >
+              <div className="banner-actions">
+                <button
+                  className="btn ghost small"
+                  onClick={() => void editor.getState().reload(activeDoc.path)}
+                >
+                  Reload
+                </button>
+                <button
+                  className="btn primary small"
+                  onClick={() => void editor.getState().keepMine(activeDoc.path)}
+                >
+                  Keep mine
+                </button>
+              </div>
+            </InlineBanner>
+          )}
           {/*
             One EditorPane per open document, hidden when inactive (W-24). The
             CodeMirror state (undo history, selection, scroll) survives a tab
@@ -110,6 +175,7 @@ export function EditorView() {
                       wordWrap={userSettings.wordWrap}
                       lineNumbers={userSettings.lineNumbers}
                       formatOnSave={userSettings.formatOnSave}
+                      readOnly={doc.readOnly}
                       onChange={(content) => editor.getState().setContent(doc.path, content)}
                       onSave={() => void editor.getState().save(doc.path)}
                       onReload={() => void editor.getState().reload(doc.path)}

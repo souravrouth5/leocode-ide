@@ -5,8 +5,8 @@ Transport: `WebViewCompat.addWebMessageListener` on the single allowed origin pr
 Vite dev origin. `addJavascriptInterface` is forbidden. Kotlin models are `@Serializable`;
 TypeScript types are generated into `web/src/bridge/types.gen.ts`, never hand-written (Task 7).
 
-Status markers in the method table: **live** = implemented today (in `WebAppBridge.kt`, moving to
-handlers in Tasks 5–6), **planned** = added by the v9 task named.
+Status markers in the method table: **live** = implemented and unit-tested on the host (device
+verification is tracked in `docs/test-matrix.md`), **planned** = added by the v9 task named.
 
 ## Envelope
 
@@ -33,9 +33,10 @@ handlers in Tasks 5–6), **planned** = added by the v9 task named.
   callbacks, so concurrent requests never overwrite each other.
 - **Size limits:** max incoming message 8 MB (`E_LIMIT`), which covers a 4 MB write plus JSON
   escaping. `fs.read` and `fs.write` share one 4 MB cap, so the app can always open what it wrote;
-  chunked reads (`maxBytes` / `nextOffset`) are planned with Task 15. Memory cost of one 4 MB read:
-  4 MB of bytes, the decoded string and the encoded reply, so budget roughly 12–16 MB of heap for
-  that request. SAF reads and writes are capped at 4 MB.
+  `fs.read` also accepts `offset` / `maxBytes` and returns `nextOffset` for chunked reads (Task 15),
+  so a file above the cap can still be paged through. Memory cost of one 4 MB read: 4 MB of bytes,
+  the decoded string and the encoded reply, so budget roughly 12–16 MB of heap for that request.
+  SAF reads and writes are capped at 4 MB.
 - **Streaming:** process and terminal output is coalesced at 16 ms per stream. Terminal output is
   gated by `term.ack` credit (default window 256 KB); the host pauses reading the PTY when credit
   is exhausted.
@@ -58,10 +59,12 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 
 | Class | Methods | Default |
 |---|---|---|
-| Fast | `app.*`, `fs.list/read/mkdir/rename/delete`, `term.write/resize/ack`, `root.status` | 10 s |
-| Write | `fs.write`, `workspace.*` | 20 s |
+| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `root.status`, `draft.list/read`, `workspace.list` | 10 s |
+| Write | `fs.write`, `workspace.*`, `draft.save/delete` | 20 s |
 | User-wait | `saf.*`, `storage.requestPermission`, `root.request`, `ssh.hostkey.answer` | none (user-driven; cancellable) |
-| Long, streamed | `proc.run`, `fs.search`, `git.clone/fetch/pull/push` | reply on start within 10 s; then events, no overall timeout |
+| Long, streamed | `proc.run`, `git.clone/fetch/pull/push` | reply on start within 10 s; then events, no overall timeout |
+| Search | `fs.search` | 60 s (the reply is the summary after the stream) |
+| Control | `fs.search.cancel` | 2 s |
 | Install | `runtime.install` | no client timeout: the host replies when the install finishes (Task 25 will move the reply to the start); cancel with `runtime.cancel` |
 
 If the host stops answering entirely (WebView detached, renderer restarted), every pending
@@ -114,19 +117,27 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `storage.requestPermission` | `{}` → `{ granted }` | live | User-wait |
 | `saf.open` | `{ mime? }` → `{ name, uri, content, size }` (or `null` on cancel) | live | Copy-in; 4 MB cap |
 | `saf.save` | `{ name, content }` → `{ name, uri }` (or `null` on cancel) | live | Copy-out; 4 MB cap |
-| `saf.importTree` / `saf.exportWorkspace` | `{ … }` → event stream `saf.progress` | planned (Task 14) | Folder copy-in, zip export |
-| `workspace.list` | `{}` → `[{ id, name, path, lastOpened }]` | planned (Task 14) | |
-| `workspace.create` | `{ name }` → `{ id, path }` | planned (Task 14) | |
-| `workspace.open` | `{ id }` → `{ id, path }` | planned (Task 14) | |
-| `workspace.rename` | `{ id, name }` → `{}` | planned (Task 14) | |
-| `workspace.delete` | `{ id }` → `{}` | planned (Task 14) | Confirmation in UI; moves to trash |
+| `saf.importTree` | `{ dest? }` → `{ path, files, bytes }` (or `null` on cancel) + `saf.progress` | live (Task 14) | Folder copy-in; never overwrites an existing name |
+| `saf.exportWorkspace` | `{}` → `{ name, uri, files, bytes }` (or `null`) + `saf.progress` | live (Task 14) | Zip copy-out of the active workspace |
+| `saf.restoreArchive` | `{ confirm: true }` → `{ files, bytes }` (or `null`) + `saf.progress` | live (Task 14) | Strict zip restore: safe entry names, size/file caps, atomic per-file replace |
+| `workspace.list` | `{}` → `{ active, workspaces: [{ id, name, path, lastOpened, createdAt }] }` | live (Task 14) | Default workspace first, then most recently opened |
+| `workspace.create` | `{ name }` → `{ id, name, path }` | live (Task 14) | Unique id under `workspace/workspaces/` |
+| `workspace.open` | `{ id }` → `{ id, name, path }` | live (Task 14) | Makes it the active root and updates `lastOpened` |
+| `workspace.rename` | `{ id, name }` → `{}` | live (Task 14) | Display name only; the directory does not move |
+| `workspace.delete` | `{ id }` → `{}` | live (Task 14) | Confirmation in UI; moves to trash; `default` is refused |
 | `fs.list` | `{ path }` → `[{ name, path, kind, size, mtime }]` | live | No recursion |
-| `fs.read` | `{ path, offset?, maxBytes? }` → `{ content, nextOffset, mtime, hash }` | live (chunking + hash in Task 15) | UTF-8 only, 4 MB cap; binaries and malformed UTF-8 → `E_BINARY`; anything that is not a regular file (FIFO, socket, device) → `E_NOT_DIR` |
-| `fs.write` | `{ path, content, expectedHash? }` → `{ mtime, hash }` | live (atomic since Task 4; `expectedHash` Task 15) | temp → fsync → rename; mismatch → `E_CONFLICT` |
+| `fs.stat` | `{ path }` → `{ path, kind, size, mtime, hash }` | live (Task 15) | SHA-256 baseline used for conflict detection |
+| `fs.read` | `{ path, offset?, maxBytes? }` → `{ path, content, size, nextOffset, mtime, hash }` | live (chunking + hash, Task 15) | UTF-8 only, 4 MB cap per call; `nextOffset: -1` means the file ended; binaries and malformed UTF-8 → `E_BINARY`; anything that is not a regular file (FIFO, socket, device) → `E_NOT_DIR` |
+| `fs.write` | `{ path, content, expectedHash? }` → `{ path, size, mtime, hash }` | live (atomic since Task 4; `expectedHash` Task 15) | temp → fsync → rename; a stale `expectedHash` → `E_CONFLICT`; `null` means create/overwrite |
 | `fs.mkdir` | `{ path }` → `{}` | live | |
 | `fs.rename` | `{ from, to }` → `{}` | live | Acts on the directory entry: renaming a symlink renames the link, not its target; a case-only rename is allowed when both names resolve to one file |
 | `fs.delete` | `{ path }` → `{}` | live | Moves to trash, never silent permanent delete; removing a symlink removes the link, not its target |
-| `fs.search` | `{ query, glob?, maxResults? }` → event stream `search.match`, then `{ count, truncated }` | planned (Task 16) | Ignores `.git`, `node_modules`, `.venv`; cancellable |
+| `fs.search` | `{ query, glob?, caseSensitive?, maxResults?, searchId? }` → `search.match` events, then `{ count, truncated }` | live (Task 16) | Ignores `.git`, `node_modules`, `.venv`, `__pycache__`; cancellable with `searchId`; results capped (default 500, max 2 000) |
+| `fs.search.cancel` | `{ searchId }` → `{ cancelled }` | live (Task 16) | Safe to call after the search finished (`false`) |
+| `draft.list` | `{}` → `[{ path, mtime, size }]` | live (Task 15) | Drafts of the active workspace only |
+| `draft.read` | `{ path }` → `{ path, content, eol, mtime }` or `null` | live (Task 15) | Outside the workspace tree, keyed by path hash |
+| `draft.save` | `{ path, content, eol }` → `{}` | live (Task 15) | 4 MB cap; replaces the previous draft atomically |
+| `draft.delete` | `{ path }` → `{}` | live (Task 15) | Also called after a successful save or discard |
 | `term.open` | `{ cwd, cols, rows, root? }` → `{ sessionId, pid }` | live (`root` Task 18) | Spawns the PTY (or `su` in PTY) and attaches this request's stream; the reply is sent before the first `term.data` |
 | `term.attach` | `{ sessionId }` → `{ sessionId, scrollback, alive, exitCode }` then `term.data` events | live (Task 10) | Replays the ring-buffer scrollback, then streams live output; a session that exited while detached is removed, so attach returns `E_NOT_FOUND` and the page opens a new terminal |
 | `term.list` | `{}` → `[{ sessionId, root, alive, title, pid, cwd }]` | live (Task 10) | Sessions survive Activity/WebView recreation via `SessionService` |
@@ -175,7 +186,7 @@ then; the client has no default timeout for it (see Timeouts). Task 25 moves the
 | `git.progress` | `{ task, done, total }` | Git network ops |
 | `ssh.hostkey.prompt` | `{ promptId, host, keyType, fingerprintSha256 }` | SSH connect; waits for `ssh.hostkey.answer` |
 | `runtime.progress` | `{ phase, bytes, total }` | `runtime.install` |
-| `saf.progress` | `{ files, bytes }` | import/export |
+| `saf.progress` | `{ phase: "import" \| "export" \| "restore", files, bytes }` | `saf.importTree` / `saf.exportWorkspace` / `saf.restoreArchive` |
 | `app.lowMemory` | `{}` | `onTrimMemory` |
 | `app.restored` | `{ reason: "renderer" \| "crash" }` | Task 8 — shows the "Restored after a problem" banner |
 | `root.lost` | `{ sessionId? }` | Task 18 — grant revoked mid-session |

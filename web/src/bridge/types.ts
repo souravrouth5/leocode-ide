@@ -1,11 +1,14 @@
 import type {
   AppInfo as GeneratedAppInfo,
+  DraftInfo as GeneratedDraftInfo,
   ErrorCode,
   FileEntry as GeneratedFileEntry,
   RuntimeProgress as GeneratedRuntimeProgress,
   SafDocument as GeneratedSafDocument,
+  SearchMatch as GeneratedSearchMatch,
   StorageInfo as GeneratedStorageInfo,
-  TermInfo as GeneratedTermInfo
+  TermInfo as GeneratedTermInfo,
+  WorkspaceInfo as GeneratedWorkspaceInfo
 } from "./types.gen"
 import type { RequestOptions } from "./timeouts"
 
@@ -90,6 +93,95 @@ export type StorageInfo = GeneratedStorageInfo
 
 export type SafDocument = GeneratedSafDocument
 
+/** A workspace as listed by `workspace.list`. */
+export type WorkspaceInfo = GeneratedWorkspaceInfo
+
+/** `workspace.create`/`workspace.open` reply: the record plus its directory. */
+export interface WorkspaceRef {
+  id: string
+  name: string
+  path: string
+}
+
+export interface WorkspaceList {
+  active: string
+  workspaces: WorkspaceInfo[]
+}
+
+export type DraftInfo = GeneratedDraftInfo
+
+export interface Draft {
+  path: string
+  content: string
+  eol: string
+  mtime: number
+}
+
+export type SearchMatch = GeneratedSearchMatch
+
+export interface SearchOptions {
+  glob?: string
+  caseSensitive?: boolean
+  maxResults?: number
+  /** Client-generated id, required to cancel a running search. */
+  searchId?: string
+}
+
+export interface SearchSummary {
+  count: number
+  truncated: boolean
+}
+
+export interface FileStat {
+  path: string
+  kind: EntryKind
+  size: number
+  mtime: number
+  hash: string
+}
+
+/** One chunk of a file, read with byte offsets for large-file mode. */
+export interface ReadChunk {
+  path: string
+  content: string
+  size: number
+  /** Next byte offset, or -1 when the whole file has been returned. */
+  nextOffset: number
+  mtime: number
+  hash: string
+}
+
+export interface WriteResult {
+  path: string
+  size: number
+  mtime: number
+  hash: string
+}
+
+export interface TreeImportResult {
+  path: string
+  files: number
+  bytes: number
+}
+
+export interface BackupResult {
+  files: number
+  bytes: number
+}
+
+export interface SafExportResult extends BackupResult {
+  name: string
+  uri: string
+}
+
+export type SafProgressPhase = "import" | "export" | "restore"
+
+export interface SafProgress {
+  phase: SafProgressPhase
+  files: number
+  bytes: number
+}
+
 export type RuntimeInstallPhase =
   | "preparing"
   | "download"
@@ -118,6 +210,60 @@ export interface Bridge {
   mkdir(path: string, options?: RequestOptions): Promise<void>
   remove(path: string, options?: RequestOptions): Promise<void>
   rename(from: string, to: string, options?: RequestOptions): Promise<void>
+  /** `fs.write` with an optimistic-concurrency baseline (Task 15). */
+  writeChecked(
+    path: string,
+    content: string,
+    expectedHash: string | null,
+    options?: RequestOptions
+  ): Promise<WriteResult>
+  /** `fs.stat`: size, mtime and SHA-256 used for conflict detection. */
+  stat(path: string, options?: RequestOptions): Promise<FileStat>
+  /** `fs.read` with byte offsets for large-file mode (Task 15). */
+  readChunk(
+    path: string,
+    offset: number,
+    maxBytes: number,
+    options?: RequestOptions
+  ): Promise<ReadChunk>
+
+  // ------------------------------------------------------------- workspaces
+  listWorkspaces(options?: RequestOptions): Promise<WorkspaceList>
+  createWorkspace(name: string, options?: RequestOptions): Promise<WorkspaceRef>
+  openWorkspace(id: string, options?: RequestOptions): Promise<WorkspaceRef>
+  renameWorkspace(id: string, name: string, options?: RequestOptions): Promise<void>
+  deleteWorkspace(id: string, options?: RequestOptions): Promise<void>
+
+  // ----------------------------------------------------------------- drafts
+  listDrafts(options?: RequestOptions): Promise<DraftInfo[]>
+  readDraft(path: string, options?: RequestOptions): Promise<Draft | null>
+  saveDraft(path: string, content: string, eol: string, options?: RequestOptions): Promise<void>
+  deleteDraft(path: string, options?: RequestOptions): Promise<void>
+
+  // -------------------------------------------------- workspace text search
+  search(
+    query: string,
+    options: SearchOptions,
+    onMatch: (match: SearchMatch) => void,
+    request?: RequestOptions
+  ): Promise<SearchSummary>
+  cancelSearch(searchId: string, options?: RequestOptions): Promise<boolean>
+
+  // ------------------------------------------------------- backups & import
+  importTree(
+    dest: string | null,
+    onProgress: (progress: SafProgress) => void,
+    options?: RequestOptions
+  ): Promise<TreeImportResult | null>
+  exportWorkspace(
+    name: string | null,
+    onProgress: (progress: SafProgress) => void,
+    options?: RequestOptions
+  ): Promise<SafExportResult | null>
+  restoreArchive(
+    onProgress: (progress: SafProgress) => void,
+    options?: RequestOptions
+  ): Promise<BackupResult | null>
   run(
     argv: string[],
     cwd: string,

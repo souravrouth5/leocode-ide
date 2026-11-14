@@ -20,7 +20,7 @@ import { handleBack } from "./back"
  */
 export function Shell({ info }: { info: AppInfo | null }) {
   const stores = useStores()
-  const { shell, settings } = stores
+  const { shell, settings, editor } = stores
   const view = useStore(shell, (state) => state.view)
   const terminalMounted = useStore(shell, (state) => state.terminalMounted)
   const userSettings = useStore(settings, (state) => state.settings)
@@ -35,7 +35,19 @@ export function Shell({ info }: { info: AppInfo | null }) {
     void stores.files.getState().refresh()
     void stores.files.getState().loadStorage()
     void stores.editor.getState().restoreSession()
+    void stores.workspace.getState().load()
   }, [stores])
+
+  // Task 15: compare mtime/hash while the user is looking at the editor. Five
+  // seconds is frequent enough to catch a save from another app without hashing
+  // the workspace on every keystroke.
+  useEffect(() => {
+    if (view !== "editor") return
+    const check = () => void editor.getState().checkExternal()
+    check()
+    const timer = window.setInterval(check, 5_000)
+    return () => window.clearInterval(timer)
+  }, [view, editor])
 
   useEffect(() => {
     // Everything the handler needs is read from the stores on demand, so this

@@ -231,6 +231,15 @@ CodeMirror (133 KB) / xterm (74 KB) are fetched on first use.
 
 ## Workspace and editor (Tasks 14–16)
 
+> **Automated coverage (2026-11-14).** JVM and web gates are green; see
+> [`reports/task14-16-verification.md`](reports/task14-16-verification.md).
+> JVM: `WorkspaceStoreTest`, `DraftsTest`, `SearchEngineTest`, `ZipBackupTest`,
+> `FileHashTest`, `WorkspaceHandlerTest`, `DraftHandlerTest`,
+> `SearchHandlerTest`, expanded `SafHandlerTest`. Web: `mock.phaseD.test.ts`,
+> `workspaceStore.test.ts`, `searchStore.test.ts`, `editorPhaseD.test.ts`.
+> The D1/D2 cells below are **device** measurements and stay pending; both
+> phones were unavailable for this session.
+
 | Test | D1 | D2 |
 |---|---|---|
 | Create / switch two workspaces | | |

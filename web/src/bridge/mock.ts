@@ -1,19 +1,34 @@
 import type {
   AppInfo,
+  BackupResult,
   Bridge,
+  Draft,
+  DraftInfo,
   FileEntry,
+  FileStat,
   ProcessEvent,
+  ReadChunk,
   RunHandle,
   RuntimeInstallHandle,
   RuntimeInstallProgress,
   SafDocument,
+  SafExportResult,
+  SafProgress,
+  SearchMatch,
+  SearchOptions,
+  SearchSummary,
   StorageInfo,
   TerminalAttach,
   TerminalHandle,
   TerminalInfo,
   TerminalOptions,
   ThemeMode,
-  ThemeState
+  ThemeState,
+  TreeImportResult,
+  WorkspaceInfo,
+  WorkspaceList,
+  WorkspaceRef,
+  WriteResult
 } from "./types"
 import { BridgeError, isThemeMode } from "./types"
 interface Node {
@@ -89,6 +104,34 @@ const join = (base: string, name: string) => (base === "." ? name : `${base}/${n
 const parentOf = (path: string) =>
   path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "."
 
+const previewLine = (line: string): string => {
+  const trimmed = line.trim()
+  return trimmed.length <= 240 ? trimmed : trimmed.slice(0, 237) + "…"
+}
+
+/** `*`, `?` and `**` as in the host's search glob. */
+const globRegExp = (glob: string): RegExp => {
+  let out = "^"
+  for (let index = 0; index < glob.length; index++) {
+    const char = glob[index]
+    if (char === "*") {
+      if (glob[index + 1] === "*") {
+        out += ".*"
+        index += 1
+      } else {
+        out += "[^/]*"
+      }
+    } else if (char === "?") {
+      out += "[^/]"
+    } else if ("\\.+()|^$@%[]{}".includes(char)) {
+      out += "\\" + char
+    } else {
+      out += char
+    }
+  }
+  return new RegExp(out + "$", "i")
+}
+
 const systemDark = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
 
@@ -97,6 +140,19 @@ export class MockBridge implements Bridge {
   private nodes = new Map<string, Node>(SEED)
   private themeListeners = new Set<(state: ThemeState) => void>()
   private mode_: ThemeMode
+  private workspaces: WorkspaceInfo[] = [
+    {
+      id: "default",
+      name: "Workspace",
+      path: ".",
+      lastOpened: now(),
+      createdAt: now()
+    }
+  ]
+  private activeWorkspace = "default"
+  private drafts = new Map<string, Map<string, Draft>>()
+  private activeSearches = new Set<string>()
+  private cancelledSearches = new Set<string>()
 
   constructor() {
     const stored = localStorage.getItem(THEME_KEY)
@@ -190,6 +246,297 @@ export class MockBridge implements Bridge {
     }
     for (const [key, node] of moved) this.nodes.set(key, node)
     this.ensureParents(to)
+  }
+
+  async writeChecked(
+    path: string,
+    content: string,
+    expectedHash: string | null
+  ): Promise<WriteResult> {
+    const existing = this.nodes.get(path)
+    if (existing?.kind === "dir") {
+      throw new BridgeError("E_NOT_DIR", `${path} is a folder`)
+    }
+    if (expectedHash !== null) {
+      if (!existing || existing.kind !== "file") {
+        throw new BridgeError("E_CONFLICT", `${path} changed on disk`)
+      }
+      if ((await this.hash(existing.content)) !== expectedHash) {
+        throw new BridgeError("E_CONFLICT", `${path} changed on disk`)
+      }
+    }
+    await this.write(path, content)
+    const node = this.nodes.get(path)!
+    return {
+      path,
+      size: byteLength(node.content),
+      mtime: node.mtime,
+      hash: await this.hash(node.content)
+    }
+  }
+
+  async stat(path: string): Promise<FileStat> {
+    const node = this.nodes.get(path)
+    if (!node) throw new BridgeError("E_NOT_FOUND", `${path} does not exist`)
+    return {
+      path,
+      kind: node.kind,
+      size: node.kind === "dir" ? 0 : byteLength(node.content),
+      mtime: node.mtime,
+      hash: node.kind === "dir" ? "" : await this.hash(node.content)
+    }
+  }
+
+  async readChunk(path: string, offset: number, maxBytes: number): Promise<ReadChunk> {
+    const node = this.nodes.get(path)
+    if (!node) throw new BridgeError("E_NOT_FOUND", `${path} does not exist`)
+    if (node.kind !== "file") throw new BridgeError("E_NOT_DIR", `${path} is a folder`)
+    if (node.content.includes("\u0000")) {
+      throw new BridgeError("E_BINARY", `${path} is not a text file`)
+    }
+    const bytes = new TextEncoder().encode(node.content)
+    const start = Math.max(0, Math.min(offset, bytes.length))
+    const end =
+      maxBytes > 0 ? Math.min(bytes.length, start + maxBytes) : bytes.length
+    const content = new TextDecoder().decode(bytes.subarray(start, end))
+    return {
+      path,
+      content,
+      size: bytes.length,
+      nextOffset: end >= bytes.length ? -1 : end,
+      mtime: node.mtime,
+      hash: await this.hash(node.content)
+    }
+  }
+
+  // ------------------------------------------------------------- workspaces
+
+  async listWorkspaces(): Promise<WorkspaceList> {
+    const workspaces = [...this.workspaces].sort(
+      (a, b) =>
+        Number(b.id === "default") - Number(a.id === "default") ||
+        b.lastOpened - a.lastOpened ||
+        a.name.localeCompare(b.name)
+    )
+    return { active: this.activeWorkspace, workspaces }
+  }
+
+  async createWorkspace(name: string): Promise<WorkspaceRef> {
+    const trimmed = name.trim()
+    if (!trimmed) throw new BridgeError("E_BAD_ENVELOPE", "a workspace needs a name")
+    const id = `ws-${this.workspaces.length + 1}`
+    const record: WorkspaceInfo = {
+      id,
+      name: trimmed,
+      path: id,
+      createdAt: now(),
+      lastOpened: now()
+    }
+    this.workspaces.push(record)
+    return { id, name: record.name, path: record.path }
+  }
+
+  async openWorkspace(id: string): Promise<WorkspaceRef> {
+    const record = this.workspaces.find((item) => item.id === id)
+    if (!record) throw new BridgeError("E_NOT_FOUND", "no such workspace")
+    record.lastOpened = now()
+    if (this.activeWorkspace !== id) {
+      this.activeWorkspace = id
+      // A real workspace switch starts from its own directory; the mock resets
+      // the demo tree so each workspace is visibly separate.
+      this.nodes = new Map(SEED)
+    }
+    return { id: record.id, name: record.name, path: record.path }
+  }
+
+  async renameWorkspace(id: string, name: string): Promise<void> {
+    const record = this.workspaces.find((item) => item.id === id)
+    if (!record) throw new BridgeError("E_NOT_FOUND", "no such workspace")
+    const trimmed = name.trim()
+    if (!trimmed) throw new BridgeError("E_BAD_ENVELOPE", "a workspace needs a name")
+    record.name = trimmed
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    if (id === "default") {
+      throw new BridgeError("E_PERMISSION", "the default workspace cannot be deleted")
+    }
+    if (!this.workspaces.some((item) => item.id === id)) {
+      throw new BridgeError("E_NOT_FOUND", "no such workspace")
+    }
+    this.workspaces = this.workspaces.filter((item) => item.id !== id)
+    this.drafts.delete(id)
+    if (this.activeWorkspace === id) this.activeWorkspace = "default"
+  }
+
+  // ----------------------------------------------------------------- drafts
+
+  async listDrafts(): Promise<DraftInfo[]> {
+    return [...(this.drafts.get(this.activeWorkspace)?.values() ?? [])]
+      .map((draft) => ({
+        path: draft.path,
+        mtime: draft.mtime,
+        size: byteLength(draft.content)
+      }))
+      .sort((a, b) => b.mtime - a.mtime)
+  }
+
+  async readDraft(path: string): Promise<Draft | null> {
+    return this.drafts.get(this.activeWorkspace)?.get(path) ?? null
+  }
+
+  async saveDraft(path: string, content: string, eol: string): Promise<void> {
+    if (!path.trim()) throw new BridgeError("E_BAD_ENVELOPE", "path is required")
+    if (byteLength(content) > MAX_WRITE_BYTES) {
+      throw new BridgeError("E_LIMIT", "draft is larger than 4 MB")
+    }
+    let forWorkspace = this.drafts.get(this.activeWorkspace)
+    if (!forWorkspace) {
+      forWorkspace = new Map()
+      this.drafts.set(this.activeWorkspace, forWorkspace)
+    }
+    forWorkspace.set(path, {
+      path,
+      content,
+      eol: eol === "\r\n" ? "\r\n" : "\n",
+      mtime: now()
+    })
+  }
+
+  async deleteDraft(path: string): Promise<void> {
+    this.drafts.get(this.activeWorkspace)?.delete(path)
+  }
+
+  // -------------------------------------------------- workspace text search
+
+  async search(
+    query: string,
+    options: SearchOptions,
+    onMatch: (match: SearchMatch) => void
+  ): Promise<SearchSummary> {
+    if (!query) return { count: 0, truncated: false }
+    const searchId = options.searchId ?? "mock-search"
+    this.activeSearches.add(searchId)
+    const cap = Math.min(Math.max(options.maxResults ?? 500, 1), 2_000)
+    const ignored = new Set([".git", "node_modules", ".venv", "__pycache__"])
+    const pattern = options.glob ? globRegExp(options.glob) : null
+    const needle = options.caseSensitive ? query : query.toLowerCase()
+    let count = 0
+    let truncated = false
+    try {
+      for (const [path, node] of this.nodes) {
+        if (this.cancelledSearches.has(searchId)) {
+          truncated = true
+          break
+        }
+        if (node.kind !== "file") continue
+        if (path.split("/").some((part) => ignored.has(part))) continue
+        if (pattern && !pattern.test(path)) continue
+        const lines = node.content.split("\n")
+        for (let index = 0; index < lines.length; index++) {
+          const haystack = options.caseSensitive ? lines[index] : lines[index].toLowerCase()
+          let at = haystack.indexOf(needle)
+          while (at >= 0) {
+            if (count >= cap) {
+              truncated = true
+              break
+            }
+            count += 1
+            onMatch({
+              path,
+              line: index + 1,
+              col: at + 1,
+              preview: previewLine(lines[index])
+            })
+            at = haystack.indexOf(needle, at + Math.max(needle.length, 1))
+          }
+          if (truncated) break
+        }
+        if (truncated) break
+      }
+      return { count, truncated }
+    } finally {
+      this.activeSearches.delete(searchId)
+      this.cancelledSearches.delete(searchId)
+    }
+  }
+
+  async cancelSearch(searchId: string): Promise<boolean> {
+    if (!this.activeSearches.has(searchId)) return false
+    this.cancelledSearches.add(searchId)
+    return true
+  }
+
+  // ------------------------------------------------------- backups & import
+
+  async importTree(
+    dest: string | null,
+    onProgress: (progress: SafProgress) => void
+  ): Promise<TreeImportResult | null> {
+    const root = (dest ?? "imports").replace(/^\/+|\/+$/g, "") || "imports"
+    const files: Array<[string, string]> = [
+      ["README.md", "# Imported folder\n\nCopied from the system picker in the mock bridge.\n"],
+      ["hello.py", "print('hello from an imported file')\n"]
+    ]
+    let bytes = 0
+    this.nodes.set(root, { kind: "dir", content: "", mtime: now() })
+    for (let index = 0; index < files.length; index++) {
+      const [name, content] = files[index]
+      this.nodes.set(`${root}/${name}`, { kind: "file", content, mtime: now() })
+      bytes += byteLength(content)
+      onProgress({ phase: "import", files: index + 1, bytes })
+    }
+    onProgress({ phase: "import", files: files.length, bytes })
+    return { path: root, files: files.length, bytes }
+  }
+
+  async exportWorkspace(
+    name: string | null,
+    onProgress: (progress: SafProgress) => void
+  ): Promise<SafExportResult | null> {
+    let files = 0
+    let bytes = 0
+    for (const node of this.nodes.values()) {
+      if (node.kind !== "file") continue
+      files += 1
+      bytes += byteLength(node.content)
+      onProgress({ phase: "export", files, bytes })
+    }
+    return {
+      name: name ?? "leocode-backup.zip",
+      uri: `content://saf/${name ?? "leocode-backup.zip"}`,
+      files,
+      bytes
+    }
+  }
+
+  async restoreArchive(
+    onProgress: (progress: SafProgress) => void
+  ): Promise<BackupResult | null> {
+    const content = "# Restored backup\n\nThe mock bridge restored this file.\n"
+    this.nodes.set("restored", { kind: "dir", content: "", mtime: now() })
+    this.nodes.set("restored/README.md", { kind: "file", content, mtime: now() })
+    const bytes = byteLength(content)
+    onProgress({ phase: "restore", files: 1, bytes })
+    return { files: 1, bytes }
+  }
+
+  private async hash(content: string): Promise<string> {
+    const bytes = new TextEncoder().encode(content)
+    if (globalThis.crypto?.subtle) {
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes)
+      return [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("")
+    }
+    // Fallback for test environments without WebCrypto: deterministic, and only
+    // compared against itself inside the mock.
+    let hash = 2166136261
+    for (const byte of bytes) {
+      hash ^= byte
+      hash = Math.imul(hash, 16777619) >>> 0
+    }
+    return `mock-${hash.toString(16)}`
   }
 
   async getTheme(): Promise<ThemeState> {

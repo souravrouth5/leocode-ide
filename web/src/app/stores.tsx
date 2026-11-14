@@ -11,6 +11,18 @@ import { createShellStore, type ShellState } from "../features/shell/shellStore"
 import { createFilesStore, type FilesState } from "../features/files/filesStore"
 import { createEditorStore, type EditorStore } from "../features/editor/editorStore"
 import { createRunStore, type RunStore } from "../features/run/runStore"
+import {
+  createWorkspaceStore,
+  type WorkspaceState
+} from "../features/workspace/workspaceStore"
+import {
+  createSearchStore,
+  type SearchState
+} from "../features/search/searchStore"
+import {
+  createFindReplaceStore,
+  type FindReplaceState
+} from "../features/editor/findReplaceStore"
 
 export interface AppStores {
   bridge: Bridge
@@ -21,6 +33,9 @@ export interface AppStores {
   files: StoreApi<FilesState>
   editor: EditorStore
   run: RunStore
+  workspace: StoreApi<WorkspaceState>
+  search: StoreApi<SearchState>
+  findReplace: StoreApi<FindReplaceState>
   /** Remove listeners the stores installed on `window` (W-26). */
   dispose(): void
 }
@@ -40,6 +55,22 @@ export function createAppStores(bridge: Bridge): AppStores {
   const files = createFilesStore(bridge, errors)
   const editor = createEditorStore({ bridge, files, settings, shell, errors, notifications })
   const run = createRunStore({ bridge, editor, notifications })
+  const workspace = createWorkspaceStore({
+    bridge,
+    files,
+    editor,
+    shell,
+    notifications,
+    errors
+  })
+  const search = createSearchStore({
+    bridge,
+    editor,
+    shell,
+    notifications,
+    errors
+  })
+  const findReplace = createFindReplaceStore()
 
   let disposed = false
   return {
@@ -51,6 +82,9 @@ export function createAppStores(bridge: Bridge): AppStores {
     files,
     editor,
     run,
+    workspace,
+    search,
+    findReplace,
     dispose() {
       if (disposed) return
       disposed = true

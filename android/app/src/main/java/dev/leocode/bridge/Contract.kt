@@ -73,13 +73,52 @@ data class PathRequest(val path: String? = null)
 data class PathReply(val path: String)
 
 @Serializable
-data class ReadReply(val path: String, val content: String, val size: Int)
+data class ReadRequest(
+    val path: String? = null,
+    /** Byte offset for a chunked read (Task 15). */
+    val offset: Long = 0L,
+    /** Maximum bytes for this chunk; 0 means the host default. */
+    val maxBytes: Int = 0
+)
 
 @Serializable
-data class WriteRequest(val path: String? = null, val content: String? = null)
+data class ReadReply(
+    val path: String,
+    val content: String,
+    val size: Long,
+    /** Next byte offset, or -1 once the whole file has been returned. */
+    val nextOffset: Long = -1L,
+    val mtime: Long = 0L,
+    val hash: String = ""
+)
 
 @Serializable
-data class WriteReply(val path: String, val size: Long)
+data class WriteRequest(
+    val path: String? = null,
+    val content: String? = null,
+    /** When set, the write fails with E_CONFLICT if the file changed on disk. */
+    val expectedHash: String? = null
+)
+
+@Serializable
+data class WriteReply(
+    val path: String,
+    val size: Long,
+    val mtime: Long = 0L,
+    val hash: String = ""
+)
+
+@Serializable
+data class StatRequest(val path: String? = null)
+
+@Serializable
+data class StatReply(
+    val path: String,
+    val kind: String,
+    val size: Long,
+    val mtime: Long,
+    val hash: String
+)
 
 @Serializable
 data class RenameRequest(val from: String? = null, val to: String? = null)
@@ -89,6 +128,94 @@ data class RenameReply(val from: String, val to: String)
 
 @Serializable
 data class DeleteReply(val deleted: String)
+
+// ---------------------------------------------------------------- workspace
+
+@Serializable
+data class WorkspaceInfo(
+    val id: String,
+    val name: String,
+    val path: String,
+    val lastOpened: Long,
+    val createdAt: Long = 0L
+)
+
+@Serializable
+data class WorkspaceCreateRequest(val name: String? = null)
+
+@Serializable
+data class WorkspaceIdRequest(val id: String? = null)
+
+@Serializable
+data class WorkspaceRenameRequest(val id: String? = null, val name: String? = null)
+
+@Serializable
+data class WorkspaceReply(val id: String, val name: String, val path: String)
+
+@Serializable
+data class WorkspaceListReply(
+    val active: String,
+    val workspaces: List<WorkspaceInfo>
+)
+
+@Serializable
+data class WorkspaceOk(val ok: Boolean = true)
+
+// ------------------------------------------------------------------ drafts
+
+@Serializable
+data class DraftInfo(
+    val path: String,
+    val mtime: Long,
+    val size: Int
+)
+
+@Serializable
+data class DraftRequest(val path: String? = null)
+
+@Serializable
+data class DraftSaveRequest(
+    val path: String? = null,
+    val content: String? = null,
+    val eol: String = "\n"
+)
+
+@Serializable
+data class DraftReadReply(
+    val path: String,
+    val content: String,
+    val eol: String,
+    val mtime: Long
+)
+
+// ------------------------------------------------------------------ search
+
+@Serializable
+data class SearchRequest(
+    val query: String? = null,
+    val glob: String? = null,
+    val maxResults: Int = 500,
+    val caseSensitive: Boolean = false,
+    /** Client-generated id used by `fs.search.cancel`. */
+    val searchId: String? = null
+)
+
+@Serializable
+data class SearchMatch(
+    val path: String,
+    val line: Int,
+    val col: Int,
+    val preview: String
+)
+
+@Serializable
+data class SearchDone(val count: Int, val truncated: Boolean)
+
+@Serializable
+data class SearchCancelRequest(val searchId: String? = null)
+
+@Serializable
+data class SearchCancelReply(val cancelled: Boolean)
 
 // -------------------------------------------------------------------- proc
 
@@ -183,6 +310,27 @@ data class SafSaveRequest(val name: String? = null, val content: String? = null)
 
 @Serializable
 data class SafSaveReply(val name: String, val uri: String)
+
+@Serializable
+data class SafImportRequest(val dest: String? = null)
+
+@Serializable
+data class SafImportReply(val path: String, val files: Int, val bytes: Long)
+
+@Serializable
+data class SafExportRequest(val name: String? = null)
+
+@Serializable
+data class SafExportReply(val name: String, val uri: String, val files: Int, val bytes: Long)
+
+@Serializable
+data class SafRestoreRequest(val confirm: Boolean = false)
+
+@Serializable
+data class SafRestoreReply(val files: Int, val bytes: Long)
+
+@Serializable
+data class SafProgress(val phase: String, val files: Int, val bytes: Long)
 
 @Serializable
 data class StorageInfo(

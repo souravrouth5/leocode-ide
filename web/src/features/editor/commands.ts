@@ -10,8 +10,19 @@ export type EditorCommand =
   | "unindent"
   | "search"
   | "gotoLine"
+  | "gotoPosition"
+  | "findNext"
+  | "replaceNext"
+  | "replaceAll"
 
-export function editorCommand(action: EditorCommand, value?: string): void {
+export interface FindReplaceCommand {
+  query: string
+  replacement: string
+  caseSensitive: boolean
+  regexp: boolean
+}
+
+export function editorCommand(action: EditorCommand, value?: unknown): void {
   window.dispatchEvent(
     new CustomEvent("leocode:editor-command", {
       detail: value === undefined ? { action } : { action, value }

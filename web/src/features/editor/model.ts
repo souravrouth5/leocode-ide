@@ -14,7 +14,23 @@ export interface OpenDoc {
   /** Line ending the file used on disk, restored on every write. */
   eol: Eol
   isUntitled?: boolean
+  /** `fs.stat` baseline used for optimistic concurrency (Task 15). */
+  mtime?: number
+  hash?: string
+  /** Large-file mode: only the first chunk is loaded and editing is off. */
+  large?: boolean
+  truncated?: boolean
+  readOnly?: boolean
+  /** The file changed on disk while this buffer was open. */
+  externalChange?: boolean
+  /** A draft from a previous run that differs from the file on disk. */
+  draft?: { content: string; eol: Eol; mtime: number } | null
 }
+
+/** Files above this size open in read-only large-file mode (Task 15). */
+export const LARGE_FILE_BYTES = 1024 * 1024
+/** The chunk loaded into CodeMirror for a large file. */
+export const LARGE_FILE_CHUNK = 1024 * 1024
 
 export const normalizeText = (text: string) => text.replace(/\r\n/g, "\n")
 
@@ -52,9 +68,26 @@ export const isSafPath = (path: string): boolean => path.startsWith("saf://")
 
 export const SESSION_KEY = "leocode.open-session"
 
-export const initial = (path: string, raw: string): OpenDoc => {
+export const initial = (
+  path: string,
+  raw: string,
+  meta: { mtime?: number; hash?: string; large?: boolean; truncated?: boolean } = {}
+): OpenDoc => {
   const content = normalizeText(raw)
-  return { path, content, saved: content, eol: detectEol(raw), isUntitled: false }
+  return {
+    path,
+    content,
+    saved: content,
+    eol: detectEol(raw),
+    isUntitled: false,
+    mtime: meta.mtime ?? 0,
+    hash: meta.hash ?? "",
+    large: meta.large ?? false,
+    truncated: meta.truncated ?? false,
+    readOnly: meta.large ?? false,
+    externalChange: false,
+    draft: null
+  }
 }
 
 /**

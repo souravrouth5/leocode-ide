@@ -27,6 +27,12 @@ interface Props {
   /** Shared-storage status, so the permission can be granted from Settings (W-27). */
   storage?: StorageInfo | null
   onRequestStoragePermission?: () => void
+  /** Task 14: folder import and zip backup/restore. */
+  onImportFolder?: () => void
+  onExportBackup?: () => void
+  onRestoreBackup?: () => void
+  backupBusy?: boolean
+  backupStatus?: string | null
 }
 
 export function SettingsDialog({
@@ -38,7 +44,12 @@ export function SettingsDialog({
   version,
   onOpenRuntimes,
   storage,
-  onRequestStoragePermission
+  onRequestStoragePermission,
+  onImportFolder,
+  onExportBackup,
+  onRestoreBackup,
+  backupBusy = false,
+  backupStatus = null
 }: Props) {
   const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "about">("editor")
 
@@ -290,6 +301,41 @@ export function SettingsDialog({
                   <span>{storage?.hasPermission ? "Storage access granted" : "Grant storage access"}</span>
                 </button>
               )}
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Backup & Import</label>
+              <p className="guide-intro">
+                A backup is a zip of the active workspace. Restoring merges the archive
+                into it; existing files with the same name are replaced. Import copies a
+                folder from the system picker without overwriting existing names.
+              </p>
+              <div className="settings-backup-actions">
+                <button className="btn ghost full-width" onClick={onImportFolder} disabled={backupBusy}>
+                  <span>Import folder…</span>
+                </button>
+                <button className="btn ghost full-width" onClick={onExportBackup} disabled={backupBusy}>
+                  <span>Export workspace backup…</span>
+                </button>
+                <button
+                  className="btn ghost full-width danger"
+                  onClick={onRestoreBackup}
+                  disabled={backupBusy}
+                >
+                  <span>Restore from backup…</span>
+                </button>
+              </div>
+              {backupStatus && <p className="guide-intro">{backupStatus}</p>}
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Before uninstalling</label>
+              <p className="guide-intro">
+                Uninstalling LeoCode deletes app-private files, including every workspace,
+                draft and backup kept inside the app. Export a workspace backup to
+                Downloads or another provider first; Android does not keep app storage
+                when the package is removed.
+              </p>
             </div>
 
             <div className="settings-card">

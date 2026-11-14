@@ -27,6 +27,10 @@ const IDEMPOTENT_READS = new Set([
   "app.theme.get",
   "fs.list",
   "fs.read",
+  "fs.stat",
+  "draft.list",
+  "draft.read",
+  "workspace.list",
   "storage.info",
   "term.list"
 ])
@@ -36,7 +40,18 @@ export function defaultTimeoutMs(method: string): number | null {
   // The host replies when an install finishes, not on start, so a fixed timeout
   // would abort every real install (B-03/W-01). Cancellation is runtime.cancel.
   if (method === "runtime.install") return null
-  if (method === "fs.write" || method.startsWith("workspace.")) return WRITE_TIMEOUT_MS
+  // Cancelling is a small control message even while its search is running.
+  if (method === "fs.search.cancel") return 2_000
+  // A broad workspace search is capped but still walks many files (Task 16).
+  if (method === "fs.search") return 60_000
+  if (
+    method === "fs.write" ||
+    method === "draft.save" ||
+    method === "draft.delete" ||
+    method.startsWith("workspace.")
+  ) {
+    return WRITE_TIMEOUT_MS
+  }
   return FAST_TIMEOUT_MS
 }
 

@@ -101,16 +101,40 @@ export interface ReadReply {
   path: string
   content: string
   size: number
+  nextOffset?: number
+  mtime?: number
+  hash?: string
+}
+
+export interface ReadRequest {
+  path?: string | null
+  offset?: number
+  maxBytes?: number
 }
 
 export interface WriteRequest {
   path?: string | null
   content?: string | null
+  expectedHash?: string | null
 }
 
 export interface WriteReply {
   path: string
   size: number
+  mtime?: number
+  hash?: string
+}
+
+export interface StatRequest {
+  path?: string | null
+}
+
+export interface StatReply {
+  path: string
+  kind: string
+  size: number
+  mtime: number
+  hash: string
 }
 
 export interface RenameRequest {
@@ -125,6 +149,93 @@ export interface RenameReply {
 
 export interface DeleteReply {
   deleted: string
+}
+
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  path: string
+  lastOpened: number
+  createdAt?: number
+}
+
+export interface WorkspaceCreateRequest {
+  name?: string | null
+}
+
+export interface WorkspaceIdRequest {
+  id?: string | null
+}
+
+export interface WorkspaceRenameRequest {
+  id?: string | null
+  name?: string | null
+}
+
+export interface WorkspaceReply {
+  id: string
+  name: string
+  path: string
+}
+
+export interface WorkspaceListReply {
+  active: string
+  workspaces: WorkspaceInfo[]
+}
+
+export interface WorkspaceOk {
+  ok?: boolean
+}
+
+export interface DraftInfo {
+  path: string
+  mtime: number
+  size: number
+}
+
+export interface DraftRequest {
+  path?: string | null
+}
+
+export interface DraftSaveRequest {
+  path?: string | null
+  content?: string | null
+  eol?: string
+}
+
+export interface DraftReadReply {
+  path: string
+  content: string
+  eol: string
+  mtime: number
+}
+
+export interface SearchRequest {
+  query?: string | null
+  glob?: string | null
+  maxResults?: number
+  caseSensitive?: boolean
+  searchId?: string | null
+}
+
+export interface SearchMatch {
+  path: string
+  line: number
+  col: number
+  preview: string
+}
+
+export interface SearchDone {
+  count: number
+  truncated: boolean
+}
+
+export interface SearchCancelRequest {
+  searchId?: string | null
+}
+
+export interface SearchCancelReply {
+  cancelled: boolean
 }
 
 export interface ProcRunRequest {
@@ -241,6 +352,42 @@ export interface SafSaveRequest {
 export interface SafSaveReply {
   name: string
   uri: string
+}
+
+export interface SafImportRequest {
+  dest?: string | null
+}
+
+export interface SafImportReply {
+  path: string
+  files: number
+  bytes: number
+}
+
+export interface SafExportRequest {
+  name?: string | null
+}
+
+export interface SafExportReply {
+  name: string
+  uri: string
+  files: number
+  bytes: number
+}
+
+export interface SafRestoreRequest {
+  confirm?: boolean
+}
+
+export interface SafRestoreReply {
+  files: number
+  bytes: number
+}
+
+export interface SafProgress {
+  phase: string
+  files: number
+  bytes: number
 }
 
 export interface StorageInfo {

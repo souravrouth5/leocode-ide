@@ -5,10 +5,11 @@ import { LeoCodeLogo, MenuIcon, PlayIcon } from "../../components/Icons"
 import { PaneBoundary } from "../../errors/PaneBoundary"
 import { baseName, isDirty } from "../editor/model"
 import { editorCommand } from "../editor/commands"
+import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher"
 
-/** App bar: brand, file/edit/overflow menus and the Run badge. */
+/** App bar: brand, workspace switcher, file/edit/overflow menus and the Run badge. */
 export function AppHeader() {
-  const { editor, run, shell, settings } = useStores()
+  const { editor, run, shell, settings, findReplace, search } = useStores()
   const docs = useStore(editor, (state) => state.docs)
   const activePath = useStore(editor, (state) => state.activePath)
   const runState = useStore(run, (state) => state.run)
@@ -55,6 +56,7 @@ export function AppHeader() {
           <span className="brand-name">LeoCode</span>
         </div>
         <div className="app-bar-actions">
+          <WorkspaceSwitcher />
           <FileMenu
             onNew={() => editor.getState().newUntitled()}
             onOpenExplorer={() => shell.getState().setSidebarOpen(true)}
@@ -97,7 +99,8 @@ export function AppHeader() {
           )}
 
           <OverflowMenu
-            onSearch={() => editorCommand("search")}
+            onFindReplace={() => findReplace.getState().openSheet()}
+            onSearchWorkspace={() => search.getState().setOpen(true)}
             onGotoLine={() => {
               const line = window.prompt("Goto line number:")
               if (line) editorCommand("gotoLine", line)

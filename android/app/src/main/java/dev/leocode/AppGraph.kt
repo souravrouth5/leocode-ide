@@ -7,13 +7,16 @@ import android.os.Environment
 import dev.leocode.bridge.AppHandler
 import dev.leocode.bridge.AppInfo
 import dev.leocode.bridge.BridgeJson
+import dev.leocode.bridge.DraftHandler
 import dev.leocode.bridge.FsHandler
 import dev.leocode.bridge.ProcHandler
 import dev.leocode.bridge.RuntimeHandler
 import dev.leocode.bridge.SafHandler
 import dev.leocode.bridge.SafPort
+import dev.leocode.bridge.SearchHandler
 import dev.leocode.bridge.TermHandler
 import dev.leocode.bridge.ThemePort
+import dev.leocode.bridge.WorkspaceHandler
 import dev.leocode.core.OrphanReaper
 import dev.leocode.core.PathJail
 import dev.leocode.core.PidFileStore
@@ -22,6 +25,9 @@ import dev.leocode.core.PtySession
 import dev.leocode.core.TerminalRegistry
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
+import dev.leocode.workspace.Drafts
+import dev.leocode.workspace.SearchEngine
+import dev.leocode.workspace.WorkspaceStore
 import java.io.File
 import kotlinx.serialization.json.Json
 
@@ -66,6 +72,15 @@ class AppGraph(private val app: Application) {
         sharedTrash = sharedStorageRoot?.let { File(it, SHARED_TRASH_DIR) }
     )
 
+    /** Multiple projects + recent list (Task 14). `ensure()` below loads the index. */
+    val workspaceStore = WorkspaceStore(workspace, trash, json)
+
+    /** Autosaved buffers for the active workspace (Task 15). */
+    val drafts = Drafts(app.filesDir, workspaceId = { workspaceStore.activeId() }, json = json)
+
+    /** Workspace-wide search engine (Task 16). */
+    val searchEngine = SearchEngine()
+
     val childEnv: Map<String, String> = workspace.childEnv()
 
     val pidFiles = PidFileStore(File(app.filesDir, RUN_DIR))
@@ -103,7 +118,15 @@ class AppGraph(private val app: Application) {
         log = { line -> android.util.Log.w("LeoCodeRuntime", line) }
     )
 
-    fun fsHandler(): FsHandler = FsHandler(workspace, jail, trash, json)
+    fun fsHandler(): FsHandler =
+        FsHandler(workspace, jail, trash, json) { workspaceStore.activeDirectory() }
+
+    fun workspaceHandler(): WorkspaceHandler = WorkspaceHandler(workspaceStore, json)
+
+    fun draftHandler(): DraftHandler = DraftHandler(drafts, json)
+
+    fun searchHandler(): SearchHandler =
+        SearchHandler(searchEngine, { workspaceStore.activeDirectory() }, json)
 
     fun appHandler(theme: ThemePort, appInfo: () -> AppInfo): AppHandler =
         AppHandler(theme, appInfo, json)
@@ -112,7 +135,12 @@ class AppGraph(private val app: Application) {
 
     fun termHandler(): TermHandler = terminalHandler
 
-    fun safHandler(port: SafPort): SafHandler = SafHandler(port)
+    fun safHandler(port: SafPort): SafHandler = SafHandler(
+        port,
+        json,
+        workspaceRoot = { workspaceStore.activeDirectory() },
+        scratchRoot = { workspace.tmp }
+    )
 
     fun runtimeHandler(): RuntimeHandler = runtimeHandler
 

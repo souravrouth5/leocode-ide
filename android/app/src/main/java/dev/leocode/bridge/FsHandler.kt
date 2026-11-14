@@ -1,12 +1,14 @@
 package dev.leocode.bridge
 
 import dev.leocode.core.AtomicWriter
+import dev.leocode.core.FileHash
 import dev.leocode.core.PathJail
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -25,12 +27,17 @@ import kotlinx.serialization.json.buildJsonArray
  *
  * Pure JVM: paths come from [PathJail], writes go through [AtomicWriter] and
  * deletes through [Trash]. The Activity never sees a raw path.
+ *
+ * [activeRoot] is a function, not a fixed directory: Phase D lets the user switch
+ * workspaces and every relative path must follow the active one. It defaults to
+ * the original single workspace, so existing callers and tests are unchanged.
  */
 class FsHandler(
     private val workspace: Workspace,
     private val jail: PathJail,
     private val trash: Trash,
-    private val json: Json = BridgeJson.value
+    private val json: Json = BridgeJson.value,
+    private val activeRoot: () -> File = { workspace.defaultWorkspace }
 ) : BridgeHandler {
 
     companion object {
@@ -51,7 +58,7 @@ class FsHandler(
         private const val SHARED_TRASH_DIR = ".leocode-trash"
 
         val METHODS = setOf(
-            "fs.list", "fs.read", "fs.write", "fs.mkdir", "fs.rename", "fs.delete"
+            "fs.list", "fs.read", "fs.write", "fs.mkdir", "fs.rename", "fs.delete", "fs.stat"
         )
     }
 
@@ -59,10 +66,13 @@ class FsHandler(
 
     override fun handle(method: String, payload: JsonObject): JsonElement = when (method) {
         "fs.list" -> list(pathOf(payload, method))
-        "fs.read" -> read(pathOf(payload, method))
+        "fs.read" -> {
+            val request = json.decodePayload(ReadRequest.serializer(), payload, method)
+            read(request.path, request.offset, request.maxBytes)
+        }
         "fs.write" -> {
             val request = json.decodePayload(WriteRequest.serializer(), payload, method)
-            write(request.path, request.content ?: "")
+            write(request.path, request.content ?: "", request.expectedHash)
         }
         "fs.mkdir" -> mkdir(pathOf(payload, method))
         "fs.rename" -> {
@@ -70,6 +80,7 @@ class FsHandler(
             rename(request.from, request.to)
         }
         "fs.delete" -> delete(pathOf(payload, method))
+        "fs.stat" -> stat(pathOf(payload, method))
         else -> throw BridgeException(ErrorCode.E_UNKNOWN_METHOD, "unknown method: $method")
     }
 
@@ -102,7 +113,7 @@ class FsHandler(
         }
     }
 
-    private fun read(rawPath: String?): JsonElement {
+    private fun read(rawPath: String?, offset: Long, maxBytes: Int): JsonElement {
         val file = resolve(rawPath)
         if (!file.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
         if (file.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "is a directory")
@@ -111,37 +122,84 @@ class FsHandler(
         if (!isRegularFile(file)) {
             throw BridgeException(ErrorCode.E_NOT_DIR, "not a regular file")
         }
-        if (file.length() > MAX_READ) {
+        if (offset < 0L) throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "offset must not be negative")
+        val length = file.length()
+        if (maxBytes <= 0 && length > MAX_READ) {
             throw BridgeException(ErrorCode.E_LIMIT, "file is larger than 4 MB")
+        }
+        if (maxBytes > MAX_READ) {
+            throw BridgeException(ErrorCode.E_LIMIT, "chunk is larger than 4 MB")
+        }
+        if (offset > length) {
+            throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "offset is past the end of the file")
+        }
+
+        val requested = if (maxBytes > 0) {
+            minOf(maxBytes.toLong(), length - offset, MAX_READ.toLong()).toInt()
+        } else {
+            minOf(length, MAX_READ.toLong()).toInt()
         }
         val bytes = try {
-            // Bounded at MAX_READ + 1: a file that grows after the length check
-            // still cannot overrun the cap.
-            readBounded(file, MAX_READ + 1)
+            readRange(file, offset, requested)
         } catch (e: IOException) {
             throw BridgeException(ErrorCode.E_IO, "cannot read ${rel(file)}")
-        }
-        if (bytes.size > MAX_READ) {
-            throw BridgeException(ErrorCode.E_LIMIT, "file is larger than 4 MB")
         }
         if (bytes.any { it == 0.toByte() }) {
             throw BridgeException(ErrorCode.E_BINARY, "binary file")
         }
+        val complete = offset + bytes.size >= length
+        val safeBytes = if (complete) bytes else trimIncompleteUtf8(bytes)
         // Strict: malformed UTF-8 is E_BINARY, never U+FFFD. Replacing the bytes
         // on read would write the replacements back on the next save (S-08).
-        val content = decodeUtf8(bytes)
+        val content = decodeUtf8(safeBytes)
             ?: throw BridgeException(ErrorCode.E_BINARY, "file is not valid UTF-8")
+        val nextOffset = if (offset + safeBytes.size >= length) -1L else offset + safeBytes.size
         return json.encodeToJsonElement(
             ReadReply.serializer(),
-            ReadReply(rel(file), content, bytes.size)
+            ReadReply(
+                path = rel(file),
+                content = content,
+                size = length,
+                nextOffset = nextOffset,
+                mtime = file.lastModified(),
+                hash = FileHash.safeHash(file) ?: ""
+            )
         )
     }
 
-    private fun write(rawPath: String?, content: String): JsonElement {
+    private fun stat(rawPath: String?): JsonElement {
+        val file = resolve(rawPath)
+        if (!file.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
+        val isDir = file.isDirectory
+        if (!isDir && !isRegularFile(file)) {
+            throw BridgeException(ErrorCode.E_NOT_DIR, "not a regular file")
+        }
+        return json.encodeToJsonElement(
+            StatReply.serializer(),
+            StatReply(
+                path = rel(file),
+                kind = if (isDir) "dir" else "file",
+                size = if (isDir) 0L else file.length(),
+                mtime = file.lastModified(),
+                hash = if (isDir) "" else (FileHash.safeHash(file) ?: "")
+            )
+        )
+    }
+
+    private fun write(rawPath: String?, content: String, expectedHash: String?): JsonElement {
         val file = resolve(rawPath)
         val bytes = content.toByteArray(Charsets.UTF_8)
         if (bytes.size > MAX_WRITE_BYTES) {
             throw BridgeException(ErrorCode.E_LIMIT, "content is larger than 4 MB")
+        }
+        if (expectedHash != null) {
+            // The editor's baseline is the whole file. A missing file with a
+            // baseline is a conflict too: someone deleted it underneath us.
+            if (!file.isFile) throw BridgeException(ErrorCode.E_CONFLICT, "file changed on disk")
+            val current = FileHash.safeHash(file)
+            if (current == null || current != expectedHash) {
+                throw BridgeException(ErrorCode.E_CONFLICT, "file changed on disk")
+            }
         }
         val parent = file.parentFile ?: throw BridgeException(ErrorCode.E_IO, "path has no parent")
         if (!parent.exists() && !parent.mkdirs()) {
@@ -154,7 +212,12 @@ class FsHandler(
         }
         return json.encodeToJsonElement(
             WriteReply.serializer(),
-            WriteReply(rel(file), file.length())
+            WriteReply(
+                path = rel(file),
+                size = file.length(),
+                mtime = file.lastModified(),
+                hash = FileHash.safeHash(file) ?: ""
+            )
         )
     }
 
@@ -231,32 +294,34 @@ class FsHandler(
     private fun protectedRoots(): Set<File> = buildSet {
         add(workspace.workspacesRoot.canonicalFile)
         add(workspace.defaultWorkspace.canonicalFile)
+        workspace.workspacesRoot.listFiles()?.forEach { add(it.canonicalFile) }
         jail.sharedStorageRoot?.let { add(it.canonicalFile) }
         trash.directories().forEach { add(it.canonicalFile) }
     }
 
     private fun resolve(rawPath: String?): File = try {
-        jail.resolve(rawPath ?: ".", workspace.defaultWorkspace)
+        jail.resolve(rawPath ?: ".", activeRoot())
     } catch (e: SecurityException) {
         throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
     }
 
     private fun resolveEntry(rawPath: String?): File = try {
-        jail.resolveEntry(rawPath ?: ".", workspace.defaultWorkspace)
+        jail.resolveEntry(rawPath ?: ".", activeRoot())
     } catch (e: SecurityException) {
         throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
     }
 
     /**
-     * Relative to the default workspace, absolute for shared storage.
+     * Relative to the active workspace, absolute for shared storage.
      *
-     * The root is canonicalised once and cached: [PathJail.resolve] returns
+     * The root is canonicalised on every call: [PathJail.resolve] returns
      * canonical paths, and on a device `filesDir` is `/data/user/0/...` while its
      * canonical form is `/data/data/...`, so comparing against the uncanonicalised
-     * root made every reply absolute (S-04).
+     * root made every reply absolute (S-04). Phase D switches this root when the
+     * user opens another workspace.
      */
     private fun rel(file: File): String {
-        val root = canonicalDefaultWorkspace
+        val root = canonicalActiveRoot
         val target = file.absoluteFile.normalize()
         if (target == root) return "."
         val prefix = root.path + File.separator
@@ -267,13 +332,12 @@ class FsHandler(
         }
     }
 
-    private val canonicalDefaultWorkspace: File by lazy {
-        try {
-            workspace.defaultWorkspace.canonicalFile
+    private val canonicalActiveRoot: File
+        get() = try {
+            activeRoot().canonicalFile
         } catch (e: IOException) {
-            workspace.defaultWorkspace.absoluteFile
+            activeRoot().absoluteFile
         }
-    }
 
     private fun isRegularFile(file: File): Boolean =
         runCatching { Files.isRegularFile(file.toPath()) }.getOrDefault(false)
@@ -295,11 +359,13 @@ class FsHandler(
         }
     }
 
-    /** Reads at most [limit] bytes, so a growing file cannot overrun the buffer. */
-    private fun readBounded(file: File, limit: Int): ByteArray =
-        file.inputStream().use { input ->
+    /** Reads at most [limit] bytes starting at [offset]. */
+    private fun readRange(file: File, offset: Long, limit: Int): ByteArray {
+        if (limit <= 0) return ByteArray(0)
+        RandomAccessFile(file, "r").use { input ->
+            input.seek(offset)
             val out = ByteArrayOutputStream(minOf(limit, READ_BUFFER))
-            val buffer = ByteArray(READ_BUFFER)
+            val buffer = ByteArray(minOf(READ_BUFFER, limit))
             var total = 0
             while (total < limit) {
                 val read = input.read(buffer, 0, minOf(buffer.size, limit - total))
@@ -307,8 +373,30 @@ class FsHandler(
                 out.write(buffer, 0, read)
                 total += read
             }
-            out.toByteArray()
+            return out.toByteArray()
         }
+    }
+
+    /**
+     * Drops a trailing partial multi-byte code point so a chunk never ends in
+     * the middle of a character. The next chunk starts at the returned offset.
+     */
+    private fun trimIncompleteUtf8(bytes: ByteArray): ByteArray {
+        if (bytes.isEmpty()) return bytes
+        var start = bytes.size - 1
+        while (start >= 0 && (bytes[start].toInt() and 0xC0) == 0x80) start--
+        if (start < 0) return bytes
+        val lead = bytes[start].toInt() and 0xFF
+        val expected = when {
+            lead and 0x80 == 0 -> 1
+            lead and 0xE0 == 0xC0 -> 2
+            lead and 0xF0 == 0xE0 -> 3
+            lead and 0xF8 == 0xF0 -> 4
+            else -> 1
+        }
+        val available = bytes.size - start
+        return if (available < expected) bytes.copyOfRange(0, start) else bytes
+    }
 
     /**
      * Strict UTF-8 decode: `null` for malformed input instead of replacement

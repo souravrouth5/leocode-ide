@@ -80,6 +80,7 @@ class LeoApp : Application() {
         try {
             val created = AppGraph(this)
             created.workspace.ensure()
+            created.workspaceStore.ensure()
             graph = created
             // Reaping waits up to 200 ms per orphan; keep it off the main thread.
             thread(name = "leocode-reap", isDaemon = true) {

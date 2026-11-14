@@ -2,14 +2,24 @@ import {
   AppError,
   isErrorCode,
   type AppInfo,
+  type BackupResult,
   type Bridge,
+  type Draft,
+  type DraftInfo,
   type FileEntry,
+  type FileStat,
   type ProcessEvent,
+  type ReadChunk,
   type RequestOptions,
   type RunHandle,
   type RuntimeInstallHandle,
   type RuntimeInstallProgress,
   type SafDocument,
+  type SafExportResult,
+  type SafProgress,
+  type SearchMatch,
+  type SearchOptions,
+  type SearchSummary,
   type StorageInfo,
   type TerminalAttach,
   type TerminalAttachOptions,
@@ -17,7 +27,11 @@ import {
   type TerminalInfo,
   type TerminalOptions,
   type ThemeMode,
-  type ThemeState
+  type ThemeState,
+  type TreeImportResult,
+  type WorkspaceList,
+  type WorkspaceRef,
+  type WriteResult
 } from "./types"
 import { MAX_MESSAGE_BYTES } from "./limits"
 import { isIdempotentRead, timeoutMsFor } from "./timeouts"
@@ -427,6 +441,161 @@ export class AndroidBridge implements Bridge {
 
   async rename(from: string, to: string, options?: RequestOptions): Promise<void> {
     await this.request("fs.rename", { from, to }, options)
+  }
+
+  async writeChecked(
+    path: string,
+    content: string,
+    expectedHash: string | null,
+    options?: RequestOptions
+  ): Promise<WriteResult> {
+    return this.request<WriteResult>(
+      "fs.write",
+      { path, content, expectedHash },
+      options
+    )
+  }
+
+  async stat(path: string, options?: RequestOptions): Promise<FileStat> {
+    const reply = await this.request<Omit<FileStat, "kind"> & { kind: string }>(
+      "fs.stat",
+      { path },
+      options
+    )
+    return { ...reply, kind: reply.kind === "dir" ? "dir" : "file" }
+  }
+
+  async readChunk(
+    path: string,
+    offset: number,
+    maxBytes: number,
+    options?: RequestOptions
+  ): Promise<ReadChunk> {
+    return this.request<ReadChunk>("fs.read", { path, offset, maxBytes }, options)
+  }
+
+  // ------------------------------------------------------------- workspaces
+
+  async listWorkspaces(options?: RequestOptions): Promise<WorkspaceList> {
+    return this.request<WorkspaceList>("workspace.list", {}, options)
+  }
+
+  async createWorkspace(name: string, options?: RequestOptions): Promise<WorkspaceRef> {
+    return this.request<WorkspaceRef>("workspace.create", { name }, options)
+  }
+
+  async openWorkspace(id: string, options?: RequestOptions): Promise<WorkspaceRef> {
+    return this.request<WorkspaceRef>("workspace.open", { id }, options)
+  }
+
+  async renameWorkspace(id: string, name: string, options?: RequestOptions): Promise<void> {
+    await this.request("workspace.rename", { id, name }, options)
+  }
+
+  async deleteWorkspace(id: string, options?: RequestOptions): Promise<void> {
+    await this.request("workspace.delete", { id }, options)
+  }
+
+  // ----------------------------------------------------------------- drafts
+
+  async listDrafts(options?: RequestOptions): Promise<DraftInfo[]> {
+    return this.request<DraftInfo[]>("draft.list", {}, options)
+  }
+
+  async readDraft(path: string, options?: RequestOptions): Promise<Draft | null> {
+    return this.request<Draft | null>("draft.read", { path }, options)
+  }
+
+  async saveDraft(
+    path: string,
+    content: string,
+    eol: string,
+    options?: RequestOptions
+  ): Promise<void> {
+    await this.request("draft.save", { path, content, eol }, options)
+  }
+
+  async deleteDraft(path: string, options?: RequestOptions): Promise<void> {
+    await this.request("draft.delete", { path }, options)
+  }
+
+  // -------------------------------------------------- workspace text search
+
+  async search(
+    query: string,
+    options: SearchOptions,
+    onMatch: (match: SearchMatch) => void,
+    request?: RequestOptions
+  ): Promise<SearchSummary> {
+    return this.request<SearchSummary>(
+      "fs.search",
+      {
+        query,
+        glob: options.glob,
+        caseSensitive: options.caseSensitive ?? false,
+        maxResults: options.maxResults,
+        searchId: options.searchId
+      },
+      request,
+      (event, payload) => {
+        if (event === "search.match") onMatch(payload as SearchMatch)
+      }
+    )
+  }
+
+  async cancelSearch(searchId: string, options?: RequestOptions): Promise<boolean> {
+    const reply = await this.request<{ cancelled: boolean }>(
+      "fs.search.cancel",
+      { searchId },
+      { timeoutMs: 2_000, ...options }
+    )
+    return Boolean(reply.cancelled)
+  }
+
+  // ------------------------------------------------------- backups & import
+
+  async importTree(
+    dest: string | null,
+    onProgress: (progress: SafProgress) => void,
+    options?: RequestOptions
+  ): Promise<TreeImportResult | null> {
+    return this.request<TreeImportResult | null>(
+      "saf.importTree",
+      { dest },
+      options,
+      (event, payload) => {
+        if (event === "saf.progress") onProgress(payload as SafProgress)
+      }
+    )
+  }
+
+  async exportWorkspace(
+    name: string | null,
+    onProgress: (progress: SafProgress) => void,
+    options?: RequestOptions
+  ): Promise<SafExportResult | null> {
+    return this.request<SafExportResult | null>(
+      "saf.exportWorkspace",
+      { name },
+      options,
+      (event, payload) => {
+        if (event === "saf.progress") onProgress(payload as SafProgress)
+      }
+    )
+  }
+
+  async restoreArchive(
+    onProgress: (progress: SafProgress) => void,
+    options?: RequestOptions
+  ): Promise<BackupResult | null> {
+    return this.request<BackupResult | null>(
+      "saf.restoreArchive",
+      { confirm: true },
+      options,
+      (event, payload) => {
+        if (event === "saf.progress") onProgress(payload as SafProgress)
+      }
+    )
   }
 
   // --------------------------------------------------------------- processes

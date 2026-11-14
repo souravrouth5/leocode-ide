@@ -30,7 +30,16 @@ import { sql } from "@codemirror/lang-sql"
 import { xml } from "@codemirror/lang-xml"
 import { yaml } from "@codemirror/lang-yaml"
 import { shell } from "@codemirror/legacy-modes/mode/shell"
-import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search"
+import {
+  findNext,
+  highlightSelectionMatches,
+  openSearchPanel,
+  replaceAll,
+  replaceNext,
+  searchKeymap,
+  SearchQuery,
+  setSearchQuery
+} from "@codemirror/search"
 import { Compartment, EditorState, type Extension } from "@codemirror/state"
 import {
   drawSelection,
@@ -40,6 +49,7 @@ import {
   lineNumbers
 } from "@codemirror/view"
 import { RedoIcon, RefreshIcon, SparklesIcon, UndoIcon } from "./Icons"
+import type { FindReplaceCommand } from "../features/editor/commands"
 import {
   EDITOR_THEMES,
   type EditorThemeId,
@@ -62,6 +72,8 @@ export interface EditorPaneProps {
   wordWrap?: boolean
   lineNumbers?: boolean
   formatOnSave?: boolean
+  /** Large-file mode: show the chunk, but never let it be edited (Task 15). */
+  readOnly?: boolean
   onChange: (content: string) => void
   onSave: () => void
   onReload?: () => void
@@ -256,6 +268,7 @@ export function EditorPane({
   wordWrap = true,
   lineNumbers: showLineNumbers = true,
   formatOnSave = false,
+  readOnly = false,
   onChange,
   onSave,
   onReload,
@@ -269,6 +282,7 @@ export function EditorPane({
   const lineWrappingCompartment = useRef(new Compartment())
   const lineNumbersCompartment = useRef(new Compartment())
   const tabSizeCompartment = useRef(new Compartment())
+  const readOnlyCompartment = useRef(new Compartment())
 
   const effectiveTheme: EditorThemeId =
     propEditorTheme ?? resolveInitialTheme(dark)
@@ -332,6 +346,10 @@ export function EditorPane({
           wordWrap ? EditorView.lineWrapping : []
         ),
         tabSizeCompartment.current.of(EditorState.tabSize.of(tabSize)),
+        readOnlyCompartment.current.of([
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly)
+        ]),
         highlightActiveLine(),
         history(),
         drawSelection(),
@@ -445,6 +463,16 @@ export function EditorPane({
     })
   }, [tabSize])
 
+  // Reconfigure editing when large-file mode is entered or left
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: readOnlyCompartment.current.reconfigure([
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly)
+      ])
+    })
+  }, [readOnly])
+
   // Sync theme when app dark/light mode toggles (if user hasn't explicitly chosen a theme)
   const prevDarkRef = useRef(dark)
   useEffect(() => {
@@ -486,6 +514,18 @@ export function EditorPane({
       if (!custom.detail) return
       const view = viewRef.current
       if (!view) return
+      // Large-file mode shows a truncated chunk; never mutate it through a menu
+      // or the find/replace sheet (the buffer is not the whole file).
+      const mutating =
+        custom.detail.action === "format" ||
+        custom.detail.action === "insert" ||
+        custom.detail.action === "indent" ||
+        custom.detail.action === "unindent" ||
+        custom.detail.action === "undo" ||
+        custom.detail.action === "redo" ||
+        custom.detail.action === "replaceNext" ||
+        custom.detail.action === "replaceAll"
+      if (readOnly && mutating) return
       switch (custom.detail.action) {
         case "undo":
           undo(view)
@@ -526,6 +566,39 @@ export function EditorPane({
           }
           break
         }
+        case "gotoPosition": {
+          const value = custom.detail.value as { line?: number; col?: number } | undefined
+          const lineNum = Number(value?.line)
+          const colNum = Math.max(1, Number(value?.col) || 1)
+          if (!isNaN(lineNum) && lineNum > 0 && lineNum <= view.state.doc.lines) {
+            const line = view.state.doc.line(lineNum)
+            const position = Math.min(line.from + colNum - 1, line.to)
+            view.dispatch({
+              selection: { anchor: position },
+              scrollIntoView: true
+            })
+            view.focus()
+          }
+          break
+        }
+        case "findNext":
+        case "replaceNext":
+        case "replaceAll": {
+          const value = custom.detail.value as FindReplaceCommand | undefined
+          if (!value?.query) break
+          const query = new SearchQuery({
+            search: value.query,
+            replace: value.replacement ?? "",
+            caseSensitive: Boolean(value.caseSensitive),
+            regexp: Boolean(value.regexp)
+          })
+          view.dispatch({ effects: setSearchQuery.of(query) })
+          if (custom.detail.action === "findNext") findNext(view)
+          else if (custom.detail.action === "replaceNext") replaceNext(view)
+          else replaceAll(view)
+          view.focus()
+          break
+        }
         case "insert": {
           if (custom.detail.value) insert(String(custom.detail.value))
           break
@@ -534,7 +607,7 @@ export function EditorPane({
     }
     window.addEventListener("leocode:editor-command", handleCommand)
     return () => window.removeEventListener("leocode:editor-command", handleCommand)
-  }, [handleFormat, active])
+  }, [handleFormat, active, readOnly])
 
   return (
     <div className="editor-shell">

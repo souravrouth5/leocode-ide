@@ -44,7 +44,8 @@ interface EditMenuProps {
 }
 
 interface OverflowMenuProps {
-  onSearch: () => void
+  onFindReplace: () => void
+  onSearchWorkspace: () => void
   onGotoLine: () => void
   onSelectSyntax: () => void
   onOpenSettings: () => void
@@ -226,7 +227,8 @@ export function EditMenu({
 }
 
 export function OverflowMenu({
-  onSearch,
+  onFindReplace,
+  onSearchWorkspace,
   onGotoLine,
   onSelectSyntax,
   onOpenSettings,
@@ -247,9 +249,13 @@ export function OverflowMenu({
     >
       {() => (
         <div className="menu-items">
-          <button className="menu-item" onClick={onSearch}>
+          <button className="menu-item" onClick={onFindReplace}>
             <SearchIcon size={16} />
             <span>Find & Replace</span>
+          </button>
+          <button className="menu-item" onClick={onSearchWorkspace}>
+            <SearchIcon size={16} />
+            <span>Search in Workspace</span>
           </button>
           <button className="menu-item" onClick={onGotoLine}>
             <span>Goto Line…</span>

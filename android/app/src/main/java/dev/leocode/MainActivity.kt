@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
@@ -38,11 +39,14 @@ import dev.leocode.bridge.AppInfo
 import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.SafDocument
 import dev.leocode.bridge.SafPort
+import dev.leocode.bridge.SafTreeResult
 import dev.leocode.bridge.StorageInfo
 import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.ThemeState
+import dev.leocode.core.AtomicWriter
 import dev.leocode.core.CrashStore
 import dev.leocode.core.Workspace
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -77,6 +81,11 @@ class MainActivity : ComponentActivity(), SafPort {
         // persisted timestamps, so a recreation cannot reset it (L-09).
         private const val PERMISSION_PREFS = "leocode.permissions"
         private const val ASKED_NOTIFICATIONS = "notifications_asked"
+
+        /** Hard cap for a restore archive copied through SAF. */
+        private const val MAX_BACKUP_BYTES = 512L * 1024 * 1024
+        private const val MAX_IMPORT_FILES = 20_000
+        private const val MAX_IMPORT_BYTES = 512L * 1024 * 1024
     }
 
     private lateinit var themeManager: ThemeManager
@@ -133,6 +142,33 @@ class MainActivity : ComponentActivity(), SafPort {
     private var saveInFlight = false
     private var pendingSave: SaveRequest? = null
 
+    private data class TreeRequest(
+        val dest: String?,
+        val progress: (Int, Long) -> Unit,
+        val callback: (Result<SafTreeResult?>) -> Unit
+    )
+
+    private data class ExportRequest(
+        val name: String,
+        val archive: File,
+        val progress: (Int, Long) -> Unit,
+        val callback: (Result<String?>) -> Unit
+    )
+
+    private data class ArchiveRequest(val callback: (Result<File?>) -> Unit)
+
+    private val treeRequests = ArrayDeque<TreeRequest>()
+    private var treeInFlight = false
+    private var pendingTree: TreeRequest? = null
+
+    private val exportRequests = ArrayDeque<ExportRequest>()
+    private var exportInFlight = false
+    private var pendingExport: ExportRequest? = null
+
+    private val archiveRequests = ArrayDeque<ArchiveRequest>()
+    private var archiveInFlight = false
+    private var pendingArchive: ArchiveRequest? = null
+
     private val permissionRequests = ArrayDeque<(Boolean) -> Unit>()
     private var permissionInFlight = false
     private var pendingPermission: ((Boolean) -> Unit)? = null
@@ -188,6 +224,112 @@ class MainActivity : ComponentActivity(), SafPort {
                 request.callback(result)
             }
             pumpSave()
+        }
+
+    private val treeLauncher: ActivityResultLauncher<Uri?> =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            treeInFlight = false
+            val request = pendingTree
+            pendingTree = null
+            if (request == null) {
+                pumpTree()
+                return@registerForActivityResult
+            }
+            if (uri == null) {
+                request.callback(Result.success(null))
+                pumpTree()
+                return@registerForActivityResult
+            }
+            thread(name = "leocode-saf-import") {
+                val result = runCatching { importTree(uri, request) }
+                request.callback(result)
+                runOnUiThread { pumpTree() }
+            }
+        }
+
+    private val exportLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            exportInFlight = false
+            val request = pendingExport
+            pendingExport = null
+            if (request == null) {
+                pumpExport()
+                return@registerForActivityResult
+            }
+            if (uri == null) {
+                request.archive.delete()
+                request.callback(Result.success(null))
+                pumpExport()
+                return@registerForActivityResult
+            }
+            thread(name = "leocode-saf-export") {
+                val result = runCatching {
+                    val output = contentResolver.openOutputStream(uri)
+                        ?: throw IOException("the provider returned no output stream")
+                    var copied = 0L
+                    output.use { stream ->
+                        request.archive.inputStream().use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                stream.write(buffer, 0, read)
+                                copied += read
+                                if (copied % (1024 * 1024) < buffer.size) {
+                                    request.progress(0, copied)
+                                }
+                            }
+                            stream.flush()
+                        }
+                    }
+                    uri.toString()
+                }
+                request.archive.delete()
+                request.callback(result)
+                runOnUiThread { pumpExport() }
+            }
+        }
+
+    private val archiveLauncher: ActivityResultLauncher<Array<String>> =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            archiveInFlight = false
+            val request = pendingArchive
+            pendingArchive = null
+            if (request == null) {
+                pumpArchive()
+                return@registerForActivityResult
+            }
+            if (uri == null) {
+                request.callback(Result.success(null))
+                pumpArchive()
+                return@registerForActivityResult
+            }
+            thread(name = "leocode-saf-restore") {
+                val result = runCatching {
+                    val target = File(cacheDir, "restore-${System.currentTimeMillis()}.zip")
+                    val input = contentResolver.openInputStream(uri)
+                        ?: throw IOException("the provider returned no input stream")
+                    var total = 0L
+                    input.use { stream ->
+                        target.outputStream().buffered().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val read = stream.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                if (total > MAX_BACKUP_BYTES) {
+                                    throw IOException("backup is larger than the limit")
+                                }
+                                output.write(buffer, 0, read)
+                            }
+                            output.flush()
+                        }
+                    }
+                    target
+                }
+                request.callback(result)
+                runOnUiThread { pumpArchive() }
+            }
         }
 
     private val permissionLauncher: ActivityResultLauncher<Array<String>> =
@@ -498,6 +640,9 @@ class MainActivity : ComponentActivity(), SafPort {
             listOf(
                 (application as LeoApp).graphOrThrow().appHandler(themePort()) { appInfo() },
                 (application as LeoApp).graphOrThrow().fsHandler(),
+                (application as LeoApp).graphOrThrow().workspaceHandler(),
+                (application as LeoApp).graphOrThrow().draftHandler(),
+                (application as LeoApp).graphOrThrow().searchHandler(),
                 (application as LeoApp).graphOrThrow().procHandler(),
                 (application as LeoApp).graphOrThrow().termHandler(),
                 (application as LeoApp).graphOrThrow().safHandler(this),
@@ -791,13 +936,231 @@ class MainActivity : ComponentActivity(), SafPort {
         }
     }
 
-    override fun storageInfo(): StorageInfo = StorageInfo(
-        hasPermission = checkStoragePermission(),
-        internalStorage = Environment.getExternalStorageDirectory().absolutePath,
-        downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath,
-        documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath,
-        workspace = (application as LeoApp).graphOrThrow().workspace.defaultWorkspace.absolutePath
-    )
+    // ---------------------------------------------- SAF trees and backups (D14)
+
+    override fun importTree(
+        dest: String?,
+        onProgress: (Int, Long) -> Unit,
+        onResult: (Result<SafTreeResult?>) -> Unit
+    ) {
+        runOnUiThread {
+            treeRequests.addLast(TreeRequest(dest, onProgress, onResult))
+            pumpTree()
+        }
+    }
+
+    private fun pumpTree() {
+        if (treeInFlight) return
+        val next = treeRequests.pollFirst() ?: return
+        treeInFlight = true
+        pendingTree = next
+        runCatching { treeLauncher.launch(null) }.onFailure {
+            treeInFlight = false
+            pendingTree = null
+            next.callback(Result.failure(it))
+        }
+    }
+
+    override fun exportArchive(
+        name: String,
+        archive: File,
+        onProgress: (Int, Long) -> Unit,
+        onResult: (Result<String?>) -> Unit
+    ) {
+        runOnUiThread {
+            exportRequests.addLast(ExportRequest(name, archive, onProgress, onResult))
+            pumpExport()
+        }
+    }
+
+    private fun pumpExport() {
+        if (exportInFlight) return
+        val next = exportRequests.pollFirst() ?: return
+        exportInFlight = true
+        pendingExport = next
+        runCatching { exportLauncher.launch(next.name) }.onFailure {
+            exportInFlight = false
+            pendingExport = null
+            next.archive.delete()
+            next.callback(Result.failure(it))
+        }
+    }
+
+    override fun openArchive(onResult: (Result<File?>) -> Unit) {
+        runOnUiThread {
+            archiveRequests.addLast(ArchiveRequest(onResult))
+            pumpArchive()
+        }
+    }
+
+    private fun pumpArchive() {
+        if (archiveInFlight) return
+        val next = archiveRequests.pollFirst() ?: return
+        archiveInFlight = true
+        pendingArchive = next
+        runCatching {
+            archiveLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+        }.onFailure {
+            archiveInFlight = false
+            pendingArchive = null
+            next.callback(Result.failure(it))
+        }
+    }
+
+    /**
+     * Copies a SAF document tree into the active workspace. Runs on a worker
+     * thread; every file is written under a fresh name, so an import never
+     * silently overwrites a document that already exists.
+     */
+    private fun importTree(treeUri: Uri, request: TreeRequest): SafTreeResult {
+        val active = (application as LeoApp).graphOrThrow().workspaceStore.activeDirectory()
+        val activeCanonical = active.canonicalFile
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
+        val rootName = sanitizeName(queryDisplayName(rootUri) ?: "Imported folder")
+        val target = if (request.dest.isNullOrBlank()) {
+            uniqueDirectory(active, rootName)
+        } else {
+            val resolved = (application as LeoApp).graphOrThrow().jail
+                .resolve(request.dest, active)
+            if (!resolved.isDirectory && !resolved.mkdirs() && !resolved.isDirectory) {
+                throw IOException("cannot create the destination folder")
+            }
+            resolved
+        }
+
+        var files = 0
+        var bytes = 0L
+        fun applyCaps() {
+            if (files > MAX_IMPORT_FILES) throw IOException("too many files to import")
+            if (bytes > MAX_IMPORT_BYTES) throw IOException("the folder is too large to import")
+        }
+
+        fun copy(uri: Uri, dir: File, depth: Int) {
+            if (depth > 64) return
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                DocumentsContract.getDocumentId(uri)
+            )
+            contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val documentId = cursor.getString(0) ?: continue
+                    val displayName = sanitizeName(cursor.getString(1) ?: "file")
+                    val mime = cursor.getString(2) ?: ""
+                    val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        val childDir = uniqueDirectory(dir, displayName)
+                        copy(childUri, childDir, depth + 1)
+                    } else {
+                        val destination = uniqueFile(dir, displayName)
+                        val input = contentResolver.openInputStream(childUri)
+                            ?: throw IOException("the provider returned no input stream")
+                        input.use { stream ->
+                            destination.outputStream().buffered().use { output ->
+                                val buffer = ByteArray(64 * 1024)
+                                while (true) {
+                                    val read = stream.read(buffer)
+                                    if (read < 0) break
+                                    output.write(buffer, 0, read)
+                                    bytes += read
+                                    if (bytes % (256 * 1024) < buffer.size) {
+                                        request.progress(files, bytes)
+                                    }
+                                    applyCaps()
+                                }
+                                output.flush()
+                            }
+                        }
+                        files += 1
+                        request.progress(files, bytes)
+                    }
+                }
+            }
+        }
+
+        copy(rootUri, target, 0)
+        val canonicalTarget = target.canonicalFile
+        val path = if (canonicalTarget == activeCanonical) {
+            "."
+        } else {
+            val prefix = activeCanonical.path + File.separator
+            if (canonicalTarget.path.startsWith(prefix)) {
+                canonicalTarget.path.substring(prefix.length).replace(File.separatorChar, '/')
+            } else {
+                canonicalTarget.absolutePath
+            }
+        }
+        return SafTreeResult(path, files, bytes)
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        var name: String? = null
+        runCatching {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index != -1 && cursor.moveToFirst()) name = cursor.getString(index)
+            }
+        }
+        return name
+    }
+
+    private fun sanitizeName(raw: String): String {
+        val cleaned = raw.replace('/', '_').replace('\\', '_').replace("\u0000", "").trim()
+        val name = cleaned.ifEmpty { "file" }
+        return if (name.length <= 100) name else name.take(100)
+    }
+
+    private fun uniqueDirectory(parent: File, desired: String): File {
+        var candidate = File(parent, desired)
+        var counter = 2
+        while (candidate.exists()) {
+            candidate = File(parent, "$desired-$counter")
+            counter += 1
+        }
+        if (!candidate.mkdirs() && !candidate.isDirectory) {
+            throw IOException("cannot create ${candidate.name}")
+        }
+        return candidate
+    }
+
+    private fun uniqueFile(parent: File, desired: String): File {
+        var candidate = File(parent, desired)
+        if (!candidate.exists()) return candidate
+        val dot = desired.lastIndexOf('.')
+        val stem = if (dot > 0) desired.substring(0, dot) else desired
+        val ext = if (dot > 0) desired.substring(dot) else ""
+        var counter = 2
+        while (candidate.exists()) {
+            candidate = File(parent, "$stem-$counter$ext")
+            counter += 1
+        }
+        return candidate
+    }
+
+    override fun storageInfo(): StorageInfo {
+        val graph = (application as LeoApp).graphOrThrow()
+        return StorageInfo(
+            hasPermission = checkStoragePermission(),
+            internalStorage = Environment.getExternalStorageDirectory().absolutePath,
+            downloads = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            ).absolutePath,
+            documents = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOCUMENTS
+            ).absolutePath,
+            workspace = graph.workspaceStore.activeDirectory().absolutePath
+        )
+    }
 
     private fun queryUriFileName(uri: Uri): String {
         var name = "document.txt"

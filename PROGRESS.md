@@ -3,11 +3,13 @@
 **Last updated:** 2026-11-14
 **Current phase:** Plan v9. Phase A fix-ups A-01…A-10 are done and the local exit gate was green
 (2026-11-11). Phase B: **Tasks 4–7 are done**; **Tasks 8–10 are code-complete and verified on
-D1/D2** (2026-11-14). **Phase B/C review fixes are done through batch 6** (2026-11-14;
-[`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md)); only the narrow remainders
-listed there stay open. Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed,
-but the repo token cannot read Actions results, so the owner must confirm the run. D2 is measured
-but **unrooted** (no `su`); the owner will root it before Phase E.
+D1/D2** (2026-11-14). Phase C: **Tasks 11–13 are done**. **Phase D (Tasks 14–16) is code-complete**
+with JVM + web gates green (2026-11-14; [`docs/reports/task14-16-verification.md`](docs/reports/task14-16-verification.md));
+only the D1/D2 device pass is pending. **Phase B/C review fixes are done through batch 6**
+(2026-11-14; [`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md)); only the narrow
+remainders listed there stay open. Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is
+now pushed, but the repo token cannot read Actions results, so the owner must confirm the run. D2 is
+measured but **unrooted** (no `su`); the owner will root it before Phase E.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
 
 Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocked · `[~]` deferred
@@ -28,10 +30,11 @@ follow-up privacy, lifecycle and editor batches are fixed with tests and device 
 | 5/6 web editor+UX | `2467948` | W-05, W-10, W-12…W-19, W-24, W-26…W-29, W-32, W-34, W-35, W-36 |
 | 6 partial terminal | `56fc5bf` | L-16, L-17, L-18, L-19, L-21, L-22 |
 
-**Still open (narrow):** W-06 conflict detection (the reload-action plumbing exists), L-06 (reaper
+**Still open (narrow):** L-06 (reaper
 when the group leader is gone), L-08 (detach on `onStop`), L-15 (wake lock), L-24 (back timeout),
 S-15/S-16/S-17/S-18 (fsync, `.tmp` sweep, SAF binary, purge off-path), S-19/S-20, B-15/B-16,
-W-25 (large-file perf), W-30/W-31/W-33/W-38. Device checks still pending: S-12 case-only rename on
+W-25 (large-file perf), W-30/W-31/W-33/W-38. W-06 conflict detection is fixed by Task 15
+(`fs.stat` + `expectedHash`); W-25 is narrower now that large files open read-only with one chunk. Device checks still pending: S-12 case-only rename on
 shared storage, L-09 renderer kill while backgrounded, W-24 visual scroll, W-18 CRLF, W-12 run-hide.
 B-09 uses the report's cancel-on-finish alternative; terminals still reattach. `runtime.install` has
 no client timeout until Task 25. Full details: [`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md);
@@ -46,7 +49,7 @@ the review copies are in `docs/reports/review-parts/`.
 | Plan + decisions | **v9** (D-001…D-017; D-016 open until Task 19; **D-017 Python is the primary language**) |
 | Devices | D1 Redmi Note 7S, Android 9, unrooted — measured. D2 POCO F1, Android 15, **unrooted (no `su`)** — measured 2026-11-11 (Task 3) |
 | Android app (real IDE shell) | Built and installed on D1 and D2 (`app-debug.apk`, versionCode 2, targetSdk 28). The CI workflow (NDK r28, unit tests + blocking lint, 16 KB alignment check) **has never run on GitHub** — it is YAML-parse-checked only. **Not production-grade** — see §2 |
-| Web IDE shell | Live on D1 — collapsible file explorer with search, 6-mode sort, properties sheet, binary & dotfile filters, shared-storage browsing, multi-tab editor with session restore, live PTY terminal, runtime manager UI |
+| Web IDE shell | Live on D1 — collapsible file explorer with search, 6-mode sort, properties sheet, binary & dotfile filters, shared-storage browsing, multi-tab editor with session restore, live PTY terminal, runtime manager UI. **Phase D (code complete, device pass pending):** workspace switcher, SAF folder import, zip backup/restore, draft autosave + recovery, external-change Reload / Keep mine, large-file read-only mode, find/replace and streaming workspace search |
 | Branding & mascot | Puppy coder mascot (`design/app-icon.png`) on launcher, splash and app bar |
 | Theme & settings | System/Light/Dark, 6 syntax themes, font picker, font size stepper |
 | Code formatting | In-browser Prettier for JS, TS, HTML, CSS, Markdown, JSON |
@@ -175,9 +178,9 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 - [x] **Task 13** Split `App.tsx` into features and stores — *done and device-verified 2026-11-14*. `App.tsx` is boot only (128 lines); `features/shell/Shell.tsx` is 84 lines and composes feature views. Zustand vanilla stores (`settings`, `shell`, `files`, `editor`, `run`, plus notifications/errors) are built once by `createAppStores(bridge)` manual DI and provided by context. Terminal session persistence moved to `features/terminal/session.ts`; OSC 0/2 titles are sanitised and OSC 52 is swallowed. `styles.css` split into 22 files under `web/src/styles/` with the original cascade order. Tests: files, editor, run, terminal helpers and a mock-mode shell smoke test — **57 web tests**. D1 parity: boot, drawer/file list, open `hello.sh`, Run sheet (`EXIT 0`), terminal PTY, Runtimes, rename (tab followed) and delete (moved to `.trash`). See [`docs/reports/task13-verification.md`](docs/reports/task13-verification.md).
 
 ### Phase D — Workspace and editor completeness
-- [ ] **Task 14** Workspaces, SAF import/export, zip backup, uninstall warning
-- [ ] **Task 15** Drafts + crash recovery, external-change detection, large-file mode, find/replace
-- [ ] **Task 16** Workspace search (`fs.search` streaming)
+- [x] **Task 14** Workspaces, SAF import/export, zip backup, uninstall warning — *code complete 2026-11-14, device pass pending*. `WorkspaceStore` registry (`filesDir/workspaces.json`, `workspace/workspaces/<id>`), `workspace.list/create/open/rename/delete` (`list` = `{ active, workspaces }`), active-root path jail, top-bar switcher, `saf.importTree` (never overwrites), `saf.exportWorkspace` (streaming zip), `saf.restoreArchive` (strict zip-slip/size caps, temp-file atomic replace), `saf.progress { phase, files, bytes }`, Settings Backup & Import and the uninstall warning. JVM: `WorkspaceStoreTest`, `ZipBackupTest`, `WorkspaceHandlerTest`, expanded `SafHandlerTest`. Web: `workspaceStore.test.ts`, `mock.phaseD.test.ts`.
+- [x] **Task 15** Drafts + crash recovery, external-change detection, large-file mode, find/replace — *code complete 2026-11-14, device pass pending*. `FileHash` + `Drafts` (`filesDir/drafts/<workspaceId>/<sha256(path)>.json`), `draft.list/read/save/delete`, 3 s idle autosave, recovery/discard banner, `fs.stat` + chunked `fs.read` + `writeChecked` (`E_CONFLICT`), 5 s external-change poll with Reload / Keep mine, >1 MB read-only large-file mode, find/replace sheet driving CodeMirror search commands. JVM: `DraftsTest`, `FileHashTest`, `DraftHandlerTest`. Web: `editorPhaseD.test.ts`.
+- [x] **Task 16** Workspace search (`fs.search` streaming) — *code complete 2026-11-14, device pass pending*. `SearchEngine` ignores `.git`/`node_modules`/`.venv`/`__pycache__`, glob + case options, capped (default 500, max 2 000), cancellable via client `searchId`; streaming `search.match` into a search sheet with jump-to-line. JVM: `SearchEngineTest`, `SearchHandlerTest`. Web: `searchStore.test.ts`.
 
 ### Phase E — Root mode
 - [ ] **Task 17** `RootManager` (libsu), Root mode setting, warning, ROOT badge
@@ -241,7 +244,7 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 | No ErrorBoundary; errors reduced to `e.message`; silent `catch {}` blocks | 12 |
 | `App.tsx` `Shell` ≈ 970 lines; `styles.css` 2 488 lines | 13 — fixed 2026-11-14 (Shell 84 lines, styles split) |
 | Rename and delete not exercised on device | 13 — verified on D1 2026-11-14 (rename follows the tab, delete lands in `.trash`) |
-| No external-change detection or autosave | 15 |
+| No external-change detection or autosave | 15 — fixed 2026-11-14 (drafts, `fs.stat`, `expectedHash`) |
 | **D2 has no `su`** (LineageOS user build): Phase E root tests are blocked until a root manager is installed | 17 (blocker) |
 | No instrumented tests (web unit tests now exist) | each task (tests) |
 | JGit / SSHD / Bouncy Castle declared but unused | 19 |
@@ -307,3 +310,4 @@ Completed under plan v8; kept for traceability.
 | 2026-11-14 | **Task 13 features and stores.** `App.tsx` is boot only; `Shell` is 84 lines and composes `features/*`. Zustand vanilla stores (`settings`, `shell`, `files`, `editor`, `run`) built once by `createAppStores(bridge)` and provided by context; views read with `useStore`, actions via `getState`. Terminal OSC titles are sanitised and OSC 52 is swallowed; session helpers moved out of the component. `styles.css` split into 22 feature files. 57 web tests; D1 parity verified (files, editor, run `EXIT 0`, terminal, runtimes, rename, delete → trash). |
 | 2026-11-14 | **Phase B/C review fixes, batches 1–3.** Batch 1 (`8889bac`): trash purge by embedded time, trash protected/hidden, killGroup/lazy-startup guards, safe envelope ids, SAF failure handling, safe New File/Save As, save records what it wrote. Batch 2 (`4b4e9a1`): no install timeout, 8 MB transport cap with an id on `E_LIMIT`, fixed/redacted runtime errors, strict envelope, `encodeDefaults`, reachable disconnect with stream failure and late-reply cancellation, guarded stream handlers. Batch 3 (`cad444a`): PTY write outside the lock, ordered replay, exited sessions kept for reattach, session/geometry caps, fd close, stdin EOF, coalesced proc output + truncation notice, count ordering, `stopSelf(startId)`, ack-after-render, resize-after-attach, fallback only on `E_NOT_FOUND`, jobs cancelled on finish/renderer loss. 130 Android tests, lint, 16 KB check, 71 web tests; D1 smoke (PTY, SAF cancel, foreground service). Report: `docs/reports/phase-b-c-fixes.md`; batches 4–6 stay open. |
 | 2026-11-14 | **Phase B/C review, batches 4–6.** Batch 4 web (`640ac2d`): redaction on every message sink, benign-error/dedupe/re-entrancy/boot queue in global handlers, fire-and-forget reporting. Batch 4 Android (`4f6c7f8`): deferred background-safe renderer recovery with persisted loss time, full `configChanges`, side/cutout insets to CSS, wider `Redactor`, crash caps, default-port origin check. Batch 5 Android files (`4a72324`): non-regular read rejection, canonical `rel`, symlink entry delete/rename, POSIX permission preservation, strict UTF-8, 4 MB read, case-only rename. Batch 5/6 web (`2467948`): sheet stack + ordered back, run hide vs stop, run identity, file-list token, folder rename/delete tab state, CRLF, SAF saves, per-tab panes, session merge/dispose, storage permission flow, prompt validation, pane boundaries, snackbar/keyboard/settings/lazy-retry/MockBridge lows. Batch 6 partial (`56fc5bf`): `close_range` removed, SIGTERM grace, resize guard, precomputed fd bound, early `term.open` output, aligned replay. Gates: Android 194 tests + lint + 16 KB; web 183 tests, typecheck/lint/build. Device: both phones boot/PTY/service; D1 rotation; D2 font scale, 755→755 save, inline prompt error, storage permission grant + Downloads listing. Narrow items remain (W-06, L-06, L-08, L-15, L-24, S-15…S-20, B-14…B-16, W-25, W-30/31/33/38). |
+| 2026-11-14 | **Phase D (Tasks 14–16) code complete.** Workspaces: `WorkspaceStore` registry + active root, `workspace.list` → `{ active, workspaces }`, top-bar switcher, SAF folder import, streaming zip export and strict zip restore with `saf.progress`. Editor: `fs.stat` + chunked `fs.read` + `writeChecked` (`E_CONFLICT`), 3 s draft autosave with recovery/discard, 5 s external-change poll with Reload / Keep mine, >1 MB read-only large-file mode, find/replace sheet. Search: `fs.search` streams `search.match`, ignore list, glob/case, capped and cancellable via `searchId`, results panel with jump-to-line. Tests: Android 252 (new workspace/draft/search/zip/hash suites), web 224 across 37 files (new mock Phase D, workspace, search and editor suites); typecheck, lint and build pass. Fixed `ReadReply.size` (`Long`), a lost buffered block in zip restore, closed-sheet accessibility leakage, and Keep mine opening the Save As prompt. Device rows stay pending: both phones unavailable. Report: `docs/reports/task14-16-verification.md`. |

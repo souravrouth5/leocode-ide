@@ -7,9 +7,10 @@ import type { FilesState } from "../files/filesStore"
 import type { SettingsState } from "../settings/settingsStore"
 import type { ShellState } from "../shell/shellStore"
 import {
+  LARGE_FILE_BYTES,
+  LARGE_FILE_CHUNK,
   SESSION_KEY,
   baseName,
-  detectEol,
   dirName,
   entryExists,
   initial,
@@ -39,6 +40,14 @@ export interface EditorState {
   restoreSession(): Promise<void>
   deleteEntry(entry: FileEntry): Promise<void>
   renamePath(from: string, to: string): void
+  /** Task 15: recovery and conflict actions. */
+  restoreDraft(path: string): void
+  discardDraft(path: string): void
+  keepMine(path: string): Promise<void>
+  /** Poll the host for mtime/hash changes behind the open buffers. */
+  checkExternal(): Promise<void>
+  /** Forget every buffer when the user switches workspace. */
+  clearWorkspace(): void
 }
 
 export type EditorStore = StoreApi<EditorState> & {
@@ -57,6 +66,9 @@ interface EditorDeps {
 
 /** Session state is written 300 ms after the last change, not on every key. */
 export const SESSION_PERSIST_DEBOUNCE_MS = 300
+
+/** Idle time before a dirty buffer is written to `draft.save` (Task 15). */
+export const DRAFT_AUTOSAVE_MS = 3_000
 
 /** Codes that mean the file is really gone; everything else may be transient. */
 const GONE_CODES = new Set(["E_NOT_FOUND", "E_BINARY"])
@@ -84,15 +96,15 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         return
       }
       try {
-        const raw = await bridge.read(path)
+        const doc = await loadDocument(path)
         // Two taps before the read returns must not create duplicate tabs (W-16).
-        if (get().docs.some((doc) => doc.path === path)) {
+        if (get().docs.some((item) => item.path === path)) {
           set({ activePath: path })
           shell.getState().go("editor")
           return
         }
         retainedPaths.delete(path)
-        set((state) => ({ docs: [...state.docs, initial(path, raw)], activePath: path }))
+        set((state) => ({ docs: [...state.docs, doc], activePath: path }))
         shell.getState().go("editor")
         const { recentFiles } = settings.getState().settings
         settings.getState().update({
@@ -135,7 +147,17 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       set((state) => ({
         docs: [
           ...state.docs,
-          { path: name, content: "", saved: null, eol: "\n" as const, isUntitled: true }
+          {
+            path: name,
+            content: "",
+            saved: null,
+            eol: "\n" as const,
+            isUntitled: true,
+            mtime: 0,
+            hash: "",
+            externalChange: false,
+            draft: null
+          }
         ],
         activePath: name
       }))
@@ -144,8 +166,11 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
 
     setContent(path, content) {
       set((state) => ({
-        docs: state.docs.map((doc) => (doc.path === path ? { ...doc, content } : doc))
+        docs: state.docs.map((doc) =>
+          doc.path === path && !doc.readOnly ? { ...doc, content } : doc
+        )
       }))
+      scheduleDraft(path)
     },
 
     setActive(path) {
@@ -157,27 +182,66 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       if (!path) return false
       const doc = get().docs.find((item) => item.path === path)
       if (!doc) return false
-      if (doc.isUntitled || doc.saved === null) {
+      if (doc.isUntitled) {
         get().beginSaveAs()
         return false
       }
+      // `saved === null` with a real path means Keep mine made the buffer
+      // authoritative; it still saves in place instead of asking for a new name.
       // A SAF document is a copy-out: writing it through `fs.write` would target
       // a path the jail does not have (W-19).
       if (isSafPath(doc.path)) return saveSaf(doc, set)
       try {
+        if (doc.readOnly) {
+          notifications.getState().enqueue({
+            kind: "info",
+            message: "This file is open in large-file mode",
+            detail: "Editing is disabled so a multi-megabyte file is not rewritten by accident.",
+            durationMs: 5_000
+          })
+          return false
+        }
         // Record exactly what was written: text typed while the write was in
         // flight must stay dirty (W-02). Line endings go back as they were (W-18).
         const written = doc.content
-        await bridge.write(path, serialize(doc))
+        const result = await bridge.writeChecked(
+          path,
+          serialize(doc),
+          doc.hash && doc.hash.length > 0 ? doc.hash : null
+        )
+        clearDraft(path)
         set((state) => ({
           docs: state.docs.map((item) =>
-            item.path === path ? { ...item, saved: written, isUntitled: false } : item
+            item.path === path
+              ? {
+                  ...item,
+                  saved: written,
+                  isUntitled: false,
+                  hash: result.hash,
+                  mtime: result.mtime,
+                  externalChange: false
+                }
+              : item
           )
         }))
         shell.getState().flash("Saved")
         if (dirName(path) === files.getState().cwd) void files.getState().refresh()
         return true
       } catch (error) {
+        if (error instanceof AppError && error.code === "E_CONFLICT") {
+          set((state) => ({
+            docs: state.docs.map((item) =>
+              item.path === path ? { ...item, externalChange: true } : item
+            )
+          }))
+          notifications.getState().enqueue({
+            kind: "warning",
+            message: `${baseName(path)} changed on disk`,
+            detail: "Reload it, or choose Keep mine before saving again.",
+            durationMs: 7_000
+          })
+          return false
+        }
         errors.getState().report(error, { context: "Save file" })
         return false
       }
@@ -231,11 +295,21 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         if (!window.confirm(`${baseName(target)} already exists. Replace it?`)) return
       }
       try {
-        await bridge.write(target, serialize(doc))
+        const result = await bridge.writeChecked(target, serialize(doc), null)
+        if (!doc.isUntitled && !isSafPath(doc.path)) void bridge.deleteDraft(doc.path).catch(() => {})
         set((state) => ({
           docs: state.docs.map((item) =>
             item.path === doc.path
-              ? { ...item, path: target, saved: doc.content, isUntitled: false }
+              ? {
+                  ...item,
+                  path: target,
+                  saved: doc.content,
+                  isUntitled: false,
+                  readOnly: false,
+                  hash: result.hash,
+                  mtime: result.mtime,
+                  externalChange: false
+                }
               : item
           ),
           activePath: target
@@ -266,12 +340,19 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         return
       }
       try {
-        const raw = await bridge.read(path)
-        const content = normalizeText(raw)
-        const eol = detectEol(raw)
+        const fresh = await loadDocument(path, false)
+        clearDraft(path)
         set((state) => ({
           docs: state.docs.map((item) =>
-            item.path === path ? { ...item, content, saved: content, eol } : item
+            item.path === path
+              ? {
+                  ...fresh,
+                  draft: null,
+                  externalChange: false,
+                  // Reload never resurrects a tab that was closed meanwhile.
+                  isUntitled: item.isUntitled
+                }
+              : item
           )
         }))
         shell.getState().flash("Reloaded from disk")
@@ -293,11 +374,19 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
             state.activePath === path ? (docs.length ? docs[docs.length - 1].path : null) : state.activePath
         }
       })
+      if (doc && !doc.isUntitled && !isSafPath(path)) void bridge.deleteDraft(path).catch(() => {})
+      clearDraftTimer(path)
     },
 
     closeAll() {
       if (get().docs.some(isDirty)) {
         if (!window.confirm("You have unsaved changes. Discard and close all tabs?")) return
+      }
+      for (const doc of get().docs) {
+        if (!doc.isUntitled && !isSafPath(doc.path)) {
+          void bridge.deleteDraft(doc.path).catch(() => {})
+        }
+        clearDraftTimer(doc.path)
       }
       set({ docs: [], activePath: null })
     },
@@ -330,7 +419,7 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         const loaded = await Promise.all(
           paths.map(async (path): Promise<OpenDoc | null> => {
             try {
-              const doc = initial(path, await bridge.read(path))
+              const doc = await loadDocument(path)
               retainedPaths.delete(path)
               return doc
             } catch (error) {
@@ -448,8 +537,204 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
                 : null
         }
       })
+      // A draft is keyed by path; move it with the file so recovery still works.
+      void bridge.readDraft(from).then((draft) => {
+        if (!draft) return
+        void bridge.saveDraft(to, draft.content, draft.eol).catch(() => {})
+        void bridge.deleteDraft(from).catch(() => {})
+      }).catch(() => {})
+    },
+
+    restoreDraft(path) {
+      set((state) => ({
+        docs: state.docs.map((doc) =>
+          doc.path === path && doc.draft
+            ? {
+                ...doc,
+                content: doc.draft.content,
+                eol: doc.draft.eol,
+                // `saved` stays the on-disk text, so the restored buffer is dirty.
+                draft: null
+              }
+            : doc
+        )
+      }))
+      void bridge.deleteDraft(path).catch(() => {})
+      shell.getState().flash("Draft restored")
+    },
+
+    discardDraft(path) {
+      set((state) => ({
+        docs: state.docs.map((doc) => (doc.path === path ? { ...doc, draft: null } : doc))
+      }))
+      void bridge.deleteDraft(path).catch(() => {})
+    },
+
+    async keepMine(path) {
+      const doc = get().docs.find((item) => item.path === path)
+      if (!doc) return
+      let hash = ""
+      let mtime = 0
+      try {
+        const stat = await bridge.stat(path)
+        if (stat.kind === "file") {
+          hash = stat.hash
+          mtime = stat.mtime
+        }
+      } catch (error) {
+        // Keep mine also covers a file that vanished: saving then recreates it.
+        if (!(error instanceof AppError && error.code === "E_NOT_FOUND")) {
+          errors.getState().report(error, { context: "Keep local version" })
+          return
+        }
+      }
+      set((state) => ({
+        docs: state.docs.map((item) =>
+          item.path === path
+            ? {
+                ...item,
+                hash,
+                mtime,
+                // Dirty on purpose: the next save writes this buffer over the
+                // version that appeared on disk.
+                saved: null,
+                externalChange: false,
+                draft: null
+              }
+            : item
+        )
+      }))
+      shell.getState().flash("Keeping your version")
+    },
+
+    async checkExternal() {
+      const candidates = get().docs.filter(
+        (doc) => !doc.isUntitled && !isSafPath(doc.path) && doc.hash && !doc.readOnly
+      )
+      if (candidates.length === 0) return
+      const changed = new Set<string>()
+      await Promise.all(
+        candidates.map(async (doc) => {
+          try {
+            const stat = await bridge.stat(doc.path)
+            if (stat.kind !== "file") {
+              changed.add(doc.path)
+              return
+            }
+            if (stat.hash !== doc.hash || stat.mtime !== doc.mtime) {
+              if (!doc.externalChange) changed.add(doc.path)
+            }
+          } catch (error) {
+            if (error instanceof AppError && error.code === "E_NOT_FOUND") {
+              changed.add(doc.path)
+            }
+            // A timeout or permission failure is not evidence that the file
+            // changed; the next poll tries again.
+          }
+        })
+      )
+      if (changed.size === 0) return
+      set((state) => ({
+        docs: state.docs.map((doc) =>
+          changed.has(doc.path) ? { ...doc, externalChange: true } : doc
+        )
+      }))
+    },
+
+    clearWorkspace() {
+      for (const doc of get().docs) clearDraftTimer(doc.path)
+      set({ docs: [], activePath: null })
     }
   }))
+
+  // ------------------------------------------------------- file loading/drafts
+
+  /**
+   * Reads a file into an `OpenDoc`. Above [LARGE_FILE_BYTES] only the first
+   * [LARGE_FILE_CHUNK] bytes are loaded, and the document is read-only.
+   */
+  async function loadDocument(path: string, withDraft = true): Promise<OpenDoc> {
+    let size = 0
+    let mtime = 0
+    let hash = ""
+    try {
+      const stat = await bridge.stat(path)
+      size = stat.size
+      mtime = stat.mtime
+      hash = stat.hash
+    } catch {
+      // A host without fs.stat still supports the old whole-file read.
+    }
+    if (size > LARGE_FILE_BYTES) {
+      const chunk = await bridge.readChunk(path, 0, LARGE_FILE_CHUNK)
+      return initial(path, chunk.content, {
+        mtime: chunk.mtime,
+        hash: chunk.hash,
+        large: true,
+        truncated: chunk.nextOffset !== -1
+      })
+    }
+    const raw = await bridge.read(path)
+    const doc = initial(path, raw, { mtime, hash })
+    if (withDraft) await attachDraft(doc)
+    return doc
+  }
+
+  async function attachDraft(doc: OpenDoc): Promise<void> {
+    if (doc.readOnly) return
+    try {
+      const draft = await bridge.readDraft(doc.path)
+      if (!draft) return
+      // A draft identical to the disk text has nothing to recover.
+      if (normalizeText(draft.content) === doc.content) {
+        void bridge.deleteDraft(doc.path).catch(() => {})
+        return
+      }
+      doc.draft = {
+        content: normalizeText(draft.content),
+        eol: draft.eol === "\r\n" ? "\r\n" : "\n",
+        mtime: draft.mtime
+      }
+    } catch {
+      // No draft, or the host cannot read one: opening the file still works.
+    }
+  }
+
+  const draftTimers = new Map<string, number>()
+
+  function clearDraftTimer(path: string) {
+    const timer = draftTimers.get(path)
+    if (timer !== undefined) {
+      window.clearTimeout(timer)
+      draftTimers.delete(path)
+    }
+  }
+
+  /** Task 15: one `draft.save` three seconds after typing stops. */
+  function scheduleDraft(path: string) {
+    if (typeof window === "undefined") return
+    clearDraftTimer(path)
+    draftTimers.set(
+      path,
+      window.setTimeout(() => {
+        draftTimers.delete(path)
+        const doc = store.getState().docs.find((item) => item.path === path)
+        if (!doc || doc.isUntitled || isSafPath(path) || doc.readOnly) return
+        if (!isDirty(doc)) {
+          void bridge.deleteDraft(path).catch(() => {})
+          return
+        }
+        void bridge.saveDraft(path, serialize(doc), doc.eol).catch(() => {
+          // Autosave must never interrupt typing; the next idle period retries.
+        })
+      }, DRAFT_AUTOSAVE_MS)
+    )
+  }
+
+  function clearDraft(path: string) {
+    clearDraftTimer(path)
+    void bridge.deleteDraft(path).catch(() => {})
+  }
 
   function saveSaf(
     doc: OpenDoc,
@@ -535,6 +820,10 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
   const api = store as EditorStore
   api.dispose = () => {
     unsubscribe()
+    if (typeof window !== "undefined") {
+      for (const timer of draftTimers.values()) window.clearTimeout(timer)
+    }
+    draftTimers.clear()
     if (typeof window !== "undefined") {
       window.removeEventListener("beforeunload", persistSession)
       if (persistTimer !== null) {
