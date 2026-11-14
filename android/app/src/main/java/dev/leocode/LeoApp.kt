@@ -1,10 +1,15 @@
 package dev.leocode
 
 import android.app.Application
+import dev.leocode.core.CrashStore
 
 /**
  * Process entry point. Owns the single [AppGraph] so every Activity sees the
  * same workspace, path jail and trash.
+ *
+ * The crash handler is installed first: if graph construction throws (for
+ * example a corrupt workspace), the record is still written and the next launch
+ * opens [RecoveryActivity] (Task 8).
  */
 class LeoApp : Application() {
 
@@ -13,6 +18,7 @@ class LeoApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashStore.install(this)
         graph = AppGraph(this)
         graph.workspace.ensure()
     }

@@ -1,29 +1,39 @@
 package dev.leocode
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.ConsoleMessage
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import androidx.webkit.WebResourceErrorCompat
 import dev.leocode.bridge.AppInfo
 import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.SafDocument
@@ -31,22 +41,28 @@ import dev.leocode.bridge.SafPort
 import dev.leocode.bridge.StorageInfo
 import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.ThemeState
+import dev.leocode.core.CrashStore
 import dev.leocode.core.Workspace
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
+import java.util.ArrayDeque
+import java.util.Locale
 import kotlin.concurrent.thread
 
 /**
  * The IDE shell: one full-screen WebView served from APK assets over
  * https://appassets.androidplatform.net, with the v1 bridge attached.
  *
- * The Phase 0 device harness is debug-only (debug source set, not in release builds)
- * and is still reachable in a debug build:
+ * Task 8 additions: ActivityResult APIs, OnBackPressedDispatcher, edge-to-edge
+ * insets forwarded to CSS, renderer-loss recovery, a crash store that opens
+ * [RecoveryActivity] on the next launch, and an asset-origin error page.
+ *
+ * The Phase 0 device harness is debug-only (debug source set, not in release builds):
  *   adb shell am start -n dev.leocode/.HarnessActivity --es run all
  */
-class MainActivity : Activity(), SafPort {
+class MainActivity : ComponentActivity(), SafPort {
 
     companion object {
         private const val TAG = "LeoCode"
@@ -55,85 +71,587 @@ class MainActivity : Activity(), SafPort {
         private const val START_URL = "$ORIGIN/assets/web/index.html"
         const val DEV_URL_DEFAULT = "http://localhost:5173"
         const val DEV_URL_LOOPBACK = "http://127.0.0.1:5173"
-        private const val FIRST_REQUEST_CODE = 3000
+
+        /** Two renderer losses inside this window escalate to RecoveryActivity. */
+        private const val RENDERER_LOSS_WINDOW_MS = 60_000L
+    }
+
+    private lateinit var themeManager: ThemeManager
+    private lateinit var rootLayout: FrameLayout
+
+    private var bridge: BridgeHost? = null
+    private var webView: WebView? = null
+    private var rendererLossAt = 0L
+    private var restoredBannerPending = false
+    private var showingErrorPage = false
+
+    private var insetTopPx = 0f
+    private var insetBottomPx = 0f
+    private var imeBottomPx = 0f
+
+    private var devUrlExtra: String? = null
+    private val allowedOrigins = mutableSetOf(ORIGIN)
+    private val extraOrigins = mutableSetOf<String>()
+
+    private val assetLoader: WebViewAssetLoader by lazy {
+        WebViewAssetLoader.Builder()
+            .setDomain(DOMAIN)
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+    }
+
+    // --------------------------------------------------- ActivityResult queues
+    //
+    // SAF and permission prompts arrive from the bridge's IO thread and may
+    // overlap. One launcher per prompt type plus queued callbacks keeps every
+    // request matched to its own result; nothing is stored in a single slot.
+
+    private data class OpenRequest(val mime: String, val callback: (SafDocument?) -> Unit)
+    private data class SaveRequest(
+        val name: String,
+        val content: String,
+        val callback: (String?) -> Unit
+    )
+
+    private val openRequests = ArrayDeque<OpenRequest>()
+    private var openInFlight = false
+    private var pendingOpen: ((SafDocument?) -> Unit)? = null
+
+    private val saveRequests = ArrayDeque<SaveRequest>()
+    private var saveInFlight = false
+    private var pendingSave: SaveRequest? = null
+
+    private val permissionRequests = ArrayDeque<(Boolean) -> Unit>()
+    private var permissionInFlight = false
+    private var pendingPermission: ((Boolean) -> Unit)? = null
+
+    private val openLauncher: ActivityResultLauncher<Array<String>> =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            openInFlight = false
+            val callback = pendingOpen
+            pendingOpen = null
+            if (uri == null) {
+                callback?.invoke(null)
+            } else {
+                thread(name = "leocode-saf-read") {
+                    val name = queryUriFileName(uri)
+                    val content = readUriContent(uri)
+                    callback?.invoke(
+                        SafDocument(
+                            name = name,
+                            uri = uri.toString(),
+                            content = content,
+                            size = content.toByteArray(Charsets.UTF_8).size
+                        )
+                    )
+                }
+            }
+            pumpOpen()
+        }
+
+    private val saveLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+            saveInFlight = false
+            val request = pendingSave
+            pendingSave = null
+            if (request != null) {
+                if (uri != null) {
+                    runCatching {
+                        contentResolver.openOutputStream(uri)?.use { stream ->
+                            stream.write(request.content.toByteArray(Charsets.UTF_8))
+                            stream.flush()
+                        }
+                    }
+                }
+                request.callback(uri?.toString())
+            }
+            pumpSave()
+        }
+
+    private val permissionLauncher: ActivityResultLauncher<Array<String>> =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            permissionInFlight = false
+            val callback = pendingPermission
+            pendingPermission = null
+            callback?.invoke(result[android.Manifest.permission.READ_EXTERNAL_STORAGE] == true)
+            pumpPermission()
+        }
+
+    // ---------------------------------------------------------------- lifecycle
+
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Debug-only recovery demo: `am start ... --ez forceCrash true`. The crash
+        // handler stores a redacted record; the next launch opens RecoveryActivity.
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("forceCrash", false) == true) {
+            throw IllegalStateException("LeoCode debug forced crash")
+        }
+
+        // A crash from the previous process takes priority over the IDE: show the
+        // native recovery screen and let the user decide what to do next.
+        val crash = CrashStore.consume(this)
+        if (crash != null) {
+            startActivity(
+                Intent(this, RecoveryActivity::class.java)
+                    .putExtra(RecoveryActivity.EXTRA_CRASH, CrashStore.encode(crash))
+            )
+            finish()
+            return
+        }
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        themeManager = ThemeManager(this)
+        themeManager.applyToWindow()
+        configureOrigins()
+
+        rootLayout = FrameLayout(this).apply {
+            setBackgroundColor(themeManager.background())
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
+            applyWindowInsets(insets)
+            insets
+        }
+        setContentView(rootLayout)
+
+        installBackDispatcher()
+        attachWebView()
+    }
+
+    override fun onDestroy() {
+        val old = webView
+        webView = null
+        bridge?.close()
+        bridge = null
+        if (old != null) {
+            runCatching { (old.parent as? ViewGroup)?.removeView(old) }
+            runCatching { old.destroy() }
+        }
+        super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!::themeManager.isInitialized) return
+        themeManager.applyToWindow()
+        webView?.onResume()
+    }
+
+    override fun onPause() {
+        webView?.onPause()
+        super.onPause()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!::themeManager.isInitialized) return
+        themeManager.applyToWindow()
+        webView?.setBackgroundColor(themeManager.background())
+        bridge?.pushTheme()
+        if (::rootLayout.isInitialized) rootLayout.requestApplyInsets()
+    }
+
+    // ------------------------------------------------------------------ back
+
+    private fun installBackDispatcher() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val view = webView
+                if (view == null || showingErrorPage) {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                    return
+                }
+                view.evaluateJavascript(
+                    "(window.__leocodeBack && window.__leocodeBack()) ? 'true' : 'false'"
+                ) { result ->
+                    if (result?.trim('"') != "true") {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
+                    }
+                }
+            }
+        })
+    }
+
+    // ---------------------------------------------------------------- WebView
+
+    private fun configureOrigins() {
+        devUrlExtra = if (BuildConfig.DEBUG) intent?.getStringExtra("devUrl") else null
+        if (!BuildConfig.DEBUG) return
+        allowedOrigins.add(DEV_URL_DEFAULT)
+        allowedOrigins.add(DEV_URL_LOOPBACK)
+        devUrlExtra?.let { url ->
+            runCatching {
+                val uri = Uri.parse(url)
+                val origin = "${uri.scheme}://${uri.authority}"
+                allowedOrigins.add(origin)
+                extraOrigins.add(origin)
+            }
+        }
+    }
+
+    /** Creates the WebView and adds it to the root; reused by renderer recovery. */
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun attachWebView() {
+        showingErrorPage = false
+        val view = WebView(this).apply {
+            setBackgroundColor(themeManager.background())
+            overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                allowFileAccess = false
+                allowContentAccess = false
+                setSupportZoom(false)
+                builtInZoomControls = false
+                displayZoomControls = false
+                mediaPlaybackRequiresUserGesture = true
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                cacheMode = WebSettings.LOAD_DEFAULT
+                textZoom = 100
+                userAgentString = "$userAgentString LeoCode/${BuildConfig.VERSION_NAME}"
+            }
+        }
+
+        view.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                Log.d("LeoCodeWeb", "${message.message()}  (${message.sourceId()}:${message.lineNumber()})")
+                return true
+            }
+        }
+
+        view.webViewClient = object : WebViewClientCompat() {
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest
+            ): Boolean {
+                val url = request.url
+                if (url.scheme == "https" && url.host == DOMAIN) return false
+                if (BuildConfig.DEBUG) {
+                    val origin = "${url.scheme}://${url.authority}"
+                    if (allowedOrigins.contains(origin)) return false
+                    if ((url.scheme == "http" || url.scheme == "ws") &&
+                        (url.host == "localhost" || url.host == "127.0.0.1")
+                    ) {
+                        return false
+                    }
+                }
+                // Anything else (docs links, imports) opens in a real browser; the IDE
+                // WebView never navigates away from its own origin.
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }
+                return true
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                if (view !== webView) return
+                bridge?.pushTheme()
+                pushInsets()
+                if (restoredBannerPending) {
+                    restoredBannerPending = false
+                    showRestoredBanner(view)
+                }
+            }
+
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: WebResourceErrorCompat
+            ) {
+                if (view !== webView) return
+                if (!request.isForMainFrame) {
+                    Log.w(TAG, "subresource failed: ${request.url} (${error.errorCode})")
+                    return
+                }
+                Log.e(TAG, "main frame failed: ${request.url} (${error.errorCode}) ${error.description}")
+                if (request.url.toString().startsWith(ORIGIN)) {
+                    showAssetErrorPage(view, error.description.toString())
+                } else if (BuildConfig.DEBUG) {
+                    // The dev server went away: fall back to the embedded bundle.
+                    Log.w(TAG, "dev server failed; loading embedded assets")
+                    view.loadUrl(currentAssetUrl())
+                }
+            }
+
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: RenderProcessGoneDetail
+            ): Boolean {
+                if (view !== webView) return true
+                handleRendererGone(detail.didCrash())
+                return true
+            }
+        }
+
+        webView = view
+        rootLayout.addView(
+            view,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val router = BridgeRouter(
+            (application as LeoApp).graph.json,
+            listOf(
+                (application as LeoApp).graph.appHandler(themePort()) { appInfo() },
+                (application as LeoApp).graph.fsHandler(),
+                (application as LeoApp).graph.procHandler(),
+                (application as LeoApp).graph.termHandler(),
+                (application as LeoApp).graph.safHandler(this),
+                (application as LeoApp).graph.runtimeHandler()
+            ),
+            { message -> Log.w("LeoCodeBridge", message) }
+        )
+
+        val host = BridgeHost(
+            view,
+            themePort(),
+            extraOrigins,
+            router,
+            onClose = { (application as LeoApp).graph.closeBridge() }
+        )
+        bridge = host
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.addWebMessageListener(
+                view,
+                "LeoCodeAndroid",
+                allowedOrigins,
+                host
+            )
+            loadInitialPage(view)
+        } else {
+            view.loadDataWithBaseURL(
+                null,
+                """
+                <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+                <body style="font-family:system-ui;padding:24px;background:#0f1115;color:#e6e9ef">
+                  <h2>WebView is too old</h2>
+                  <p>LeoCode needs Android System WebView / Chrome 100 or newer.
+                  Update it from the Play Store and reopen the app.</p>
+                </body>
+                """.trimIndent(),
+                "text/html",
+                "utf-8",
+                null
+            )
+        }
+
+        ViewCompat.requestApplyInsets(rootLayout)
     }
 
     /**
-     * Each dialog gets its own request code, so two overlapping SAF picks or a
-     * permission prompt cannot overwrite each other's callback (Task 6).
+     * The renderer is a separate process that Android kills when it runs out of
+     * memory. Returning true from onRenderProcessGone prevents a process crash;
+     * one loss rebuilds the WebView, two in a minute escalate to the native
+     * recovery screen (the page may be stuck in a loop).
      */
-    private var nextRequestCode = java.util.concurrent.atomic.AtomicInteger(FIRST_REQUEST_CODE)
-    private val pendingPermissions = java.util.concurrent.ConcurrentHashMap<Int, (Boolean) -> Unit>()
-    private val pendingSafOpens = java.util.concurrent.ConcurrentHashMap<Int, (Uri?) -> Unit>()
-    private val pendingSafSaves =
-        java.util.concurrent.ConcurrentHashMap<Int, Pair<String, (Uri?) -> Unit>>()
+    private fun handleRendererGone(didCrash: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        val recent = rendererLossAt != 0L && now - rendererLossAt < RENDERER_LOSS_WINDOW_MS
+        rendererLossAt = now
+        Log.e(TAG, "WebView renderer gone (crash=$didCrash, rapid=$recent)")
 
-    private fun newRequestCode(): Int = nextRequestCode.getAndIncrement()
+        // Drop the dead view and transport first. BridgeHost.detach() leaves the
+        // graph (and its terminal/job state) alive for the replacement view.
+        val old = webView
+        webView = null
+        bridge?.detach()
+        bridge = null
+        if (old != null) {
+            runCatching { old.stopLoading() }
+            runCatching { (old.parent as? ViewGroup)?.removeView(old) }
+            runCatching { old.destroy() }
+        }
 
-    private fun checkStoragePermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (recent) {
+            startActivity(
+                Intent(this, RecoveryActivity::class.java)
+                    .putExtra(RecoveryActivity.EXTRA_REASON, RecoveryActivity.REASON_RENDERER)
+            )
+            finish()
+            return
+        }
+
+        restoredBannerPending = true
+        attachWebView()
+        Toast.makeText(this, "Restored after a problem", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showRestoredBanner(view: WebView) {
+        view.evaluateJavascript(
+            """
+            (function () {
+              var id = 'leocode-restored-banner';
+              var old = document.getElementById(id);
+              if (old) old.parentNode.removeChild(old);
+              var el = document.createElement('div');
+              el.id = id;
+              el.textContent = 'Restored after a problem';
+              el.style.cssText = 'position:fixed;left:50%;top:calc(var(--inset-top, 0px) + 12px);' +
+                'transform:translateX(-50%);z-index:2147483647;background:#1b2028;color:#fff;' +
+                'padding:8px 14px;border-radius:999px;font:500 13px system-ui,sans-serif;' +
+                'box-shadow:0 6px 20px rgba(0,0,0,.35);white-space:nowrap;';
+              document.body.appendChild(el);
+              setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 4000);
+            })()
+            """.trimIndent(),
+            null
+        )
+    }
+
+    private fun showAssetErrorPage(view: WebView, message: String) {
+        showingErrorPage = true
+        val safe = message.replace("<", "&lt;").replace(">", "&gt;")
+        view.loadDataWithBaseURL(
+            null,
+            """
+            <!doctype html>
+            <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+            <style>
+              body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1115;
+                   color:#e6e9ef;font-family:system-ui,sans-serif;padding:24px;text-align:center}
+              h2{margin:0 0 8px;font-size:19px} p{margin:0 0 20px;color:#b9c0cc;font-size:14px}
+              a{display:inline-block;padding:10px 18px;border-radius:10px;background:#2563eb;
+                color:#fff;text-decoration:none;font-weight:600}
+            </style></head>
+            <body><div>
+              <h2>Could not load LeoCode</h2>
+              <p>The embedded app failed to start.<br>$safe</p>
+              <a href="$START_URL">Retry</a>
+            </div></body></html>
+            """.trimIndent(),
+            "text/html",
+            "utf-8",
+            null
+        )
+    }
+
+    // ----------------------------------------------------------------- insets
+
+    /**
+     * Edge-to-edge: Android owns the real insets, CSS owns the layout. The page
+     * reads --inset-top (status bar), --inset-bottom (navigation bar) and
+     * --ime-bottom (keyboard above the navigation bar).
+     */
+    private fun applyWindowInsets(insets: WindowInsetsCompat) {
+        val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+        val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+        val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        val imePx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        } else {
+            @Suppress("DEPRECATION")
+            insets.systemWindowInsetBottom
+        }
+        insetTopPx = status.top / density
+        insetBottomPx = nav.bottom / density
+        imeBottomPx = (imePx - nav.bottom).coerceAtLeast(0) / density
+        pushInsets()
+    }
+
+    private fun pushInsets() {
+        val view = webView ?: return
+        val js = String.format(
+            Locale.US,
+            "document.documentElement.style.setProperty('--inset-top','%.1fpx');" +
+                "document.documentElement.style.setProperty('--inset-bottom','%.1fpx');" +
+                "document.documentElement.style.setProperty('--ime-bottom','%.1fpx');",
+            insetTopPx,
+            insetBottomPx,
+            imeBottomPx
+        )
+        view.post { runCatching { view.evaluateJavascript(js, null) } }
+    }
+
+    // ------------------------------------------------------------- SAF / perms
+
+    private fun checkStoragePermission(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
-                    PackageManager.PERMISSION_GRANTED
+                PackageManager.PERMISSION_GRANTED
         } else {
             true
         }
-    }
 
     override fun requestStoragePermission(callback: (Boolean) -> Unit) {
         if (checkStoragePermission()) {
             callback(true)
             return
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val code = newRequestCode()
-            pendingPermissions[code] = callback
-            runOnUiThread {
-                requestPermissions(
-                    arrayOf(
-                        android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                    ),
-                    code
-                )
-            }
-        } else {
-            callback(true)
+        runOnUiThread {
+            permissionRequests.addLast(callback)
+            pumpPermission()
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        val callback = pendingPermissions.remove(requestCode) ?: return
-        callback(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+    private fun pumpPermission() {
+        if (permissionInFlight) return
+        val next = permissionRequests.pollFirst() ?: return
+        permissionInFlight = true
+        pendingPermission = next
+        runCatching {
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
+        }.onFailure {
+            permissionInFlight = false
+            pendingPermission = null
+            next(false)
+        }
     }
 
     override fun openDocument(mime: String, onResult: (SafDocument?) -> Unit) {
-        pickDocument(mime) { uri ->
-            if (uri == null) {
-                onResult(null)
-                return@pickDocument
-            }
-            thread(name = "leocode-saf-read") {
-                val name = queryUriFileName(uri)
-                val content = readUriContent(uri)
-                onResult(
-                    SafDocument(
-                        name = name,
-                        uri = uri.toString(),
-                        content = content,
-                        size = content.toByteArray(Charsets.UTF_8).size
-                    )
-                )
-            }
+        runOnUiThread {
+            openRequests.addLast(OpenRequest(mime, onResult))
+            pumpOpen()
+        }
+    }
+
+    private fun pumpOpen() {
+        if (openInFlight) return
+        val next = openRequests.pollFirst() ?: return
+        openInFlight = true
+        pendingOpen = next.callback
+        runCatching { openLauncher.launch(arrayOf(next.mime)) }.onFailure {
+            openInFlight = false
+            pendingOpen = null
+            next.callback(null)
         }
     }
 
     override fun saveDocument(name: String, content: String, onResult: (String?) -> Unit) {
-        saveSafDocument(name, content) { uri -> onResult(uri?.toString()) }
+        runOnUiThread {
+            saveRequests.addLast(SaveRequest(name, content, onResult))
+            pumpSave()
+        }
+    }
+
+    private fun pumpSave() {
+        if (saveInFlight) return
+        val next = saveRequests.pollFirst() ?: return
+        saveInFlight = true
+        pendingSave = next
+        runCatching { saveLauncher.launch(next.name) }.onFailure {
+            saveInFlight = false
+            pendingSave = null
+            next.callback(null)
+        }
     }
 
     override fun storageInfo(): StorageInfo = StorageInfo(
@@ -143,49 +661,6 @@ class MainActivity : Activity(), SafPort {
         documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath,
         workspace = (application as LeoApp).graph.workspace.defaultWorkspace.absolutePath
     )
-
-    private fun pickDocument(mime: String, callback: (Uri?) -> Unit) {
-        val code = newRequestCode()
-        pendingSafOpens[code] = callback
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = mime
-        }
-        runOnUiThread { startActivityForResult(intent, code) }
-    }
-
-    private fun saveSafDocument(filename: String, content: String, callback: (Uri?) -> Unit) {
-        val code = newRequestCode()
-        pendingSafSaves[code] = content to callback
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TITLE, filename)
-        }
-        runOnUiThread { startActivityForResult(intent, code) }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        val uri = if (resultCode == RESULT_OK) data?.data else null
-
-        pendingSafOpens.remove(requestCode)?.let { callback ->
-            callback(uri)
-            return
-        }
-
-        val pendingSave = pendingSafSaves.remove(requestCode) ?: return
-        val (content, callback) = pendingSave
-        if (uri != null) {
-            runCatching {
-                contentResolver.openOutputStream(uri)?.use { stream ->
-                    stream.write(content.toByteArray(Charsets.UTF_8))
-                    stream.flush()
-                }
-            }
-        }
-        callback(uri)
-    }
 
     private fun queryUriFileName(uri: Uri): String {
         var name = "document.txt"
@@ -222,240 +697,55 @@ class MainActivity : Activity(), SafPort {
         } ?: ""
     }
 
+    // ------------------------------------------------------------------ theme
+
+    private fun themePort(): ThemePort = object : ThemePort {
+        override fun state(): ThemeState =
+            ThemeState(themeManager.mode, themeManager.effective())
+
+        override fun setMode(mode: String?): ThemeState {
+            val changed = themeManager.setMode(mode)
+            runOnUiThread {
+                themeManager.applyToWindow()
+                webView?.setBackgroundColor(themeManager.background())
+            }
+            if (changed) bridge?.pushTheme()
+            return state()
+        }
+    }
+
     /**
      * The `app.info` payload. Kept in the Activity because it reports WebView,
      * SDK and workspace details that are only meaningful for this window.
      */
-    private fun appInfo(workspace: Workspace, theme: ThemePort): AppInfo = AppInfo(
-        app = "LeoCode",
-        version = BuildConfig.VERSION_NAME,
-        mode = "android",
-        androidSdk = Build.VERSION.SDK_INT,
-        androidRelease = Build.VERSION.RELEASE,
-        abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "",
-        webview = runCatching { WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "",
-        workspace = workspace.defaultWorkspace.absolutePath,
-        theme = theme.state()
-    )
-
-    private lateinit var themeManager: ThemeManager
-    private lateinit var bridge: BridgeHost
-    private lateinit var webView: WebView
-
-    private var webViewDestroyed = false
-
-    @SuppressLint("SetJavaScriptEnabled")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        themeManager = ThemeManager(this)
-        themeManager.applyToWindow()
-
-        val workspace = (application as LeoApp).graph.workspace
-
-        webView = WebView(this).apply {
-            setBackgroundColor(themeManager.background())
-            overScrollMode = View.OVER_SCROLL_NEVER
-            isVerticalScrollBarEnabled = false
-            isHorizontalScrollBarEnabled = false
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                allowFileAccess = false
-                allowContentAccess = false
-                setSupportZoom(false)
-                builtInZoomControls = false
-                displayZoomControls = false
-                mediaPlaybackRequiresUserGesture = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                cacheMode = WebSettings.LOAD_DEFAULT
-                textZoom = 100
-                userAgentString = "$userAgentString LeoCode/${BuildConfig.VERSION_NAME}"
-            }
-        }
-
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                Log.d("LeoCodeWeb", "${message.message()}  (${message.sourceId()}:${message.lineNumber()})")
-                return true
-            }
-        }
-
-        val assets = WebViewAssetLoader.Builder()
-            .setDomain(DOMAIN)
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
-            .build()
-
-        val allowedOrigins = mutableSetOf(ORIGIN)
-        val devUrlExtra = if (BuildConfig.DEBUG) intent?.getStringExtra("devUrl") else null
-        val extraOrigins = mutableSetOf<String>()
-
-        if (BuildConfig.DEBUG) {
-            allowedOrigins.add(DEV_URL_DEFAULT)
-            allowedOrigins.add(DEV_URL_LOOPBACK)
-            devUrlExtra?.let { url ->
-                runCatching {
-                    val uri = Uri.parse(url)
-                    val origin = "${uri.scheme}://${uri.authority}"
-                    allowedOrigins.add(origin)
-                    extraOrigins.add(origin)
-                }
-            }
-        }
-
-        webView.webViewClient = object : WebViewClientCompat() {
-            override fun shouldInterceptRequest(
-                view: WebView,
-                request: WebResourceRequest
-            ): WebResourceResponse? = assets.shouldInterceptRequest(request.url)
-
-            override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest
-            ): Boolean {
-                val url = request.url
-                if (url.scheme == "https" && url.host == DOMAIN) return false
-                if (BuildConfig.DEBUG) {
-                    val origin = "${url.scheme}://${url.authority}"
-                    if (allowedOrigins.contains(origin)) return false
-                    if ((url.scheme == "http" || url.scheme == "ws") &&
-                        (url.host == "localhost" || url.host == "127.0.0.1")
-                    ) {
-                        return false
-                    }
-                }
-                // Anything else (docs links, imports) opens in a real browser; the IDE
-                // WebView never navigates away from its own origin.
-                runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }
-                return true
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                bridge.pushTheme()
-            }
-        }
-
-        val themePort = object : ThemePort {
-            override fun state(): ThemeState =
-                ThemeState(themeManager.mode, themeManager.effective())
-
-            override fun setMode(mode: String?): ThemeState {
-                val changed = themeManager.setMode(mode)
-                runOnUiThread {
-                    themeManager.applyToWindow()
-                    if (!webViewDestroyed) webView.setBackgroundColor(themeManager.background())
-                }
-                if (changed && ::bridge.isInitialized) bridge.pushTheme()
-                return state()
-            }
-        }
-
-        val graph = (application as LeoApp).graph
-        val router = BridgeRouter(
-            graph.json,
-            listOf(
-                graph.appHandler(themePort) { appInfo(workspace, themePort) },
-                graph.fsHandler(),
-                graph.procHandler(),
-                graph.termHandler(),
-                graph.safHandler(this),
-                graph.runtimeHandler()
-            ),
-            { message -> Log.w("LeoCodeBridge", message) }
+    private fun appInfo(): AppInfo {
+        val workspace: Workspace = (application as LeoApp).graph.workspace
+        return AppInfo(
+            app = "LeoCode",
+            version = BuildConfig.VERSION_NAME,
+            mode = "android",
+            androidSdk = Build.VERSION.SDK_INT,
+            androidRelease = Build.VERSION.RELEASE,
+            abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "",
+            webview = runCatching { WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "",
+            workspace = workspace.defaultWorkspace.absolutePath,
+            theme = themePort().state()
         )
-
-        bridge = BridgeHost(
-            webView,
-            themePort,
-            extraOrigins,
-            router,
-            onClose = { graph.closeBridge() }
-        )
-
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-            WebViewCompat.addWebMessageListener(
-                webView,
-                "LeoCodeAndroid",
-                allowedOrigins,
-                bridge
-            )
-            loadInitialPage(devUrlExtra)
-        } else {
-            webView.loadDataWithBaseURL(
-                null,
-                """
-                <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
-                <body style="font-family:system-ui;padding:24px;background:#0f1115;color:#e6e9ef">
-                  <h2>WebView is too old</h2>
-                  <p>LeoCode needs Android System WebView / Chrome 100 or newer.
-                  Update it from the Play Store and reopen the app.</p>
-                </body>
-                """.trimIndent(),
-                "text/html",
-                "utf-8",
-                null
-            )
-        }
-
-        setContentView(
-            FrameLayout(this).apply {
-                fitsSystemWindows = true
-                setBackgroundColor(themeManager.background())
-                addView(
-                    webView,
-                    FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                )
-            }
-        )
-
-        // Re-apply once the decor view is attached: some OEM ROMs (MIUI included)
-        // only honour navigation-bar colours after layout.
-        themeManager.applyToWindow()
     }
 
-    @Deprecated("Deprecated in API 33; kept because this app targets SDK 28.")
-    override fun onBackPressed() {
-        if (webViewDestroyed) {
-            super.onBackPressed()
-            return
-        }
-        webView.evaluateJavascript(
-            "(window.__leocodeBack && window.__leocodeBack()) ? 'true' : 'false'"
-        ) { result ->
-            if (result?.trim('"') != "true") {
-                @Suppress("DEPRECATION")
-                super.onBackPressed()
-            }
-        }
-    }
+    // ------------------------------------------------------------------ loading
 
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        themeManager.applyToWindow()
-        webView.setBackgroundColor(themeManager.background())
-        bridge.pushTheme()
-    }
+    private fun currentAssetUrl(): String =
+        DevServerConfig.buildPageUrl(START_URL, themeManager.mode, themeManager.effective())
 
-    override fun onResume() {
-        super.onResume()
-        themeManager.applyToWindow()
-        if (!webViewDestroyed) webView.onResume()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (!webViewDestroyed) webView.onPause()
-    }
-
-    private fun loadInitialPage(devUrlExtra: String?) {
-        val fallbackUrl = DevServerConfig.buildPageUrl(START_URL, themeManager.mode, themeManager.effective())
+    private fun loadInitialPage(target: WebView) {
+        val fallbackUrl = currentAssetUrl()
 
         // If not a debug build or no explicit dev server was requested, load embedded assets immediately
-        if (!BuildConfig.DEBUG || (devUrlExtra.isNullOrBlank() && !intent.getBooleanExtra("devMode", false))) {
-            webView.loadUrl(fallbackUrl)
+        if (!BuildConfig.DEBUG ||
+            (devUrlExtra.isNullOrBlank() && intent?.getBooleanExtra("devMode", false) != true)
+        ) {
+            target.loadUrl(fallbackUrl)
             return
         }
 
@@ -472,8 +762,8 @@ class MainActivity : Activity(), SafPort {
             }
 
             runOnUiThread {
-                if (!isFinishing && !webViewDestroyed) {
-                    webView.loadUrl(finalUrl)
+                if (webView === target && !isFinishing) {
+                    target.loadUrl(finalUrl)
                 }
             }
         }
@@ -503,17 +793,5 @@ class MainActivity : Activity(), SafPort {
                 false
             }
         }
-    }
-
-    override fun onDestroy() {
-        if (!webViewDestroyed) {
-            webViewDestroyed = true
-            runCatching { bridge.close() }
-            runCatching {
-                (webView.parent as? FrameLayout)?.removeView(webView)
-                webView.destroy()
-            }
-        }
-        super.onDestroy()
     }
 }

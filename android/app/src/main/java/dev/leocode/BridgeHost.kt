@@ -165,6 +165,15 @@ class BridgeHost(
         io.shutdownNow()
     }
 
+    /**
+     * Drop the transport without tearing down sessions/jobs. Used when the
+     * WebView renderer dies and the Activity rebuilds the view: the graph (and
+     * any terminal owned by it) must survive into the new WebView.
+     */
+    fun detach() {
+        io.shutdownNow()
+    }
+
     // -------------------------------------------------------------------- streams
 
     /** One sink per request; coalesces text/bytes and posts events on the main thread. */
