@@ -19,6 +19,7 @@ import {
   type ThemeMode,
   type ThemeState
 } from "./types"
+import { MAX_MESSAGE_BYTES } from "./limits"
 import { isIdempotentRead, timeoutMsFor } from "./timeouts"
 
 /** The object injected by WebViewCompat.addWebMessageListener. */
@@ -52,14 +53,39 @@ interface Pending {
  * disconnect is ignored instead of resolving a settled promise. Idempotent reads
  * are retried once after a timeout; writes and streams never are.
  */
+const notConnected = () =>
+  new AppError(
+    "E_BRIDGE_DISCONNECTED",
+    "The LeoCode host stopped responding. Reload the page.",
+    true
+  )
+
+/**
+ * The real bridge, Tasks 11 and 12 review fixes.
+ *
+ * Every request carries a per-method timeout, an optional `AbortSignal` and a
+ * pending slot that is always removed. A late reply after a timeout or abort is
+ * not just dropped: for `proc.run`, `term.open` and `runtime.install` it is used
+ * to cancel/close the work the host started (W-08). After a disconnect every
+ * call fails immediately and open streams receive a failure callback (W-07).
+ */
 export class AndroidBridge implements Bridge {
   readonly mode = "android" as const
 
   private seq = 0
   private readonly pending = new Map<string, Pending>()
   private readonly streams = new Map<string, StreamHandler>()
+  private readonly streamFailures = new Map<string, (error: AppError) => void>()
   private readonly themeListeners = new Set<(state: ThemeState) => void>()
   private readonly onDisconnect = () => this.disconnect()
+  /** Requests whose reply arrived after the client gave up, for cleanup. */
+  private readonly late = new Map<
+    string,
+    { method: string; payload: unknown; expires: number }
+  >()
+  private disconnected = false
+  /** Two timeouts in a row suggest the host is gone; the third disconnects. */
+  private consecutiveTimeouts = 0
 
   constructor(private readonly channel: InjectedChannel) {
     channel.onmessage = (event) => this.receive(event.data)
@@ -71,21 +97,46 @@ export class AndroidBridge implements Bridge {
 
   /** Reject everything outstanding, for a detached WebView or renderer loss. */
   disconnect() {
+    if (this.disconnected) return
+    this.disconnected = true
     const outstanding = [...this.pending.values()]
     this.pending.clear()
     this.streams.clear()
-    const error = new AppError(
-      "E_BRIDGE_DISCONNECTED",
-      "The LeoCode host stopped responding. Reload the page.",
-      true
-    )
+    const failures = [...this.streamFailures.values()]
+    this.streamFailures.clear()
+    const error = notConnected()
     for (const entry of outstanding) {
       entry.cleanup()
       entry.reject(error)
     }
+    for (const fail of failures) {
+      try {
+        fail(error)
+      } catch {
+        // A stream callback must not break the disconnect of the others.
+      }
+    }
   }
 
   // ------------------------------------------------------------- transport
+
+  private checkChannel() {
+    if (typeof window === "undefined") return
+    const injected = window.LeoCodeAndroid
+    if (injected && injected !== this.channel) this.disconnect()
+  }
+
+  private rememberLate(id: string, method: string, payload: unknown) {
+    const now = Date.now()
+    for (const [key, entry] of this.late) {
+      if (entry.expires < now) this.late.delete(key)
+    }
+    this.late.set(id, { method, payload, expires: now + 60_000 })
+    if (this.late.size > 50) {
+      const oldest = this.late.keys().next()
+      if (!oldest.done) this.late.delete(oldest.value)
+    }
+  }
 
   private send<T>(
     method: string,
@@ -94,6 +145,10 @@ export class AndroidBridge implements Bridge {
     options?: RequestOptions
   ): { id: string; result: Promise<T> } {
     const id = String(++this.seq)
+    this.checkChannel()
+    if (this.disconnected) {
+      return { id, result: Promise.reject(notConnected()) }
+    }
     if (onEvent) this.streams.set(id, onEvent)
 
     const result = new Promise<T>((resolve, reject) => {
@@ -117,17 +172,20 @@ export class AndroidBridge implements Bridge {
         fn(value)
       }
 
-      const fail = (error: AppError) => {
+      const fail = (error: AppError, remember: boolean) => {
         this.streams.delete(id)
+        this.streamFailures.delete(id)
+        if (remember) this.rememberLate(id, method, payload)
         settle(reject, error)
       }
 
-      const onAbort = () => fail(new AppError("E_CANCELLED", `${method} was cancelled`))
+      const onAbort = () => fail(new AppError("E_CANCELLED", `${method} was cancelled`), true)
 
       this.pending.set(id, {
         resolve: (value) => settle(resolve, value),
         reject: (error) => {
           this.streams.delete(id)
+          this.streamFailures.delete(id)
           settle(reject, error)
         },
         cleanup
@@ -140,25 +198,36 @@ export class AndroidBridge implements Bridge {
 
       const timeoutMs = timeoutMsFor(method, options)
       if (timeoutMs !== null) {
-        timer = window.setTimeout(
-          () =>
-            fail(
-              new AppError(
-                "E_TIMEOUT",
-                `${method} timed out after ${Math.round(timeoutMs / 1000)} s`,
-                true
-              )
+        timer = window.setTimeout(() => {
+          this.consecutiveTimeouts += 1
+          fail(
+            new AppError(
+              "E_TIMEOUT",
+              `${method} timed out after ${Math.round(timeoutMs / 1000)} s`,
+              true
             ),
-          timeoutMs
-        )
+            true
+          )
+          if (this.consecutiveTimeouts >= 3) this.disconnect()
+        }, timeoutMs)
       }
       signal?.addEventListener("abort", onAbort, { once: true })
 
+      let text: string
       try {
-        this.channel.postMessage(JSON.stringify({ v: 1, id, method, payload }))
+        text = JSON.stringify({ v: 1, id, method, payload })
       } catch (error) {
-        this.streams.delete(id)
-        settle(reject, error)
+        fail(new AppError("E_BAD_ENVELOPE", `${method} payload is not serialisable`), false)
+        return
+      }
+      if (new TextEncoder().encode(text).length > MAX_MESSAGE_BYTES) {
+        fail(new AppError("E_LIMIT", `${method} is too large to send`), false)
+        return
+      }
+      try {
+        this.channel.postMessage(text)
+      } catch (error) {
+        fail(new AppError("E_IO", `${method} could not be sent`), false)
       }
     })
 
@@ -198,13 +267,32 @@ export class AndroidBridge implements Bridge {
     }
 
     if (message.event) {
-      if (message.id) this.streams.get(message.id)?.(message.event, message.payload)
+      if (message.id) {
+        const handler = this.streams.get(message.id)
+        if (handler) {
+          // A host payload must not throw into the window error handler (W-37).
+          try {
+            handler(message.event, message.payload)
+          } catch {
+            this.streams.delete(message.id)
+            this.streamFailures.delete(message.id)
+          }
+        }
+      }
       return
     }
 
     if (!message.id) return
     const pending = this.pending.get(message.id)
-    if (!pending) return
+    if (!pending) {
+      const late = this.late.get(message.id)
+      if (late) {
+        this.late.delete(message.id)
+        if (message.ok) this.cancelLateRequest(late, message.payload)
+      }
+      return
+    }
+    this.consecutiveTimeouts = 0
 
     if (message.ok) {
       pending.resolve(message.payload)
@@ -217,6 +305,34 @@ export class AndroidBridge implements Bridge {
           message.error?.message ?? "unknown bridge error"
         )
       )
+    }
+  }
+
+  /** The client gave up; stop what the host started when the reply finally lands. */
+  private cancelLateRequest(
+    late: { method: string; payload: unknown },
+    replyPayload: unknown
+  ) {
+    const reply = replyPayload as { jobId?: string; sessionId?: string } | null
+    if (late.method === "proc.run" && reply?.jobId) {
+      void this.request("proc.cancel", { jobId: reply.jobId }, { timeoutMs: 2_000 }).catch(
+        () => {
+          /* the job may already be gone */
+        }
+      )
+    } else if (late.method === "term.open" && reply?.sessionId) {
+      void this.request("term.close", { sessionId: reply.sessionId }, { timeoutMs: 2_000 }).catch(
+        () => {
+          /* the PTY may already be gone */
+        }
+      )
+    } else if (late.method === "runtime.install") {
+      const id = (late.payload as { id?: string } | null)?.id
+      if (id) {
+        void this.request("runtime.cancel", { id }, { timeoutMs: 2_000 }).catch(() => {
+          /* the install may have finished */
+        })
+      }
     }
   }
 
@@ -261,8 +377,10 @@ export class AndroidBridge implements Bridge {
     options?: RequestOptions
   ): Promise<number> {
     let finish: (code: number) => void = () => {}
-    const exit = new Promise<number>((resolve) => {
+    let failExit: (reason: unknown) => void = () => {}
+    const exit = new Promise<number>((resolve, reject) => {
       finish = resolve
+      failExit = reject
     })
 
     const { id, result } = this.send<{ jobId: string }>(
@@ -276,11 +394,14 @@ export class AndroidBridge implements Bridge {
       options
     )
 
+    this.streamFailures.set(id, (error) => failExit(error))
+
     let reply: { jobId: string }
     try {
       reply = await result
     } catch (error) {
       this.streams.delete(id)
+      this.streamFailures.delete(id)
       throw error
     }
 
@@ -292,7 +413,10 @@ export class AndroidBridge implements Bridge {
       }
     })
 
-    return exit.finally(() => this.streams.delete(id))
+    return exit.finally(() => {
+      this.streams.delete(id)
+      this.streamFailures.delete(id)
+    })
   }
 
   // ----------------------------------------------------------------- theme
@@ -335,18 +459,24 @@ export class AndroidBridge implements Bridge {
           channel.receive(base64ToBytes(payload.b64 ?? ""))
         } else if (event === "term.exit") {
           this.streams.delete(id)
+          this.streamFailures.delete(id)
           channel.receiveExit(payload.code ?? -1)
         }
       },
       { ...request, signal: request?.signal ?? options.signal }
     )
-    channel.bind(() => this.streams.delete(id))
+    channel.bind(() => {
+      this.streams.delete(id)
+      this.streamFailures.delete(id)
+    })
+    this.streamFailures.set(id, () => channel.receiveExit(-1))
 
     let reply: { sessionId: string }
     try {
       reply = await result
     } catch (error) {
       this.streams.delete(id)
+      this.streamFailures.delete(id)
       channel.detach()
       throw error
     }
@@ -383,18 +513,24 @@ export class AndroidBridge implements Bridge {
           channel.receive(base64ToBytes(payload.b64 ?? ""))
         } else if (event === "term.exit") {
           this.streams.delete(id)
+          this.streamFailures.delete(id)
           channel.receiveExit(payload.code ?? -1)
         }
       },
       request
     )
-    channel.bind(() => this.streams.delete(id))
+    channel.bind(() => {
+      this.streams.delete(id)
+      this.streamFailures.delete(id)
+    })
+    this.streamFailures.set(id, () => channel.receiveExit(-1))
 
     let reply: { sessionId?: string; scrollback?: string; alive?: boolean; exitCode?: number }
     try {
       reply = await result
     } catch (error) {
       this.streams.delete(id)
+      this.streamFailures.delete(id)
       channel.detach()
       if (
         error instanceof AppError &&

@@ -13,7 +13,7 @@ import kotlinx.serialization.json.JsonObject
  */
 class SafHandler(
     private val port: SafPort,
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = BridgeJson.value
 ) : AsyncBridgeHandler {
 
     companion object {

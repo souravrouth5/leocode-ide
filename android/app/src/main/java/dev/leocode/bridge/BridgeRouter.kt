@@ -1,5 +1,6 @@
 package dev.leocode.bridge
 
+import dev.leocode.core.Redactor
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -117,15 +118,31 @@ class BridgeRouter(
             send(errorReply(id, e.errorCode, e.message))
         } catch (e: Throwable) {
             val correlationId = newCorrelationId()
-            log("E_INTERNAL $correlationId: ${e.javaClass.name}: ${e.message}")
+            log("E_INTERNAL $correlationId: ${Redactor.redact("${e.javaClass.name}: ${e.message}")}")
             send(errorReply(id, ErrorCode.E_INTERNAL, INTERNAL_MESSAGE, correlationId))
         }
     }
 
+    /**
+     * Strict envelope rules (B-18): `v` must be the number 1 when present, and a
+     * payload must be an object. A non-object payload used to become `{}` and
+     * fail later with a misleading error; the router now says what is wrong.
+     */
     private fun validate(request: JsonObject, id: JsonElement): JsonObject? {
-        val version = (request["v"] as? JsonPrimitive)?.intOrNull
-        if (request["v"] != null && request["v"] != JsonNull && version != 1) {
-            return errorReply(id, ErrorCode.E_UNSUPPORTED, "unsupported protocol version")
+        val version = request["v"]
+        if (version != null && version != JsonNull) {
+            val primitive = version as? JsonPrimitive
+                ?: return errorReply(id, ErrorCode.E_BAD_ENVELOPE, "v must be the number 1")
+            if (primitive.isString) {
+                return errorReply(id, ErrorCode.E_BAD_ENVELOPE, "v must be the number 1")
+            }
+            if (primitive.intOrNull != 1) {
+                return errorReply(id, ErrorCode.E_UNSUPPORTED, "unsupported protocol version")
+            }
+        }
+        val payload = request["payload"]
+        if (payload != null && payload != JsonNull && payload !is JsonObject) {
+            return errorReply(id, ErrorCode.E_BAD_ENVELOPE, "payload must be an object")
         }
         if (methodOf(request) == null) {
             return errorReply(id, ErrorCode.E_BAD_ENVELOPE, "method is required")

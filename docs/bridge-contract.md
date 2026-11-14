@@ -31,9 +31,9 @@ handlers in Tasks 5–6), **planned** = added by the v9 task named.
 - **Exactly one reply** per request, including for requests that wait on the user (SAF pickers,
   permission dialogs, host-key prompts). These are keyed by request `id`; there are no single-slot
   callbacks, so concurrent requests never overwrite each other.
-- **Size limits:** max incoming message 256 KB (`E_LIMIT`). `fs.read` returns at most `maxBytes`
-  (default 512 KB) and a `nextOffset` for chunked reads; files above 2 MB require chunking.
-  `fs.write` content max 4 MB. SAF reads are capped the same way.
+- **Size limits:** max incoming message 8 MB (`E_LIMIT`), which covers a 4 MB write plus JSON
+  escaping. `fs.read` returns at most 2 MB; chunked reads (`maxBytes` / `nextOffset`) are planned
+  with Task 15. `fs.write` content max 4 MB. SAF reads and writes are capped at 4 MB.
 - **Streaming:** process and terminal output is coalesced at 16 ms per stream. Terminal output is
   gated by `term.ack` credit (default window 256 KB); the host pauses reading the PTY when credit
   is exhausted.
@@ -59,10 +59,14 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 | Fast | `app.*`, `fs.list/read/mkdir/rename/delete`, `term.write/resize/ack`, `root.status` | 10 s |
 | Write | `fs.write`, `workspace.*` | 20 s |
 | User-wait | `saf.*`, `storage.requestPermission`, `root.request`, `ssh.hostkey.answer` | none (user-driven; cancellable) |
-| Long, streamed | `proc.run`, `fs.search`, `git.clone/fetch/pull/push`, `runtime.install` | reply on start within 10 s; then events, no overall timeout |
+| Long, streamed | `proc.run`, `fs.search`, `git.clone/fetch/pull/push` | reply on start within 10 s; then events, no overall timeout |
+| Install | `runtime.install` | no client timeout: the host replies when the install finishes (Task 25 will move the reply to the start); cancel with `runtime.cancel` |
 
 If the host stops answering entirely (WebView detached, renderer restarted), every pending
-request rejects with `E_BRIDGE_DISCONNECTED` (web side only).
+request rejects with `E_BRIDGE_DISCONNECTED` (web side only). The client raises this after three
+consecutive request timeouts, when the injected channel object changes, or when the page
+dispatches `leocode:bridge-disconnected`; open streams receive their failure callback and later
+calls fail immediately.
 
 ## Error codes
 
@@ -154,7 +158,8 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `language.list` | `{}` → `[{ id, name, extensions[], runtimeId, hasRepl, template }]` | planned (Task 30) | Language providers (D-017); Python is the first |
 | `trust.check` / `trust.grant` | `{ project, action }` → `{ trusted }` | planned (Task 26) | Scripts, pip, venv, Git hooks |
 
-> **Runtime prototype codes.** The Python installer prototype (commit `1a279a2`) emits `E_BAD_MANIFEST`, `E_INTEGRITY` and `E_HEALTH_CHECK`. They are not in the table above yet. Task 25 decides whether to add `E_INTEGRITY` and `E_HEALTH_CHECK` to the `ErrorCode` enum (and the catalog) or map them onto existing codes. `runtime.install` must reply within 10 s and then stream `runtime.progress` events (see Timeouts).
+> **Runtime prototype codes.** The Python installer prototype (commit `1a279a2`) emits `E_BAD_MANIFEST`, `E_INTEGRITY` and `E_HEALTH_CHECK`. They are not in the table above yet. Task 25 decides whether to add `E_INTEGRITY` and `E_HEALTH_CHECK` to the `ErrorCode` enum (and the catalog) or map them onto existing codes. `runtime.install` currently replies when the install finishes and streams `runtime.progress` until
+then; the client has no default timeout for it (see Timeouts). Task 25 moves the reply to the start.
 
 ## Events
 

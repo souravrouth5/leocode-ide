@@ -33,7 +33,10 @@ describe("bridge timeout policy (Task 11)", () => {
 
   it("limits streamed methods to their reply-on-start", () => {
     expect(defaultTimeoutMs("proc.run")).toBe(FAST_TIMEOUT_MS)
-    expect(defaultTimeoutMs("runtime.install")).toBe(FAST_TIMEOUT_MS)
+  })
+
+  it("never times out an install that replies when it finishes", () => {
+    expect(defaultTimeoutMs("runtime.install")).toBeNull()
   })
 
   it("lets a call override or disable its timeout", () => {

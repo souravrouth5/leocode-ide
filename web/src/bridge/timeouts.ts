@@ -33,6 +33,9 @@ const IDEMPOTENT_READS = new Set([
 
 export function defaultTimeoutMs(method: string): number | null {
   if (USER_WAIT_METHODS.has(method) || method.startsWith("saf.")) return null
+  // The host replies when an install finishes, not on start, so a fixed timeout
+  // would abort every real install (B-03/W-01). Cancellation is runtime.cancel.
+  if (method === "runtime.install") return null
   if (method === "fs.write" || method.startsWith("workspace.")) return WRITE_TIMEOUT_MS
   return FAST_TIMEOUT_MS
 }

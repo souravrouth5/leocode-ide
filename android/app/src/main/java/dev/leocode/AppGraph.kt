@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Environment
 import dev.leocode.bridge.AppHandler
 import dev.leocode.bridge.AppInfo
+import dev.leocode.bridge.BridgeJson
 import dev.leocode.bridge.FsHandler
 import dev.leocode.bridge.ProcHandler
 import dev.leocode.bridge.RuntimeHandler
@@ -40,7 +41,7 @@ class AppGraph(private val app: Application) {
         private const val RUN_DIR = "run"
     }
 
-    val json = Json { ignoreUnknownKeys = true }
+    val json = BridgeJson.value
 
     val workspace = Workspace(app.filesDir)
 
@@ -96,7 +97,11 @@ class AppGraph(private val app: Application) {
 
     private val procHandler = ProcHandler(workspace, jail, supervisor)
     private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json)
-    private val runtimeHandler = RuntimeHandler(app, workspace)
+    private val runtimeHandler = RuntimeHandler(
+        app,
+        workspace,
+        log = { line -> android.util.Log.w("LeoCodeRuntime", line) }
+    )
 
     fun fsHandler(): FsHandler = FsHandler(workspace, jail, trash, json)
 

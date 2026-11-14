@@ -17,7 +17,7 @@ interface ThemePort {
 class AppHandler(
     private val theme: ThemePort,
     private val appInfo: () -> AppInfo,
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = BridgeJson.value
 ) : BridgeHandler {
 
     companion object {

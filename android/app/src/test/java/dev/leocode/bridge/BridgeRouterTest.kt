@@ -3,6 +3,7 @@ package dev.leocode.bridge
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -102,6 +103,47 @@ class BridgeRouterTest {
     }
 
     @Test
+    fun `a string version is malformed not unsupported`() {
+        val router = router(
+            FakeHandler(setOf("known.method")) { _, _ -> JsonObject(emptyMap()) }
+        )
+        val reply = router.dispatch(
+            buildJsonObject {
+                put("v", "1")
+                put("id", "v-string")
+                put("method", "known.method")
+                put("payload", JsonObject(emptyMap()))
+            }
+        )
+
+        assertFalse(isOk(reply))
+        assertEquals("E_BAD_ENVELOPE", errorCode(reply))
+    }
+
+    @Test
+    fun `a non-object payload is rejected before the handler`() {
+        var called = false
+        val router = router(
+            FakeHandler(setOf("known.method")) { _, _ ->
+                called = true
+                JsonObject(emptyMap())
+            }
+        )
+        val reply = router.dispatch(
+            buildJsonObject {
+                put("v", 1)
+                put("id", "array-payload")
+                put("method", "known.method")
+                put("payload", kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive(1))))
+            }
+        )
+
+        assertFalse(isOk(reply))
+        assertEquals("E_BAD_ENVELOPE", errorCode(reply))
+        assertFalse(called)
+    }
+
+    @Test
     fun `missing method returns E_BAD_ENVELOPE`() {
         val router = router(
             FakeHandler(setOf("known.method")) { _, _ -> JsonObject(emptyMap()) }
@@ -151,6 +193,8 @@ class BridgeRouterTest {
         val logged = logs.single()
         assertTrue(logged.contains(correlationId))
         assertTrue(logged.contains("secret detail"))
+        assertTrue(logged.contains("<path>"))
+        assertFalse(logged.contains("/data/data/dev.leocode"))
     }
 
     @Test

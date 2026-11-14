@@ -140,4 +140,109 @@ describe("AndroidBridge transport (Task 11)", () => {
       message: "boom"
     })
   })
+
+  it("cancels a process whose reply arrives after the timeout", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const pending = bridge.run(["sleep", "10"], ".", () => {})
+    const timedOut = expect(pending).rejects.toMatchObject({ code: "E_TIMEOUT" })
+    await vi.advanceTimersByTimeAsync(10_001)
+    await timedOut
+
+    channel.reply(0, { jobId: "job-1" })
+    await vi.advanceTimersByTimeAsync(5)
+
+    expect(channel.sent.some((message) => message.method === "proc.cancel")).toBe(true)
+  })
+
+  it("closes an orphan PTY whose open reply arrives after the timeout", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const pending = bridge.openTerminal({
+      cwd: ".",
+      cols: 80,
+      rows: 24,
+      onData: () => {},
+      onExit: () => {}
+    })
+    const timedOut = expect(pending).rejects.toMatchObject({ code: "E_TIMEOUT" })
+    await vi.advanceTimersByTimeAsync(10_001)
+    await timedOut
+
+    channel.reply(0, { sessionId: "session-1", pid: 42 })
+    await vi.advanceTimersByTimeAsync(5)
+
+    expect(channel.sent.some((message) => message.method === "term.close")).toBe(true)
+  })
+
+  it("fails an open run and later calls after disconnect", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const run = bridge.run(["sleep", "10"], ".", () => {})
+    channel.reply(0, { jobId: "job-1" })
+    await Promise.resolve()
+
+    bridge.disconnect()
+    await expect(run).rejects.toMatchObject({ code: "E_BRIDGE_DISCONNECTED" })
+
+    const before = channel.sent.length
+    await expect(bridge.list(".")).rejects.toMatchObject({ code: "E_BRIDGE_DISCONNECTED" })
+    expect(channel.sent).toHaveLength(before)
+  })
+
+  it("disconnects when the injected channel is replaced", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    ;(window as any).LeoCodeAndroid = { postMessage: () => {}, onmessage: null }
+
+    await expect(bridge.list(".")).rejects.toMatchObject({ code: "E_BRIDGE_DISCONNECTED" })
+    expect(channel.sent).toHaveLength(0)
+    delete (window as any).LeoCodeAndroid
+  })
+
+  it("fails fast after three consecutive timeouts", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    for (let index = 0; index < 3; index += 1) {
+      const pending = bridge.write(`f${index}.txt`, "x")
+      const timedOut = expect(pending).rejects.toMatchObject({ code: "E_TIMEOUT" })
+      await vi.advanceTimersByTimeAsync(20_001)
+      await timedOut
+    }
+
+    const before = channel.sent.length
+    await expect(bridge.read("a.txt")).rejects.toMatchObject({ code: "E_BRIDGE_DISCONNECTED" })
+    expect(channel.sent).toHaveLength(before)
+  })
+
+  it("rejects an oversize request without posting it", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    await expect(bridge.write("big.txt", "x".repeat(9 * 1024 * 1024))).rejects.toMatchObject({
+      code: "E_LIMIT"
+    })
+    expect(channel.sent).toHaveLength(0)
+  })
+
+  it("survives a stream payload that throws", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    const opening = bridge.openTerminal({
+      cwd: ".",
+      cols: 80,
+      rows: 24,
+      onData: () => {},
+      onExit: () => {}
+    })
+    channel.reply(0, { sessionId: "s1", pid: 1 })
+    const handle = await opening
+    expect(handle).not.toBeNull()
+
+    expect(() => channel.emit(0, "term.data", { b64: "not-base64!!" })).not.toThrow()
+  })
 })

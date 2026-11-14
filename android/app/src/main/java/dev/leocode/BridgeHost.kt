@@ -8,6 +8,7 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
+import dev.leocode.bridge.BridgeJson
 import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.EventSink
 import dev.leocode.bridge.SafeEnvelope
@@ -41,7 +42,10 @@ class BridgeHost(
 
     companion object {
         private const val TAG = "LeoCodeBridge"
-        private const val MAX_MESSAGE_BYTES = 256 * 1024
+        // Covers a 4 MB write plus JSON escaping/base64 growth (B-04). The old
+        // 256 KB cap made the documented 4 MB write unreachable and surfaced as
+        // a 20 s timeout because the E_LIMIT reply had no id.
+        private const val MAX_MESSAGE_BYTES = 8 * 1024 * 1024
 
         fun isOriginAllowed(
             scheme: String?,
@@ -105,7 +109,7 @@ class BridgeHost(
         }
     }
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = BridgeJson.value
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "leocode-bridge").apply { isDaemon = true }

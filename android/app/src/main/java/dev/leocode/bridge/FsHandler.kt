@@ -23,7 +23,7 @@ class FsHandler(
     private val workspace: Workspace,
     private val jail: PathJail,
     private val trash: Trash,
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = BridgeJson.value
 ) : BridgeHandler {
 
     companion object {

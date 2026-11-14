@@ -20,7 +20,7 @@ class ProcHandler(
     private val workspace: Workspace,
     private val jail: PathJail,
     private val supervisor: ProcessSupervisor,
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = BridgeJson.value
 ) : StreamingBridgeHandler, Closeable {
 
     companion object {

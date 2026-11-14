@@ -27,7 +27,7 @@ class TermHandler(
     private val jail: PathJail,
     private val childEnv: Map<String, String>,
     private val registry: TerminalRegistry,
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = BridgeJson.value
 ) : AsyncBridgeHandler, Closeable {
 
     companion object {
