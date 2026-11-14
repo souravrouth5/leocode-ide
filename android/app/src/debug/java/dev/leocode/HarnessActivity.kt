@@ -65,6 +65,8 @@ class HarnessActivity : Activity() {
             Test("T5", "output flood, bounded buffer") { t5Flood() },
             Test("T6", "native PTY smoke test") { t6Pty() },
             Test("T7", "system shell applet inventory") { t7Toybox() },
+            Test("T8", "PTY child environment is allowlisted") { t8PtyEnv() },
+            Test("T9", "PTY child has no fds above stderr") { t9PtyFds() },
             Test("S1", "shared storage with legacy permissions") { s1SharedStorage() }
         )
 
@@ -319,8 +321,54 @@ class HarnessActivity : Activity() {
             if (text.contains("pty-ok") && exit == 7) "  PASS" else "  FAIL"
     }
 
-    private fun t7Toybox(): String {
-        val r = runSpec(
+    /**
+     * T8: the child must see exactly the ChildEnv allowlist. The native probe
+     * execs /system/bin/env with the same envp array a PTY session uses, so a
+     * leaked parent variable (for example ANDROID_DATA) fails the test.
+     */
+    private fun t8PtyEnv(): String {
+        if (!NativePty.available()) return "  SKIP — native library not loaded"
+        val env = workspace.childEnv()
+        val pairs = env.map { (key, value) -> "$key=$value" }.toTypedArray()
+        val out = runCatching { NativePty.probeEnvironment(pairs) }
+            .getOrElse { return "  FAIL — probe threw ${it.message}" }
+
+        val keys = out.lineSequence()
+            .filter { it.contains('=') }
+            .map { it.substringBefore('=') }
+            .filter { it.isNotBlank() }
+            .toSet()
+        val allowed = env.keys
+        val unexpected = keys - allowed
+        val missing = allowed - keys
+        val pwd = out.lineSequence()
+            .firstOrNull { it.startsWith("PWD=") }
+            ?.substringAfter("PWD=")
+
+        return buildString {
+            appendLine("  allowed=${allowed.sorted().joinToString(",")}")
+            appendLine("  child=${keys.sorted().joinToString(",")}")
+            appendLine("  unexpected=${unexpected.sorted()} missing=${missing.sorted()}")
+            appendLine("  PWD=${pwd ?: "<absent>"}")
+            append(if (unexpected.isEmpty() && missing.isEmpty()) "  PASS" else "  FAIL")
+        }
+    }
+
+    /** T9: after dup2 and close_inherited_fds only 0/1/2 may remain open. */
+    private fun t9PtyFds(): String {
+        if (!NativePty.available()) return "  SKIP — native library not loaded"
+        val pairs = workspace.childEnv()
+            .map { (key, value) -> "$key=$value" }
+            .toTypedArray()
+        val out = runCatching { NativePty.probeFds(pairs) }
+            .getOrElse { return "  FAIL — probe threw ${it.message}" }
+        val line = out.lineSequence().firstOrNull { it.startsWith("open_above_2=") }
+            ?: return "  FAIL — no result: ${out.trim()}"
+        val count = line.substringAfter('=').trim().toIntOrNull() ?: -1
+        return "  $line\n" + if (count == 0) "  PASS" else "  FAIL — $count inherited fd(s)"
+    }
+
+    private fun t7Toybox(): String {        val r = runSpec(
             ProcessSupervisor.Spec(
                 argv = listOf(
                     "/system/bin/sh",

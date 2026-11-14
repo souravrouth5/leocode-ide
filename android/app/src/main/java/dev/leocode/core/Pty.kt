@@ -48,6 +48,12 @@ object NativePty {
     external fun waitFor(pid: Int): Int
     external fun killGroup(pid: Int, signal: Int): Int
     external fun pageSize(): Int
+
+    /** Harness T8: child has exactly the supplied environment (execve envp). */
+    external fun probeEnvironment(envPairs: Array<String>): String
+
+    /** Harness T9: child reports how many fds above stderr survived setup. */
+    external fun probeFds(envPairs: Array<String>): String
 }
 
 class PtySession private constructor(
@@ -75,18 +81,29 @@ class PtySession private constructor(
 
     private val fd: FileDescriptor = descriptor.fileDescriptor
 
-    fun write(bytes: ByteArray): Int = try {
-        Os.write(fd, bytes, 0, bytes.size)
-    } catch (e: ErrnoException) {
-        -1
+    /** Set by [destroy]; write/resize/read become no-ops afterwards (Task 9). */
+    @Volatile
+    private var closed = false
+
+    val isClosed: Boolean get() = closed
+
+    fun write(bytes: ByteArray): Int {
+        if (closed) return -1
+        if (bytes.isEmpty()) return 0
+        return try {
+            Os.write(fd, bytes, 0, bytes.size)
+        } catch (e: ErrnoException) {
+            -1
+        }
     }
 
     /**
      * Blocking single read. Returns null on EOF/EIO (which is what a PTY master
-     * reports when the child exits). Intended for a dedicated reader thread.
+     * reports when the child exits) or after [destroy]. Intended for a dedicated
+     * reader thread.
      */
     fun readBlocking(maxBytes: Int = 16 * 1024): ByteArray? {
-        if (maxBytes <= 0) return null
+        if (closed || maxBytes <= 0) return null
         val buf = ByteArray(maxBytes)
         val n = try {
             Os.read(fd, buf, 0, maxBytes)
@@ -112,12 +129,15 @@ class PtySession private constructor(
     }
 
     fun resize(rows: Int, cols: Int) {
+        if (closed) return
         NativePty.setWindowSize(descriptor.fd, rows, cols)
     }
 
     fun waitFor(): Int = NativePty.waitFor(pid)
 
     fun destroy() {
+        if (closed) return
+        closed = true
         // Kill the group first: that closes the slave side and unblocks any reader.
         NativePty.killGroup(pid, OsConstants.SIGTERM)
         NativePty.killGroup(pid, OsConstants.SIGKILL)
