@@ -65,19 +65,23 @@ Android unit suite green (130 tests), `lintDebug` green, 16 KB alignment PASSED,
 | W-21 | The PTY is resized right after a successful attach. |
 | W-22 | Only `E_NOT_FOUND` falls back to a new shell; other attach failures are reported and leave the session alone. |
 
-## Device verification (D1, Redmi Note 7S / Android 9)
+## Device verification (D1 Redmi Note 7S / Android 9 · D2 POCO F1 / Android 15)
 
-Built from the synced bundle, `lintDebug` green, 16 KB check PASSED, installed and launched:
+The same APK was installed on both phones. Built from the synced bundle, `lintDebug` green,
+16 KB check PASSED.
 
-| Check | Result |
-|---|---|
-| Terminal PTY after the write/exit changes | **PASS** — prompt, key row, `SessionService isForeground=true` (`docs/device-reports/20261114-191736-review-fix-terminal-11f98015.png`) |
-| SAF cancel after the `Result` port change | **PASS** — "No document selected" snackbar (`...-191748-review-fix-saf-cancel-...png`) |
-| App boot after the startup guard | **PASS** (`...-191701-review-fix-home-...png`) |
+| Check | D1 | D2 |
+|---|---|---|
+| App boot after the startup guard | **PASS** (`...-191701-review-fix-home-...png`) | **PASS** (`...-193142-fix-d2-home-...png`) |
+| Terminal PTY after the write/exit changes | **PASS** — prompt + key row (`...-191736-review-fix-terminal-...png`) | **PASS** — prompt, `SessionService isForeground=true` (`...-193148-fix-d2-terminal-...png`) |
+| Background + reattach with a live session | earlier run (same PID across recreation) | **PASS** — `sleep 45; echo d2-alive` typed, Home 12 s, returned with the command and a live `sh`/`sleep` (`...-193235-fix-d2-reattach-...png`) |
+| Exited while detached, then reattach (L-05) | **PASS** — shell SIGKILLed via `run-as` while Home: scrollback, `[session ended, exit 137]`, EXITED 137 badge, no new shell (`...-194200-fix-d1-exited-reattach2-...png`; SIGTERM alone is ignored by `sh -i`) | **PASS** — `echo bye-d2; exit`, Home, return: full scrollback, `[session ended, exit 0]`, EXITED 0 badge, no new shell (`...-193344-fix-d2-exited-reattach-...png`) |
+| SAF cancel after the `Result` port change | **PASS** — "No document selected" (`...-191748-review-fix-saf-cancel-...png`) | **PASS** — same snackbar (`...-193447-fix-d2-saf-cancel-...png`) |
 
 SUSPECTED findings in batches 1–3 that still need the phone checks from report §7: B-02/L-04's
 kernel-level block (the lock fix is structural and tested), L-03's service ordering (fixed by
-`stopSelf(startId)`; not re-measured), and B-14's `setsid` presence (batch 6).
+`stopSelf(startId)`; not re-measured), L-08 (backpressure while backgrounded, batch 4) and B-14's
+`setsid` presence (batch 6).
 
 ## Behaviour changes worth knowing
 
