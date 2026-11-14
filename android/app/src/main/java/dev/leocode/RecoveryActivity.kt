@@ -30,7 +30,9 @@ class RecoveryActivity : Activity() {
     companion object {
         const val EXTRA_CRASH = "dev.leocode.extra.CRASH"
         const val EXTRA_REASON = "dev.leocode.extra.REASON"
+        const val EXTRA_MESSAGE = "dev.leocode.extra.MESSAGE"
         const val REASON_RENDERER = "renderer"
+        const val REASON_STARTUP = "startup"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,6 +42,8 @@ class RecoveryActivity : Activity() {
 
         val record = CrashStore.decode(intent.getStringExtra(EXTRA_CRASH))
         val rendererLoss = intent.getStringExtra(EXTRA_REASON) == REASON_RENDERER
+        val startupMessage = intent.getStringExtra(EXTRA_MESSAGE)
+        val startupFailure = !startupMessage.isNullOrBlank()
         val dark = theme.isDark()
         val textColor = if (dark) 0xFFE6E9EF.toInt() else 0xFF1B2028.toInt()
         val dimColor = if (dark) 0xFF8B93A3.toInt() else 0xFF6E7787.toInt()
@@ -51,17 +55,33 @@ class RecoveryActivity : Activity() {
         }
 
         column.addView(text(
-            if (rendererLoss) "Restored after a problem" else "LeoCode closed unexpectedly",
+            when {
+                startupFailure -> "LeoCode could not start"
+                rendererLoss -> "Restored after a problem"
+                else -> "LeoCode closed unexpectedly"
+            },
             24f, textColor, Typeface.BOLD
         ))
         column.addView(text(
-            if (rendererLoss) {
-                "The web view stopped twice in under a minute. Your files and workspace are unchanged."
-            } else {
-                "The previous session ended with an unexpected error. Your files and workspace are unchanged."
+            when {
+                startupFailure ->
+                    "The app could not open its workspace, so it stopped before the IDE loaded. " +
+                        "Nothing on disk was changed by this attempt."
+                rendererLoss ->
+                    "The web view stopped twice in under a minute. Your files and workspace are unchanged."
+                else ->
+                    "The previous session ended with an unexpected error. Your files and workspace are unchanged."
             },
             15f, dimColor, Typeface.NORMAL
         ).apply { setPadding(0, dp(12), 0, dp(20)) })
+
+        if (startupFailure) {
+            column.addView(text(startupMessage!!, 13f, textColor, Typeface.NORMAL).apply {
+                typeface = Typeface.MONOSPACE
+                setTextIsSelectable(true)
+                setPadding(0, 0, 0, dp(20))
+            })
+        }
 
         if (record != null) {
             column.addView(text(summary(record), 13f, textColor, Typeface.NORMAL).apply {

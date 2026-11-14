@@ -1,5 +1,6 @@
+import { AppError } from "../../bridge"
 import type { AppStores } from "../../app/stores"
-import { dirName, join } from "../editor/model"
+import { dirName, entryExists, join } from "../editor/model"
 
 /**
  * Applies the prompt sheet's value. New file/folder/rename are file operations;
@@ -36,6 +37,10 @@ export async function submitPrompt(stores: AppStores, value: string): Promise<vo
     }
 
     const path = value.startsWith("/") ? value : join(cwd, value)
+    // fs.write always replaces; creating a "new" file must not truncate one (W-03).
+    if (await entryExists(bridge, path)) {
+      throw new AppError("E_EXISTS", `${value} already exists`)
+    }
     await bridge.write(path, "")
     shell.getState().flash("File created")
     await files.getState().refresh()

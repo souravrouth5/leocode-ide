@@ -347,12 +347,32 @@ Java_dev_leocode_core_NativePty_waitFor(JNIEnv *env, jobject thiz, jint pid) {
     return -1;
 }
 
+/*
+ * Reject pids that `kill(-pid)` would turn into a broadcast or a self-kill:
+ * 1 means "every process this uid may signal", and our own pid/group would kill
+ * the app (L-01). Also reject pids above /proc/sys/kernel/pid_max.
+ */
+static int pid_is_safe_to_signal(pid_t pid) {
+    if (pid <= 1) return 0;
+    if (pid == getpid() || pid == getpgrp()) return 0;
+    FILE *f = fopen("/proc/sys/kernel/pid_max", "r");
+    if (f != NULL) {
+        long max = 0;
+        if (fscanf(f, "%ld", &max) == 1 && max > 1 && (long) pid > max) {
+            fclose(f);
+            return 0;
+        }
+        fclose(f);
+    }
+    return 1;
+}
+
 /* Negative pid targets the process group created by setsid(). */
 JNIEXPORT jint JNICALL
 Java_dev_leocode_core_NativePty_killGroup(JNIEnv *env, jobject thiz, jint pid, jint signal_number) {
     (void) env;
     (void) thiz;
-    if (pid <= 0) return -1;
+    if (!pid_is_safe_to_signal((pid_t) pid)) return -1;
     if (kill((pid_t) -pid, signal_number) == 0) return 0;
     return kill((pid_t) pid, signal_number);
 }

@@ -14,8 +14,10 @@ class PidFileStore(private val dir: File) {
     data class Record(val id: String, val pid: Int, val startTime: Long, val kind: String)
 
     fun write(id: String, pid: Int, kind: String) {
-        if (pid <= 0) return
-        val start = ProcessStartTime.read(pid) ?: 0L
+        if (pid <= 1) return
+        // Never record an unknown start time: a zero cannot prove identity and
+        // would let pid reuse target an unrelated process later (L-07).
+        val start = ProcessStartTime.read(pid) ?: return
         runCatching {
             dir.mkdirs()
             val target = fileFor(id)
@@ -43,7 +45,7 @@ class PidFileStore(private val dir: File) {
         val parts = file.readText().trim().split(Regex("\\s+"))
         if (parts.size < 2) return@runCatching null
         val pid = parts[0].toIntOrNull() ?: return@runCatching null
-        if (pid <= 0) return@runCatching null
+        if (pid <= 1) return@runCatching null
         val start = parts[1].toLongOrNull() ?: 0L
         val kind = parts.getOrNull(2) ?: "unknown"
         Record(file.nameWithoutExtension, pid, start, kind)

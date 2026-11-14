@@ -30,6 +30,7 @@ class FsHandler(
         private const val MAX_READ = 2 * 1024 * 1024
         private const val MAX_WRITE_BYTES = 4 * 1024 * 1024
         private const val TRASH_DIR = ".trash"
+        private const val SHARED_TRASH_DIR = ".leocode-trash"
 
         val METHODS = setOf(
             "fs.list", "fs.read", "fs.write", "fs.mkdir", "fs.rename", "fs.delete"
@@ -62,7 +63,7 @@ class FsHandler(
         if (!dir.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "not a directory")
 
         val visible = (dir.listFiles()?.toList() ?: emptyList())
-            .filter { it.name != TRASH_DIR }
+            .filter { it.name != TRASH_DIR && it.name != SHARED_TRASH_DIR }
             .sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() }))
 
         return buildJsonArray {
@@ -135,6 +136,12 @@ class FsHandler(
         val from = resolve(rawFrom)
         val to = resolve(rawTo)
         if (!from.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "source does not exist")
+        // Renaming the workspace root would leave no default workspace until the
+        // next process start (S-13); the trash must stay where it is (S-02).
+        val protectedRoots = protectedRoots()
+        if (from.canonicalFile in protectedRoots) {
+            throw BridgeException(ErrorCode.E_PERMISSION, "refusing to rename root storage")
+        }
         if (to.exists()) throw BridgeException(ErrorCode.E_EXISTS, "target already exists")
         val parent = to.parentFile ?: throw BridgeException(ErrorCode.E_IO, "target has no parent")
         if (!parent.exists() && !parent.mkdirs()) {
@@ -151,12 +158,7 @@ class FsHandler(
         val target = resolve(rawPath)
         if (!target.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
 
-        val protectedRoots = buildList {
-            add(workspace.workspacesRoot.canonicalFile)
-            add(workspace.defaultWorkspace.canonicalFile)
-            jail.sharedStorageRoot?.let { add(it) }
-        }
-        if (target in protectedRoots) {
+        if (target.canonicalFile in protectedRoots()) {
             throw BridgeException(ErrorCode.E_PERMISSION, "refusing to delete root storage")
         }
 
@@ -170,6 +172,14 @@ class FsHandler(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /** Roots that must never be renamed or deleted. Both trash dirs are included. */
+    private fun protectedRoots(): Set<File> = buildSet {
+        add(workspace.workspacesRoot.canonicalFile)
+        add(workspace.defaultWorkspace.canonicalFile)
+        jail.sharedStorageRoot?.let { add(it.canonicalFile) }
+        trash.directories().forEach { add(it.canonicalFile) }
+    }
 
     private fun resolve(rawPath: String?): File {
         val raw = rawPath ?: "."

@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
-import type { Bridge, FileEntry } from "../../bridge"
+import { AppError, type Bridge, type FileEntry } from "../../bridge"
 import type { ErrorsState } from "../../errors/errorsStore"
 import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { FilesState } from "../files/filesStore"
@@ -9,6 +9,7 @@ import {
   SESSION_KEY,
   baseName,
   dirName,
+  entryExists,
   initial,
   isDirty,
   normalizeText,
@@ -61,6 +62,12 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       }
       try {
         const raw = await bridge.read(path)
+        // Two taps before the read returns must not create duplicate tabs (W-16).
+        if (get().docs.some((doc) => doc.path === path)) {
+          set({ activePath: path })
+          shell.getState().go("editor")
+          return
+        }
         set((state) => ({ docs: [...state.docs, initial(path, raw)], activePath: path }))
         shell.getState().go("editor")
         const { recentFiles } = settings.getState().settings
@@ -128,10 +135,13 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         return false
       }
       try {
-        await bridge.write(path, doc.content)
+        // Record exactly what was written: text typed while the write was in
+        // flight must stay dirty (W-02).
+        const written = doc.content
+        await bridge.write(path, written)
         set((state) => ({
           docs: state.docs.map((item) =>
-            item.path === path ? { ...item, saved: item.content, isUntitled: false } : item
+            item.path === path ? { ...item, saved: written, isUntitled: false } : item
           )
         }))
         shell.getState().flash("Saved")
@@ -164,6 +174,21 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       const path = get().activePath
       const doc = path ? get().docs.find((item) => item.path === path) : undefined
       if (!doc) return
+      if (target === doc.path) {
+        await get().save(doc.path)
+        return
+      }
+      // Never create a second tab for an existing open document (W-04).
+      if (get().docs.some((item) => item.path === target)) {
+        set({ activePath: target })
+        errors.getState().report(new AppError("E_EXISTS", `${baseName(target)} is already open`), {
+          context: "Save As"
+        })
+        return
+      }
+      if (await entryExists(bridge, target)) {
+        if (!window.confirm(`${baseName(target)} already exists. Replace it?`)) return
+      }
       try {
         await bridge.write(target, doc.content)
         set((state) => ({

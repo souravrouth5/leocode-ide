@@ -1,3 +1,5 @@
+import type { Bridge } from "../../bridge"
+
 /** Document model shared by the editor store, views and session restore. */
 
 export interface OpenDoc {
@@ -27,4 +29,20 @@ export const SESSION_KEY = "leocode.open-session"
 export const initial = (path: string, raw: string): OpenDoc => {
   const content = normalizeText(raw)
   return { path, content, saved: content, isUntitled: false }
+}
+
+/**
+ * True when the entry already exists. Listing the parent avoids `fs.write`
+ * truncating an existing file (W-03/W-04).
+ */
+export async function entryExists(bridge: Bridge, path: string): Promise<boolean> {
+  const parent = dirName(path)
+  const name = baseName(path)
+  try {
+    const entries = await bridge.list(parent)
+    return entries.some((entry) => entry.name === name)
+  } catch {
+    // A missing parent means nothing can collide with it yet.
+    return false
+  }
 }

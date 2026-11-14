@@ -76,4 +76,15 @@ describe("editor store (Task 13)", () => {
     expect(stores.editor.getState().docs).toEqual([])
     expect(stores.editor.getState().activePath).toBeNull()
   })
+
+  it("does not create a duplicate tab when opened twice at once", async () => {
+    const stores = createAppStores(new MockBridge())
+    await Promise.all([
+      stores.editor.getState().openFile("README.md"),
+      stores.editor.getState().openFile("README.md")
+    ])
+
+    expect(stores.editor.getState().docs).toHaveLength(1)
+    expect(stores.editor.getState().activePath).toBe("README.md")
+  })
 })

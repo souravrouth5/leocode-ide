@@ -44,6 +44,7 @@ import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.ThemeState
 import dev.leocode.core.CrashStore
 import dev.leocode.core.Workspace
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -109,16 +110,16 @@ class MainActivity : ComponentActivity(), SafPort {
     // overlap. One launcher per prompt type plus queued callbacks keeps every
     // request matched to its own result; nothing is stored in a single slot.
 
-    private data class OpenRequest(val mime: String, val callback: (SafDocument?) -> Unit)
+    private data class OpenRequest(val mime: String, val callback: (Result<SafDocument?>) -> Unit)
     private data class SaveRequest(
         val name: String,
         val content: String,
-        val callback: (String?) -> Unit
+        val callback: (Result<String?>) -> Unit
     )
 
     private val openRequests = ArrayDeque<OpenRequest>()
     private var openInFlight = false
-    private var pendingOpen: ((SafDocument?) -> Unit)? = null
+    private var pendingOpen: ((Result<SafDocument?>) -> Unit)? = null
 
     private val saveRequests = ArrayDeque<SaveRequest>()
     private var saveInFlight = false
@@ -134,19 +135,22 @@ class MainActivity : ComponentActivity(), SafPort {
             val callback = pendingOpen
             pendingOpen = null
             if (uri == null) {
-                callback?.invoke(null)
+                callback?.invoke(Result.success(null))
             } else {
                 thread(name = "leocode-saf-read") {
-                    val name = queryUriFileName(uri)
-                    val content = readUriContent(uri)
-                    callback?.invoke(
+                    // A revoked/offline provider must become E_IO, not an uncaught
+                    // exception that kills the process (S-10).
+                    val result = runCatching {
+                        val name = queryUriFileName(uri)
+                        val content = readUriContent(uri)
                         SafDocument(
                             name = name,
                             uri = uri.toString(),
                             content = content,
                             size = content.toByteArray(Charsets.UTF_8).size
                         )
-                    )
+                    }
+                    callback?.invoke(result)
                 }
             }
             pumpOpen()
@@ -158,15 +162,22 @@ class MainActivity : ComponentActivity(), SafPort {
             val request = pendingSave
             pendingSave = null
             if (request != null) {
-                if (uri != null) {
+                // Report a failed write instead of a URI that points at nothing
+                // or at a truncated document (S-11).
+                val result = if (uri == null) {
+                    Result.success(null)
+                } else {
                     runCatching {
-                        contentResolver.openOutputStream(uri)?.use { stream ->
-                            stream.write(request.content.toByteArray(Charsets.UTF_8))
-                            stream.flush()
+                        val stream = contentResolver.openOutputStream(uri)
+                            ?: throw IOException("the provider returned no output stream")
+                        stream.use {
+                            it.write(request.content.toByteArray(Charsets.UTF_8))
+                            it.flush()
                         }
+                        uri.toString()
                     }
                 }
-                request.callback(uri?.toString())
+                request.callback(result)
             }
             pumpSave()
         }
@@ -194,6 +205,19 @@ class MainActivity : ComponentActivity(), SafPort {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // A failed AppGraph construction happened before any Activity could run.
+        // Show the native recovery screen instead of looping on "app keeps stopping".
+        val app = application as LeoApp
+        if (app.startupError != null) {
+            startActivity(
+                Intent(this, RecoveryActivity::class.java)
+                    .putExtra(RecoveryActivity.EXTRA_REASON, RecoveryActivity.REASON_STARTUP)
+                    .putExtra(RecoveryActivity.EXTRA_MESSAGE, app.startupError)
+            )
+            finish()
+            return
+        }
 
         // Debug-only recovery demo: `am start ... --ez forceCrash true`. The crash
         // handler stores a redacted record; the next launch opens RecoveryActivity.
@@ -228,12 +252,12 @@ class MainActivity : ComponentActivity(), SafPort {
         setContentView(rootLayout)
 
         installBackDispatcher()
-        (application as LeoApp).graph.onFirstSession = firstSessionCallback
+        (application as LeoApp).graphOrThrow().onFirstSession = firstSessionCallback
         attachWebView()
     }
 
     override fun onDestroy() {
-        val graph = (application as LeoApp).graph
+        val graph = (application as LeoApp).graphOrThrow()
         if (graph.onFirstSession === firstSessionCallback) {
             graph.onFirstSession = null
         }
@@ -423,14 +447,14 @@ class MainActivity : ComponentActivity(), SafPort {
         )
 
         val router = BridgeRouter(
-            (application as LeoApp).graph.json,
+            (application as LeoApp).graphOrThrow().json,
             listOf(
-                (application as LeoApp).graph.appHandler(themePort()) { appInfo() },
-                (application as LeoApp).graph.fsHandler(),
-                (application as LeoApp).graph.procHandler(),
-                (application as LeoApp).graph.termHandler(),
-                (application as LeoApp).graph.safHandler(this),
-                (application as LeoApp).graph.runtimeHandler()
+                (application as LeoApp).graphOrThrow().appHandler(themePort()) { appInfo() },
+                (application as LeoApp).graphOrThrow().fsHandler(),
+                (application as LeoApp).graphOrThrow().procHandler(),
+                (application as LeoApp).graphOrThrow().termHandler(),
+                (application as LeoApp).graphOrThrow().safHandler(this),
+                (application as LeoApp).graphOrThrow().runtimeHandler()
             ),
             { message -> Log.w("LeoCodeBridge", message) }
         )
@@ -440,7 +464,7 @@ class MainActivity : ComponentActivity(), SafPort {
             themePort(),
             extraOrigins,
             router,
-            onClose = { (application as LeoApp).graph.closeBridge() }
+            onClose = { (application as LeoApp).graphOrThrow().closeBridge() }
         )
         bridge = host
 
@@ -488,7 +512,7 @@ class MainActivity : ComponentActivity(), SafPort {
         // graph (and its terminal/job state) alive for the replacement view.
         val old = webView
         webView = null
-        (application as LeoApp).graph.detachBridge()
+        (application as LeoApp).graphOrThrow().detachBridge()
         bridge?.detach()
         bridge = null
         if (old != null) {
@@ -650,7 +674,7 @@ class MainActivity : ComponentActivity(), SafPort {
         }
     }
 
-    override fun openDocument(mime: String, onResult: (SafDocument?) -> Unit) {
+    override fun openDocument(mime: String, onResult: (Result<SafDocument?>) -> Unit) {
         runOnUiThread {
             openRequests.addLast(OpenRequest(mime, onResult))
             pumpOpen()
@@ -665,11 +689,11 @@ class MainActivity : ComponentActivity(), SafPort {
         runCatching { openLauncher.launch(arrayOf(next.mime)) }.onFailure {
             openInFlight = false
             pendingOpen = null
-            next.callback(null)
+            next.callback(Result.failure(it))
         }
     }
 
-    override fun saveDocument(name: String, content: String, onResult: (String?) -> Unit) {
+    override fun saveDocument(name: String, content: String, onResult: (Result<String?>) -> Unit) {
         runOnUiThread {
             saveRequests.addLast(SaveRequest(name, content, onResult))
             pumpSave()
@@ -684,7 +708,7 @@ class MainActivity : ComponentActivity(), SafPort {
         runCatching { saveLauncher.launch(next.name) }.onFailure {
             saveInFlight = false
             pendingSave = null
-            next.callback(null)
+            next.callback(Result.failure(it))
         }
     }
 
@@ -693,7 +717,7 @@ class MainActivity : ComponentActivity(), SafPort {
         internalStorage = Environment.getExternalStorageDirectory().absolutePath,
         downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath,
         documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath,
-        workspace = (application as LeoApp).graph.workspace.defaultWorkspace.absolutePath
+        workspace = (application as LeoApp).graphOrThrow().workspace.defaultWorkspace.absolutePath
     )
 
     private fun queryUriFileName(uri: Uri): String {
@@ -715,12 +739,14 @@ class MainActivity : ComponentActivity(), SafPort {
      * must never be handed an unbounded string.
      */
     fun readUriContent(uri: Uri, maxBytes: Int = 4 * 1024 * 1024): String {
-        return contentResolver.openInputStream(uri)?.use { stream ->
+        val stream = contentResolver.openInputStream(uri)
+            ?: throw IOException("the provider returned no input stream")
+        return stream.use { input ->
             val out = java.io.ByteArrayOutputStream()
             val buffer = ByteArray(64 * 1024)
             var total = 0
             while (total <= maxBytes) {
-                val read = stream.read(buffer)
+                val read = input.read(buffer)
                 if (read < 0) break
                 val keep = minOf(read, maxBytes + 1 - total)
                 out.write(buffer, 0, keep)
@@ -728,7 +754,7 @@ class MainActivity : ComponentActivity(), SafPort {
                 if (total > maxBytes) break
             }
             out.toString(Charsets.UTF_8.name())
-        } ?: ""
+        }
     }
 
     // ------------------------------------------------------------------ theme
@@ -753,7 +779,7 @@ class MainActivity : ComponentActivity(), SafPort {
      * SDK and workspace details that are only meaningful for this window.
      */
     private fun appInfo(): AppInfo {
-        val workspace: Workspace = (application as LeoApp).graph.workspace
+        val workspace: Workspace = (application as LeoApp).graphOrThrow().workspace
         return AppInfo(
             app = "LeoCode",
             version = BuildConfig.VERSION_NAME,

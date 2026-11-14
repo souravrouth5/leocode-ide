@@ -16,13 +16,17 @@ interface SafPort {
     fun requestStoragePermission(callback: (Boolean) -> Unit)
 
     /**
-     * Show the open-document picker and read the chosen file. [onResult] receives
-     * `null` when the user cancels; reading happens off the main thread.
+     * Show the open-document picker and read the chosen file. [onResult] is
+     * `success(null)` when the user cancels and a failure when the read fails;
+     * reading happens off the main thread.
      */
-    fun openDocument(mime: String, onResult: (SafDocument?) -> Unit)
+    fun openDocument(mime: String, onResult: (Result<SafDocument?>) -> Unit)
 
-    /** Show the create-document picker and write [content] to the chosen target. */
-    fun saveDocument(name: String, content: String, onResult: (String?) -> Unit)
+    /**
+     * Show the create-document picker and write [content] to the chosen target.
+     * `success(null)` is a cancel; a failed write is a failure (S-10/S-11).
+     */
+    fun saveDocument(name: String, content: String, onResult: (Result<String?>) -> Unit)
 }
 
 /** A document read through SAF: display name, URI and UTF-8 content. */

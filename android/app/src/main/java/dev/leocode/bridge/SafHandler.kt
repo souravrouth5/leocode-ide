@@ -50,7 +50,13 @@ class SafHandler(
 
             "saf.open" -> {
                 val request = json.decodePayload(SafOpenRequest.serializer(), payload, method)
-                port.openDocument(request.mime ?: "*/*") { document ->
+                port.openDocument(request.mime ?: "*/*") { result ->
+                    val error = result.exceptionOrNull()
+                    if (error != null) {
+                        respond(AsyncReply.Error(safError(error), safMessage(error)))
+                        return@openDocument
+                    }
+                    val document = result.getOrNull()
                     when {
                         document == null -> respond(AsyncReply.Ok(JsonNull))
                         document.size > MAX_WRITE_BYTES -> respond(
@@ -81,7 +87,13 @@ class SafHandler(
                 if (size > MAX_WRITE_BYTES) {
                     throw BridgeException(ErrorCode.E_LIMIT, "content is larger than 4 MB")
                 }
-                port.saveDocument(name, content) { uri ->
+                port.saveDocument(name, content) { result ->
+                    val error = result.exceptionOrNull()
+                    if (error != null) {
+                        respond(AsyncReply.Error(safError(error), safMessage(error)))
+                        return@saveDocument
+                    }
+                    val uri = result.getOrNull()
                     respond(
                         AsyncReply.Ok(
                             if (uri == null) {
@@ -102,5 +114,18 @@ class SafHandler(
                 "unknown method: $method"
             )
         }
+    }
+
+    /** Fixed copy: never put provider paths or exception text on the wire (B-06). */
+    private fun safError(error: Throwable): ErrorCode = when (error) {
+        is SecurityException -> ErrorCode.E_PERMISSION
+        is java.io.FileNotFoundException -> ErrorCode.E_NOT_FOUND
+        else -> ErrorCode.E_IO
+    }
+
+    private fun safMessage(error: Throwable): String = when (safError(error)) {
+        ErrorCode.E_PERMISSION -> "the document provider denied access"
+        ErrorCode.E_NOT_FOUND -> "the selected document is no longer available"
+        else -> "the document could not be read or written"
     }
 }

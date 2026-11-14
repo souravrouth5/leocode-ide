@@ -85,4 +85,41 @@ class OrphanReaperTest {
         assertEquals(0, reaper.reap())
         assertFalse(file.exists())
     }
+
+    @Test
+    fun `never signals pid 1, the app's own pid or its own group`() {
+        val store = tempStore()
+        pidFile(store, "one", "1 500 term\n")
+        val (selfPid, selfGroup) = ProcessStartTime.selfIds() ?: (0 to 0)
+        if (selfPid > 1) pidFile(store, "self", "$selfPid 500 term\n")
+        if (selfGroup > 1) pidFile(store, "group", "$selfGroup 500 term\n")
+        val signals = mutableListOf<Pair<Int, Int>>()
+
+        val reaper = OrphanReaper(
+            store,
+            kill = { pid, signal -> signals += pid to signal },
+            startTime = { 500L },
+            sleep = {}
+        )
+
+        assertEquals(0, reaper.reap())
+        assertTrue(signals.isEmpty())
+    }
+
+    @Test
+    fun `an unknown start time is never treated as the orphan`() {
+        val store = tempStore()
+        pidFile(store, "zero", "4242 0 term\n")
+        val signals = mutableListOf<Pair<Int, Int>>()
+
+        val reaper = OrphanReaper(
+            store,
+            kill = { pid, signal -> signals += pid to signal },
+            startTime = { 777L },
+            sleep = {}
+        )
+
+        assertEquals(0, reaper.reap())
+        assertTrue(signals.isEmpty())
+    }
 }

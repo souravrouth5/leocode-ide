@@ -30,15 +30,23 @@ class OrphanReaper(
     /** Reaps every live orphan recorded in the store and returns how many were signalled. */
     fun reap(): Int {
         var killed = 0
+        val (selfPid, selfGroup) = ProcessStartTime.selfIds() ?: (-1 to -1)
         for (file in store.list()) {
             val record = store.parse(file)
             if (record == null) {
                 file.delete()
                 continue
             }
+            // `kill(-1)` and `kill(-ownPid)` are never valid (L-01).
+            if (!isSafePid(record.pid, selfPid, selfGroup)) {
+                file.delete()
+                continue
+            }
             val current = startTime(record.pid)
+            // A zero/unknown start time cannot prove identity, so keep the
+            // process: pid reuse would otherwise target an unrelated one (L-07).
             val sameProcess = current != null &&
-                (record.startTime <= 0L || current == record.startTime)
+                record.startTime > 0L && current == record.startTime
             if (sameProcess) {
                 runCatching {
                     kill(record.pid, SIGTERM)
@@ -51,4 +59,7 @@ class OrphanReaper(
         }
         return killed
     }
+
+    private fun isSafePid(pid: Int, selfPid: Int, selfGroup: Int): Boolean =
+        pid > 1 && pid != selfPid && pid != selfGroup
 }

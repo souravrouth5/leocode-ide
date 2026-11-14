@@ -34,15 +34,22 @@ class SafHandlerTest {
             callback(granted)
         }
 
-        override fun openDocument(mime: String, onResult: (SafDocument?) -> Unit) {
+        var openFailure: Throwable? = null
+        var saveFailure: Throwable? = null
+
+        override fun openDocument(mime: String, onResult: (Result<SafDocument?>) -> Unit) {
             lastMime = mime
-            onResult(document)
+            onResult(openFailure?.let { Result.failure(it) } ?: Result.success(document))
         }
 
-        override fun saveDocument(name: String, content: String, onResult: (String?) -> Unit) {
+        override fun saveDocument(
+            name: String,
+            content: String,
+            onResult: (Result<String?>) -> Unit
+        ) {
             lastSaveName = name
             lastSaveContent = content
-            onResult(savedUri)
+            onResult(saveFailure?.let { Result.failure(it) } ?: Result.success(savedUri))
         }
     }
 
@@ -177,6 +184,43 @@ class SafHandlerTest {
         }
         assertEquals(null, port.lastSaveName)
         assertTrue(replies.isEmpty())
+    }
+
+    @Test
+    fun `saf open reports a failed read as E_IO`() {
+        val port = FakePort().apply { openFailure = java.io.IOException("provider offline") }
+        val handler = SafHandler(port)
+
+        call(handler, "saf.open")
+
+        val reply = replies.single()
+        assertTrue(reply is AsyncReply.Error)
+        assertEquals(ErrorCode.E_IO, (reply as AsyncReply.Error).code)
+        assertFalse(reply.message.contains("provider offline"))
+    }
+
+    @Test
+    fun `saf open maps a revoked provider to E_PERMISSION`() {
+        val port = FakePort().apply { openFailure = SecurityException("denied") }
+        val handler = SafHandler(port)
+
+        call(handler, "saf.open")
+
+        val reply = replies.single()
+        assertTrue(reply is AsyncReply.Error)
+        assertEquals(ErrorCode.E_PERMISSION, (reply as AsyncReply.Error).code)
+    }
+
+    @Test
+    fun `saf save reports a failed write instead of a URI`() {
+        val port = FakePort().apply { saveFailure = java.io.IOException("disk full") }
+        val handler = SafHandler(port)
+
+        call(handler, "saf.save", buildJsonObject { put("name", "out.txt") })
+
+        val reply = replies.single()
+        assertTrue(reply is AsyncReply.Error)
+        assertEquals(ErrorCode.E_IO, (reply as AsyncReply.Error).code)
     }
 
     @Test

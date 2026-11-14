@@ -91,6 +91,34 @@ class TrashTest {
         assertTrue(fresh.exists())
     }
 
+    @Test
+    fun `an old file deleted now is not purged by the next delete`() {
+        val root = createTempDir()
+        val trash = Trash(File(root, ".trash"))
+        val now = 1_700_000_000_000L
+        val old = File(root, "notes.txt").apply {
+            writeText("old")
+            setLastModified(now - 45L * 24 * 60 * 60 * 1000)
+        }
+
+        val trashed = trash.move(old, now = now)
+        // A minute later: the file was trashed "now", so it is still inside the
+        // 30-day window even though its mtime is 45 days old (S-01).
+        assertEquals(0, trash.purge(now = now + 60_000L))
+        assertTrue(trashed.exists())
+
+        // After the window, the embedded trash time expires it as intended.
+        assertEquals(1, trash.purge(now = now + 31L * 24 * 60 * 60 * 1000))
+        assertFalse(trashed.exists())
+    }
+
+    @Test(expected = IOException::class)
+    fun `refuses to move the trash directory itself`() {
+        val root = createTempDir()
+        val trashDir = File(root, ".trash").apply { mkdirs() }
+        Trash(trashDir).move(trashDir)
+    }
+
     @Test(expected = IOException::class)
     fun `moving a nonexistent target throws and creates no trash entry`() {
         val root = createTempDir()

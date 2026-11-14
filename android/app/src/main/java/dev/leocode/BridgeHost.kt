@@ -10,6 +10,7 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.EventSink
+import dev.leocode.bridge.SafeEnvelope
 import dev.leocode.bridge.StreamSink
 import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.ThemeState
@@ -19,8 +20,6 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.concurrent.Executors
 
@@ -130,22 +129,40 @@ class BridgeHost(
         if (raw.length > MAX_MESSAGE_BYTES ||
             raw.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES
         ) {
-            sendError(replyProxy, null, "E_LIMIT", "message is larger than 256 KB")
+            sendError(replyProxy, extractId(raw), "E_LIMIT", "message is too large")
             return
         }
 
-        val request = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
-        if (request == null) {
-            sendError(replyProxy, null, "E_BAD_ENVELOPE", "message is not a JSON object")
-            return
-        }
-
-        val id = request.str("id")
-        io.execute {
-            router.dispatchAsync(request, WebViewStreamSink(replyProxy, id)) { reply ->
-                post(replyProxy, reply)
+        var id: String? = null
+        try {
+            val request = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+            if (request == null) {
+                sendError(replyProxy, null, "E_BAD_ENVELOPE", "message is not a JSON object")
+                return
             }
+            if (!SafeEnvelope.isValidId(SafeEnvelope.idElement(request))) {
+                sendError(replyProxy, null, "E_BAD_ENVELOPE", "id must be a string or number")
+                return
+            }
+            id = SafeEnvelope.id(request)
+            io.execute {
+                router.dispatchAsync(request, WebViewStreamSink(replyProxy, id)) { reply ->
+                    post(replyProxy, reply)
+                }
+            }
+        } catch (error: Throwable) {
+            // A rejected execute (pool shut down after detach) or any unexpected
+            // failure must not reach the framework's uncaught handler (B-01/B-17).
+            Log.w(TAG, "request rejected: ${error.javaClass.simpleName}")
+            sendError(replyProxy, id, "E_INTERNAL", "internal error")
         }
+    }
+
+    /** Best-effort id for an oversize message, read from a small prefix. */
+    private fun extractId(raw: String): String? {
+        val prefix = raw.take(1024)
+        val match = Regex("\"id\"\\s*:\\s*\"([^\"]{1,128})\"").find(prefix) ?: return null
+        return match.groupValues[1]
     }
 
     /** Re-applies the current theme after a page load. */
@@ -242,7 +259,4 @@ class BridgeHost(
 
     private fun idElement(id: String?): JsonElement =
         if (id == null) JsonNull else JsonPrimitive(id)
-
-    private fun JsonObject.str(key: String): String? =
-        this[key]?.jsonPrimitive?.contentOrNull
 }

@@ -187,4 +187,47 @@ class FsHandlerTest {
             call("fs.delete", buildJsonObject { put("path", ".") })
         }
     }
+
+    @Test
+    fun `list hides both trash directories`() {
+        File(workspace.defaultWorkspace, ".trash").mkdirs()
+        File(workspace.defaultWorkspace, ".leocode-trash").mkdirs()
+        File(workspace.defaultWorkspace, "visible.txt").writeText("v")
+
+        val names = list().map { it.jsonObject["name"]!!.jsonPrimitive.content }
+
+        assertTrue(names.contains("visible.txt"))
+        assertFalse(names.contains(".trash"))
+        assertFalse(names.contains(".leocode-trash"))
+    }
+
+    @Test
+    fun `deleting or renaming the workspace root is refused`() {
+        expect(ErrorCode.E_PERMISSION) {
+            call("fs.delete", buildJsonObject { put("path", ".") })
+        }
+        expect(ErrorCode.E_PERMISSION) {
+            call(
+                "fs.rename",
+                buildJsonObject {
+                    put("from", ".")
+                    put("to", "renamed")
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `deleting the trash directory is refused`() {
+        val localTrash = Trash(File(workspace.defaultWorkspace, ".trash")).also {
+            it.directories().forEach { dir -> dir.mkdirs() }
+        }
+        val localHandler = FsHandler(workspace, jail, localTrash, json)
+        try {
+            localHandler.handle("fs.delete", buildJsonObject { put("path", ".trash") })
+            fail("expected E_PERMISSION")
+        } catch (e: BridgeException) {
+            assertEquals(ErrorCode.E_PERMISSION, e.errorCode)
+        }
+    }
 }
