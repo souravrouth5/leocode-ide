@@ -1,13 +1,15 @@
 # LeoCode — Progress Tracker
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-15
 **Current phase:** Plan v9. Phase A fix-ups A-01…A-10 are done and the local exit gate was green
 (2026-11-11). Phase B: **Tasks 4–7 are done**; **Tasks 8–10 are code-complete and verified on
 D1/D2** (2026-11-14). Phase C: **Tasks 11–13 are done**. **Phase D (Tasks 14–16) is code-complete**
 with JVM + web gates green (2026-11-14; [`docs/reports/task14-16-verification.md`](docs/reports/task14-16-verification.md))
 and reviewed: 25 findings PD-01…PD-25 in [`docs/reports/phase-d-analysis.md`](docs/reports/phase-d-analysis.md)
-(2 High: workspace-registry reset on a corrupt index, `window.prompt`/`confirm` no-ops in the WebView);
-only the D1/D2 device pass is pending. **Phase B/C review fixes are done through batch 6**
+(2 High: workspace-registry reset on a corrupt index, `window.prompt`/`confirm` no-ops in the WebView).
+**All PD findings are fixed** (2026-11-15; [`docs/reports/phase-d-fixes.md`](docs/reports/phase-d-fixes.md)),
+except PD-20's async `ensure()` and PD-25's host-side cancel, which stay deliberately deferred; only
+the D1/D2 device pass is pending. **Phase B/C review fixes are done through batch 6**
 (2026-11-14; [`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md)); only the narrow
 remainders listed there stay open. Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is
 now pushed, but the repo token cannot read Actions results, so the owner must confirm the run. D2 is
@@ -41,6 +43,32 @@ shared storage, L-09 renderer kill while backgrounded, W-24 visual scroll, W-18 
 B-09 uses the report's cancel-on-finish alternative; terminals still reattach. `runtime.install` has
 no client timeout until Task 25. Full details: [`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md);
 the review copies are in `docs/reports/review-parts/`.
+
+### Review fixes (Phase D analysis, 2026-11-15)
+
+All 25 findings were developed in four worktrees (one per area, strict file ownership) and merged
+with `--no-ff`:
+
+| Branch | Commit | IDs fixed |
+|---|---|---|
+| Web search/mock | `9f14602` | PD-04, PD-13, PD-15, PD-16, PD-17, PD-23, client half of PD-05 |
+| Web editor/dialogs | `aba9ff5` | PD-02, PD-03, PD-11, PD-14, PD-24, PD-25 |
+| Android core | `b729f11` | PD-01, PD-08, PD-09, PD-10, PD-15, PD-18, PD-19, PD-20 (store), PD-21, PD-22, host half of PD-05 |
+| Android platform | `9bd2d57` | PD-05, PD-06, PD-07, PD-12, PD-20 (sweep) |
+| Merges | `a4480ca`, `136751f`, `bc10d54`, `a021d50` | — |
+| Follow-up | `8eceac6` | PD-16 `mkdir` ancestor parity |
+
+**Partial by design:** PD-20 — corrupt-index quarantine, orphan adoption and create/open rollback are
+in, and the scratch sweep runs on the background reaper thread, but `workspace.ensure()` stays
+synchronous until `AppGraph` gains a readiness state. PD-25 — import/export/restore status is now a
+persistent banner that survives closing Settings, but there is no cancel button because the host
+exposes no cancellation for `saf.*` heavy work.
+
+**Gates on the merged tree:** Android 302 tests (0 failures/skips) + `lintDebug`; web typecheck, lint,
+255 tests in 38 files, build. Device checks still pending: real-WebView dialogs (PD-02), import jank
+(PD-05), stat-poll battery/heat (PD-12), corrupt-index recovery after a forced kill (PD-01/PD-20),
+partial-import rollback with a revoked provider (PD-06), and kill-during-restore (PD-07/PD-22). Full
+report: [`docs/reports/phase-d-fixes.md`](docs/reports/phase-d-fixes.md).
 
 ---
 
@@ -180,9 +208,9 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 - [x] **Task 13** Split `App.tsx` into features and stores — *done and device-verified 2026-11-14*. `App.tsx` is boot only (128 lines); `features/shell/Shell.tsx` is 84 lines and composes feature views. Zustand vanilla stores (`settings`, `shell`, `files`, `editor`, `run`, plus notifications/errors) are built once by `createAppStores(bridge)` manual DI and provided by context. Terminal session persistence moved to `features/terminal/session.ts`; OSC 0/2 titles are sanitised and OSC 52 is swallowed. `styles.css` split into 22 files under `web/src/styles/` with the original cascade order. Tests: files, editor, run, terminal helpers and a mock-mode shell smoke test — **57 web tests**. D1 parity: boot, drawer/file list, open `hello.sh`, Run sheet (`EXIT 0`), terminal PTY, Runtimes, rename (tab followed) and delete (moved to `.trash`). See [`docs/reports/task13-verification.md`](docs/reports/task13-verification.md).
 
 ### Phase D — Workspace and editor completeness
-- [x] **Task 14** Workspaces, SAF import/export, zip backup, uninstall warning — *code complete 2026-11-14, device pass pending*. `WorkspaceStore` registry (`filesDir/workspaces.json`, `workspace/workspaces/<id>`), `workspace.list/create/open/rename/delete` (`list` = `{ active, workspaces }`), active-root path jail, top-bar switcher, `saf.importTree` (never overwrites), `saf.exportWorkspace` (streaming zip), `saf.restoreArchive` (strict zip-slip/size caps, temp-file atomic replace), `saf.progress { phase, files, bytes }`, Settings Backup & Import and the uninstall warning. JVM: `WorkspaceStoreTest`, `ZipBackupTest`, `WorkspaceHandlerTest`, expanded `SafHandlerTest`. Web: `workspaceStore.test.ts`, `mock.phaseD.test.ts`.
-- [x] **Task 15** Drafts + crash recovery, external-change detection, large-file mode, find/replace — *code complete 2026-11-14, device pass pending*. `FileHash` + `Drafts` (`filesDir/drafts/<workspaceId>/<sha256(path)>.json`), `draft.list/read/save/delete`, 3 s idle autosave, recovery/discard banner, `fs.stat` + chunked `fs.read` + `writeChecked` (`E_CONFLICT`), 5 s external-change poll with Reload / Keep mine, >1 MB read-only large-file mode, find/replace sheet driving CodeMirror search commands. JVM: `DraftsTest`, `FileHashTest`, `DraftHandlerTest`. Web: `editorPhaseD.test.ts`.
-- [x] **Task 16** Workspace search (`fs.search` streaming) — *code complete 2026-11-14, device pass pending*. `SearchEngine` ignores `.git`/`node_modules`/`.venv`/`__pycache__`, glob + case options, capped (default 500, max 2 000), cancellable via client `searchId`; streaming `search.match` into a search sheet with jump-to-line. JVM: `SearchEngineTest`, `SearchHandlerTest`. Web: `searchStore.test.ts`.
+- [x] **Task 14** Workspaces, SAF import/export, zip backup, uninstall warning — *code complete 2026-11-14, review fixes 2026-11-15, device pass pending*. `WorkspaceStore` registry (`filesDir/workspaces.json`, `workspace/workspaces/<id>`), `workspace.list/create/open/rename/delete` (`list` = `{ active, workspaces }`), active-root path jail, top-bar switcher, `saf.importTree` (never overwrites), `saf.exportWorkspace` (streaming zip), `saf.restoreArchive` (strict zip-slip/size caps, temp-file atomic replace), `saf.progress { phase, files, bytes }`, Settings Backup & Import and the uninstall warning. JVM: `WorkspaceStoreTest`, `ZipBackupTest`, `WorkspaceHandlerTest`, expanded `SafHandlerTest`. Web: `workspaceStore.test.ts`, `mock.phaseD.test.ts`.
+- [x] **Task 15** Drafts + crash recovery, external-change detection, large-file mode, find/replace — *code complete 2026-11-14, review fixes 2026-11-15, device pass pending*. `FileHash` + `Drafts` (`filesDir/drafts/<workspaceId>/<sha256(path)>.json`), `draft.list/read/save/delete`, 3 s idle autosave, recovery/discard banner, `fs.stat` + chunked `fs.read` + `writeChecked` (`E_CONFLICT`), 5 s external-change poll with Reload / Keep mine, >1 MB read-only large-file mode, find/replace sheet driving CodeMirror search commands. JVM: `DraftsTest`, `FileHashTest`, `DraftHandlerTest`. Web: `editorPhaseD.test.ts`.
+- [x] **Task 16** Workspace search (`fs.search` streaming) — *code complete 2026-11-14, review fixes 2026-11-15, device pass pending*. `SearchEngine` ignores `.git`/`node_modules`/`.venv`/`__pycache__`, glob + case options, capped (default 500, max 2 000), cancellable via client `searchId`; streaming `search.match` into a search sheet with jump-to-line. JVM: `SearchEngineTest`, `SearchHandlerTest`. Web: `searchStore.test.ts`.
 
 ### Phase E — Root mode
 - [ ] **Task 17** `RootManager` (libsu), Root mode setting, warning, ROOT badge
@@ -314,3 +342,4 @@ Completed under plan v8; kept for traceability.
 | 2026-11-14 | **Phase B/C review, batches 4–6.** Batch 4 web (`640ac2d`): redaction on every message sink, benign-error/dedupe/re-entrancy/boot queue in global handlers, fire-and-forget reporting. Batch 4 Android (`4f6c7f8`): deferred background-safe renderer recovery with persisted loss time, full `configChanges`, side/cutout insets to CSS, wider `Redactor`, crash caps, default-port origin check. Batch 5 Android files (`4a72324`): non-regular read rejection, canonical `rel`, symlink entry delete/rename, POSIX permission preservation, strict UTF-8, 4 MB read, case-only rename. Batch 5/6 web (`2467948`): sheet stack + ordered back, run hide vs stop, run identity, file-list token, folder rename/delete tab state, CRLF, SAF saves, per-tab panes, session merge/dispose, storage permission flow, prompt validation, pane boundaries, snackbar/keyboard/settings/lazy-retry/MockBridge lows. Batch 6 partial (`56fc5bf`): `close_range` removed, SIGTERM grace, resize guard, precomputed fd bound, early `term.open` output, aligned replay. Gates: Android 194 tests + lint + 16 KB; web 183 tests, typecheck/lint/build. Device: both phones boot/PTY/service; D1 rotation; D2 font scale, 755→755 save, inline prompt error, storage permission grant + Downloads listing. Narrow items remain (W-06, L-06, L-08, L-15, L-24, S-15…S-20, B-14…B-16, W-25, W-30/31/33/38). |
 | 2026-11-14 | **Phase D (Tasks 14–16) code complete.** Workspaces: `WorkspaceStore` registry + active root, `workspace.list` → `{ active, workspaces }`, top-bar switcher, SAF folder import, streaming zip export and strict zip restore with `saf.progress`. Editor: `fs.stat` + chunked `fs.read` + `writeChecked` (`E_CONFLICT`), 3 s draft autosave with recovery/discard, 5 s external-change poll with Reload / Keep mine, >1 MB read-only large-file mode, find/replace sheet. Search: `fs.search` streams `search.match`, ignore list, glob/case, capped and cancellable via `searchId`, results panel with jump-to-line. Tests: Android 252 (new workspace/draft/search/zip/hash suites), web 224 across 37 files (new mock Phase D, workspace, search and editor suites); typecheck, lint and build pass. Fixed `ReadReply.size` (`Long`), a lost buffered block in zip restore, closed-sheet accessibility leakage, and Keep mine opening the Save As prompt. Device rows stay pending: both phones unavailable. Report: `docs/reports/task14-16-verification.md`. |
 | 2026-11-14 | **Phase D review.** 25 findings PD-01…PD-25 (2 High, 12 Medium, 11 Low) in `docs/reports/phase-d-analysis.md`. High: a corrupt `workspaces.json` silently resets the registry and is overwritten (other workspaces become unopenable), and `window.prompt`/`window.confirm` are no-ops in the unpatched Android WebView, which makes workspace create/rename/delete, backup-restore confirm and goto-line unreachable on device (SUSPECTED until D1/D2). Notable Mediums: Save As on a >1 MB read-only doc writes only the first chunk; stale search reply clobbers a newer search; import failure leaves a partial tree; failed SAF archive copies leak up to 512 MB in `cacheDir`; export aborts on one out-of-root symlink; `workspace.delete` never purges drafts (`Drafts.deleteWorkspace` dead code); Turkish-locale lowercasing breaks case-insensitive search; workspace switch leaves stale search results and kills session restore. Sound: restore zip-slip protection and caps, `expectedHash` conflict loop, draft hygiene, protected workspace roots, one-reply-per-request. Fix batches 1–3 are listed in the report; findings need tests + fixes before the Python phase starts. |
+| 2026-11-15 | **Phase D review fixes (PD-01…PD-25).** Four worktrees fixed the findings in parallel, then merged with `--no-ff`: web search/mock `9f14602` (stale/late search guard, mock parity incl. glob/ignore/read cap, jump handshake, cancel on timeout), web editor/dialogs `aba9ff5` (in-app confirm/prompt replacing `window.confirm`/`prompt`, Save As large-file guard, workspace-tagged session with delete purge, find/replace reset, per-path draft locks, persistent backup banner), Android core `b729f11` (corrupt-index quarantine + orphan adoption + create/open rollback, symlink-safe export with caps, draft purge on delete, locale-independent search with honest `truncated`, `confirm` requirement and single heavy-SAF lock, batched `search.matches`, scratch-staged restore), Android platform `9bd2d57` (staged folder import with rollback, `restore-*` cleanup + `ScratchSweeper` on the reaper thread, throttled `*.progress`, `(size, mtime)` stat-hash LRU). Follow-up `8eceac6` aligned mock `mkdir` with the host's `mkdirs()`. Gates on merged `v9-impl`: Android 302 tests + `lintDebug`; web typecheck, lint, 255 tests in 38 files, build. Two items stay partial by design: PD-20 async `ensure()` and PD-25 host-side cancel. Device checks (real-WebView dialogs, import jank, stat-poll heat, kill-during-import/restore) remain pending. Report: `docs/reports/phase-d-fixes.md`. |
