@@ -21,7 +21,7 @@ describe("run store (Task 13)", () => {
   it("refuses a file type it cannot run and explains why", async () => {
     const stores = createAppStores(new MockBridge())
     stores.editor.setState({
-      docs: [{ path: "notes.txt", content: "hi", saved: "hi" }],
+      docs: [{ path: "notes.txt", content: "hi", saved: "hi", eol: "\n" }],
       activePath: "notes.txt"
     })
 

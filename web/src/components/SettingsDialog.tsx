@@ -1,4 +1,5 @@
 import { useState } from "react"
+import type { StorageInfo } from "../bridge"
 import { FONT_FAMILIES, type UserSettings } from "../settings/userSettings"
 import {
   EDITOR_THEMES,
@@ -9,6 +10,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
+  SmartphoneIcon,
   SunIcon,
   TypeIcon
 } from "./Icons"
@@ -22,6 +24,9 @@ interface Props {
   bridgeMode: string
   version: string
   onOpenRuntimes: () => void
+  /** Shared-storage status, so the permission can be granted from Settings (W-27). */
+  storage?: StorageInfo | null
+  onRequestStoragePermission?: () => void
 }
 
 export function SettingsDialog({
@@ -31,7 +36,9 @@ export function SettingsDialog({
   onUpdate,
   bridgeMode,
   version,
-  onOpenRuntimes
+  onOpenRuntimes,
+  storage,
+  onRequestStoragePermission
 }: Props) {
   const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "about">("editor")
 
@@ -264,6 +271,27 @@ export function SettingsDialog({
 
         {activeTab === "about" && (
           <div className="settings-panel">
+            <div className="settings-card">
+              <label className="settings-card-label">Shared storage</label>
+              <p className="guide-intro">
+                {storage === null || storage === undefined
+                  ? "Storage access has not been checked yet."
+                  : storage.hasPermission
+                    ? "LeoCode can read and write shared storage (Downloads, Documents, SD cards)."
+                    : "LeoCode cannot read shared storage yet. Grant access to open Downloads, Documents and bookmarks outside the app workspace."}
+              </p>
+              {onRequestStoragePermission && (
+                <button
+                  className="btn primary full-width"
+                  onClick={onRequestStoragePermission}
+                  disabled={Boolean(storage?.hasPermission)}
+                >
+                  <SmartphoneIcon size={18} />
+                  <span>{storage?.hasPermission ? "Storage access granted" : "Grant storage access"}</span>
+                </button>
+              )}
+            </div>
+
             <div className="settings-card">
               <label className="settings-card-label">Runtime Toolchains</label>
               <button

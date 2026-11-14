@@ -50,6 +50,11 @@ export interface EditorPaneProps {
   path: string
   initialContent: string
   dark: boolean
+  /**
+   * One pane is mounted per open document (W-24); only the visible one handles
+   * global editor commands, so Undo does not run against every hidden buffer.
+   */
+  active?: boolean
   fontSize?: number
   fontFamily?: string
   editorTheme?: EditorThemeId
@@ -243,6 +248,7 @@ export function EditorPane({
   path,
   initialContent,
   dark,
+  active = true,
   fontSize = 14,
   fontFamily = "'JetBrains Mono', monospace",
   editorTheme: propEditorTheme,
@@ -474,6 +480,7 @@ export function EditorPane({
   }
 
   useEffect(() => {
+    if (!active) return
     const handleCommand = (e: Event) => {
       const custom = e as CustomEvent<{ action: string; value?: unknown }>
       if (!custom.detail) return
@@ -527,7 +534,7 @@ export function EditorPane({
     }
     window.addEventListener("leocode:editor-command", handleCommand)
     return () => window.removeEventListener("leocode:editor-command", handleCommand)
-  }, [handleFormat])
+  }, [handleFormat, active])
 
   return (
     <div className="editor-shell">

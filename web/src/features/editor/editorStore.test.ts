@@ -65,8 +65,8 @@ describe("editor store (Task 13)", () => {
     const stores = createAppStores(new MockBridge())
     stores.editor.setState({
       docs: [
-        { path: "a.txt", content: "changed", saved: "x" },
-        { path: "b.txt", content: "y", saved: "y" }
+        { path: "a.txt", content: "changed", saved: "x", eol: "\n" },
+        { path: "b.txt", content: "y", saved: "y", eol: "\n" }
       ],
       activePath: "a.txt"
     })

@@ -27,3 +27,15 @@ if (!("ResizeObserver" in window)) {
     value: ResizeObserverStub
   })
 }
+
+// CodeMirror measures the caret with Range.getClientRects, which jsdom lacks.
+// The editor still renders; without the stub every measure logs a TypeError.
+if (typeof Range !== "undefined" && !Range.prototype.getClientRects) {
+  const emptyRect = new DOMRect(0, 0, 0, 0)
+  Range.prototype.getClientRects = function getClientRects() {
+    return Object.assign([], { item: () => null }) as unknown as DOMRectList
+  }
+  Range.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    return emptyRect
+  }
+}

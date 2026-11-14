@@ -32,6 +32,11 @@ export interface ErrorsState {
   dismissBanner(): void
   dismissSheet(): void
   dismissAll(): void
+  /**
+   * Back-button helper (W-12): close the sheet, else the banner. Returns false
+   * when nothing is showing, so the caller can handle the next layer.
+   */
+  dismissTop(): boolean
 }
 
 export type Notify = (notice: Omit<Notice, "id">) => void
@@ -46,7 +51,7 @@ export type Notify = (notice: Omit<Notice, "id">) => void
  * for surface selection and for `errorDetails`, which does its own masking.
  */
 export function createErrorsStore(notify: Notify): StoreApi<ErrorsState> {
-  return createStore<ErrorsState>((set) => ({
+  return createStore<ErrorsState>((set, get) => ({
     banner: null,
     sheet: null,
 
@@ -86,6 +91,18 @@ export function createErrorsStore(notify: Notify): StoreApi<ErrorsState> {
 
     dismissAll() {
       set({ banner: null, sheet: null })
+    },
+
+    dismissTop() {
+      if (get().sheet) {
+        set({ sheet: null })
+        return true
+      }
+      if (get().banner) {
+        set({ banner: null })
+        return true
+      }
+      return false
     }
   }))
 }

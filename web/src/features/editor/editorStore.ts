@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
 import { AppError, type Bridge, type FileEntry } from "../../bridge"
+import { toAppError } from "../../errors/catalog"
 import type { ErrorsState } from "../../errors/errorsStore"
 import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { FilesState } from "../files/filesStore"
@@ -8,11 +9,16 @@ import type { ShellState } from "../shell/shellStore"
 import {
   SESSION_KEY,
   baseName,
+  detectEol,
   dirName,
   entryExists,
   initial,
   isDirty,
+  isSafPath,
+  isUnder,
   normalizeText,
+  rewritePrefix,
+  serialize,
   type OpenDoc
 } from "./model"
 
@@ -35,6 +41,11 @@ export interface EditorState {
   renamePath(from: string, to: string): void
 }
 
+export type EditorStore = StoreApi<EditorState> & {
+  /** Remove the window/subscription listeners this store installed (W-26). */
+  dispose(): void
+}
+
 interface EditorDeps {
   bridge: Bridge
   files: StoreApi<FilesState>
@@ -44,11 +55,23 @@ interface EditorDeps {
   notifications: StoreApi<NotificationsState>
 }
 
-export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
+/** Session state is written 300 ms after the last change, not on every key. */
+export const SESSION_PERSIST_DEBOUNCE_MS = 300
+
+/** Codes that mean the file is really gone; everything else may be transient. */
+const GONE_CODES = new Set(["E_NOT_FOUND", "E_BINARY"])
+
+export function createEditorStore(deps: EditorDeps): EditorStore {
   const { bridge, files, settings, shell, errors, notifications } = deps
   let untitledCounter = 1
   let sessionLoaded = false
   let sessionSaveWarned = false
+  let persistTimer: number | null = null
+  /**
+   * Paths whose restore failed for a transient reason (timeout, permission).
+   * They stay in the persisted session so the next launch can try again (W-26).
+   */
+  const retainedPaths = new Set<string>()
 
   const store = createStore<EditorState>((set, get) => ({
     docs: [],
@@ -68,6 +91,7 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
           shell.getState().go("editor")
           return
         }
+        retainedPaths.delete(path)
         set((state) => ({ docs: [...state.docs, initial(path, raw)], activePath: path }))
         shell.getState().go("editor")
         const { recentFiles } = settings.getState().settings
@@ -109,7 +133,10 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
     newUntitled() {
       const name = `Untitled-${untitledCounter++}`
       set((state) => ({
-        docs: [...state.docs, { path: name, content: "", saved: null, isUntitled: true }],
+        docs: [
+          ...state.docs,
+          { path: name, content: "", saved: null, eol: "\n" as const, isUntitled: true }
+        ],
         activePath: name
       }))
       shell.getState().go("editor")
@@ -134,11 +161,14 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         get().beginSaveAs()
         return false
       }
+      // A SAF document is a copy-out: writing it through `fs.write` would target
+      // a path the jail does not have (W-19).
+      if (isSafPath(doc.path)) return saveSaf(doc, set)
       try {
         // Record exactly what was written: text typed while the write was in
-        // flight must stay dirty (W-02).
+        // flight must stay dirty (W-02). Line endings go back as they were (W-18).
         const written = doc.content
-        await bridge.write(path, written)
+        await bridge.write(path, serialize(doc))
         set((state) => ({
           docs: state.docs.map((item) =>
             item.path === path ? { ...item, saved: written, isUntitled: false } : item
@@ -157,11 +187,18 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       const path = get().activePath
       const doc = path ? get().docs.find((item) => item.path === path) : undefined
       if (!doc) return
-      const initialName = doc.isUntitled
-        ? `${doc.path}.txt`
-        : doc.path.startsWith("saf://")
-          ? doc.path.slice(6)
-          : doc.path
+      if (isSafPath(doc.path)) {
+        // There is no destination picker for Save As, and writing a `saf://`
+        // name into the workspace would silently create a stray file (W-19).
+        notifications.getState().enqueue({
+          kind: "info",
+          message: "Save As is not available for documents opened with the system picker",
+          detail: "Use Save to export the document again, or open it from the workspace to keep a copy.",
+          durationMs: 6_000
+        })
+        return
+      }
+      const initialName = doc.isUntitled ? `${doc.path}.txt` : doc.path
       shell.getState().openPrompt({
         title: "Save As",
         label: "Save file as (filename or full path):",
@@ -174,6 +211,10 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       const path = get().activePath
       const doc = path ? get().docs.find((item) => item.path === path) : undefined
       if (!doc) return
+      if (isSafPath(doc.path)) {
+        get().beginSaveAs()
+        return
+      }
       if (target === doc.path) {
         await get().save(doc.path)
         return
@@ -190,7 +231,7 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         if (!window.confirm(`${baseName(target)} already exists. Replace it?`)) return
       }
       try {
-        await bridge.write(target, doc.content)
+        await bridge.write(target, serialize(doc))
         set((state) => ({
           docs: state.docs.map((item) =>
             item.path === doc.path
@@ -210,6 +251,14 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       if (!path) return
       const doc = get().docs.find((item) => item.path === path)
       if (!doc) return
+      if (isSafPath(path)) {
+        notifications.getState().enqueue({
+          kind: "info",
+          message: "Reload is not available for system-picker documents",
+          durationMs: 4_000
+        })
+        return
+      }
       if (
         isDirty(doc) &&
         !window.confirm(`Discard unsaved changes to ${baseName(path)} and reload from disk?`)
@@ -219,9 +268,10 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       try {
         const raw = await bridge.read(path)
         const content = normalizeText(raw)
+        const eol = detectEol(raw)
         set((state) => ({
           docs: state.docs.map((item) =>
-            item.path === path ? { ...item, content, saved: content } : item
+            item.path === path ? { ...item, content, saved: content, eol } : item
           )
         }))
         shell.getState().flash("Reloaded from disk")
@@ -263,19 +313,36 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
           sessionLoaded = true
           return
         }
-        const session = JSON.parse(raw) as { paths: string[]; active: string | null }
-        if (!session.paths || session.paths.length === 0) {
+        const session = JSON.parse(raw) as { paths?: unknown; active?: unknown }
+        const paths = Array.isArray(session.paths)
+          ? session.paths.filter(
+              (path): path is string =>
+                typeof path === "string" && path.length > 0 && !isSafPath(path)
+            )
+          : []
+        const active = typeof session.active === "string" ? session.active : null
+        if (paths.length === 0) {
           sessionLoaded = true
           return
         }
         let missing = 0
+        let deferred = 0
         const loaded = await Promise.all(
-          session.paths.map(async (path): Promise<OpenDoc | null> => {
+          paths.map(async (path): Promise<OpenDoc | null> => {
             try {
-              return initial(path, await bridge.read(path))
-            } catch {
-              // The file may have been deleted or moved since last session.
-              missing += 1
+              const doc = initial(path, await bridge.read(path))
+              retainedPaths.delete(path)
+              return doc
+            } catch (error) {
+              // Only a file that is really gone drops out of the session. A
+              // timeout or a not-yet-granted storage permission is retried on the
+              // next launch instead of silently forgetting the tab (W-26).
+              if (GONE_CODES.has(toAppError(error).code)) {
+                missing += 1
+                return null
+              }
+              deferred += 1
+              retainedPaths.add(path)
               return null
             }
           })
@@ -287,43 +354,68 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
             durationMs: 5_000
           })
         }
-        const valid = loaded.filter((doc): doc is OpenDoc => doc !== null)
-        if (valid.length > 0) {
-          set({
-            docs: valid,
-            activePath:
-              session.active && valid.some((doc) => doc.path === session.active)
-                ? session.active
-                : valid[0].path
+        if (deferred > 0) {
+          notifications.getState().enqueue({
+            kind: "warning",
+            message: `${deferred} tab${deferred === 1 ? "" : "s"} could not be opened right now`,
+            detail: "They stay in the session and are retried on the next launch.",
+            durationMs: 6_000
           })
         }
+        // Merge with anything opened while the reads were in flight (W-26) and
+        // never replace the user's newer active tab.
+        set((state) => {
+          const existing = new Set(state.docs.map((doc) => doc.path))
+          const restored = loaded.filter(
+            (doc): doc is OpenDoc => doc !== null && !existing.has(doc.path)
+          )
+          if (restored.length === 0) return state
+          const docs = [...state.docs, ...restored]
+          const activePath =
+            state.activePath ??
+            (active && docs.some((doc) => doc.path === active) ? active : docs[0].path)
+          return { docs, activePath }
+        })
       } catch (error) {
         errors.getState().report(error, { context: "Restore the previous session" })
       } finally {
         sessionLoaded = true
+        // Rewrite the session immediately: tabs that are really gone must not be
+        // re-read on every launch (W-26).
+        persistSession()
       }
     },
 
     async deleteEntry(entry) {
-      const ok = window.confirm(
+      // A folder delete removes whole buffers; say so before the confirm (W-17).
+      const affected = get().docs.filter((doc) => isUnder(doc.path, entry.path))
+      const dirty = affected.filter(isDirty).length
+      const base =
         entry.kind === "dir"
           ? `Delete the folder "${entry.name}" and everything in it?`
           : `Delete "${entry.name}"?`
-      )
-      if (!ok) return
+      const message =
+        dirty > 0
+          ? `${base}\n\n${dirty} open tab${dirty === 1 ? " has" : "s have"} unsaved changes, which will be lost.`
+          : base
+      if (!window.confirm(message)) return
       try {
         await bridge.remove(entry.path)
-        set((state) => ({
-          docs: state.docs.filter(
-            (doc) => doc.path !== entry.path && !doc.path.startsWith(entry.path + "/")
-          ),
-          activePath:
-            state.activePath &&
-            (state.activePath === entry.path ||
-              state.activePath.startsWith(entry.path + "/"))
-              ? null
-              : state.activePath
-        }))
+        set((state) => {
+          const docs = state.docs.filter((doc) => !isUnder(doc.path, entry.path))
+          const stillOpen =
+            state.activePath !== null && docs.some((doc) => doc.path === state.activePath)
+          return {
+            docs,
+            // A surviving tab stays active instead of showing "No file open"
+            // above a tab strip that still has tabs (W-17).
+            activePath: stillOpen
+              ? state.activePath
+              : docs.length > 0
+                ? docs[docs.length - 1].path
+                : null
+          }
+        })
         shell.getState().flash("Deleted")
         await files.getState().refresh()
       } catch (error) {
@@ -332,15 +424,68 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
     },
 
     renamePath(from, to) {
-      set((state) => ({
-        docs: state.docs.map((doc) => (doc.path === from ? { ...doc, path: to } : doc)),
-        activePath: state.activePath === from ? to : state.activePath
-      }))
+      set((state) => {
+        const seen = new Set<string>()
+        const docs: OpenDoc[] = []
+        for (const doc of state.docs) {
+          // A folder rename moves every tab under it, not just exact matches (W-17).
+          const path = rewritePrefix(doc.path, from, to)
+          // Renaming onto an open path must not produce duplicate React keys.
+          if (seen.has(path)) continue
+          seen.add(path)
+          docs.push(path === doc.path ? doc : { ...doc, path })
+        }
+        const rewrittenActive = state.activePath
+          ? rewritePrefix(state.activePath, from, to)
+          : null
+        return {
+          docs,
+          activePath:
+            rewrittenActive && docs.some((doc) => doc.path === rewrittenActive)
+              ? rewrittenActive
+              : docs.length > 0
+                ? docs[docs.length - 1].path
+                : null
+        }
+      })
     }
   }))
 
-  if (typeof window !== "undefined") {
-    window.addEventListener("beforeunload", persistSession)
+  function saveSaf(
+    doc: OpenDoc,
+    setState: StoreApi<EditorState>["setState"]
+  ): Promise<boolean> {
+    const name = doc.path.slice("saf://".length)
+    const save = bridge.saveSafDocument
+    if (!save) {
+      errors
+        .getState()
+        .report(
+          new AppError("E_UNSUPPORTED", "This bridge cannot export documents through the system picker"),
+          { context: "Save document" }
+        )
+      return Promise.resolve(false)
+    }
+    const written = doc.content
+    return Promise.resolve(save.call(bridge, name, serialize(doc)))
+      .then((result) => {
+        if (!result) {
+          // The system picker was dismissed: nothing was exported, keep it dirty.
+          shell.getState().flash("Export cancelled")
+          return false
+        }
+        setState((state) => ({
+          docs: state.docs.map((item) =>
+            item.path === doc.path ? { ...item, saved: written } : item
+          )
+        }))
+        shell.getState().flash(`Exported ${name}`)
+        return true
+      })
+      .catch((error: unknown) => {
+        errors.getState().report(error, { context: "Export document" })
+        return false
+      })
   }
 
   function persistSession() {
@@ -348,8 +493,11 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
     try {
       const state = store.getState()
       const paths = state.docs
-        .filter((doc) => !doc.isUntitled && !doc.path.startsWith("saf://"))
+        .filter((doc) => !doc.isUntitled && !isSafPath(doc.path))
         .map((doc) => doc.path)
+      for (const retained of retainedPaths) {
+        if (!paths.includes(retained)) paths.push(retained)
+      }
       const active = state.activePath
       const activeDoc = state.docs.find((doc) => doc.path === active)
       localStorage.setItem(
@@ -369,7 +517,32 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
     }
   }
 
-  store.subscribe(() => persistSession())
+  /** Debounced: one `JSON.stringify` + `setItem` per burst, not per keystroke. */
+  function schedulePersist() {
+    if (typeof window === "undefined") return
+    if (persistTimer !== null) window.clearTimeout(persistTimer)
+    persistTimer = window.setTimeout(() => {
+      persistTimer = null
+      persistSession()
+    }, SESSION_PERSIST_DEBOUNCE_MS)
+  }
 
-  return store
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", persistSession)
+  }
+  const unsubscribe = store.subscribe(schedulePersist)
+
+  const api = store as EditorStore
+  api.dispose = () => {
+    unsubscribe()
+    if (typeof window !== "undefined") {
+      window.removeEventListener("beforeunload", persistSession)
+      if (persistTimer !== null) {
+        window.clearTimeout(persistTimer)
+        persistTimer = null
+      }
+    }
+  }
+
+  return api
 }

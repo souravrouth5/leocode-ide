@@ -12,10 +12,17 @@ interface ErrorSurfacesProps {
   notifications: StoreApi<NotificationsState>
   /** `app.info` version, included in the sheet's Copy details (W-09). */
   version?: string
+  /** Storage permission flow for E_PERMISSION / E_PATH_OUTSIDE_ROOT (W-27). */
+  onRequestStoragePermission?: () => void
 }
 
 /** Renders the active banner, sheet and the head of the snackbar queue. */
-export function ErrorSurfaces({ errors, notifications, version }: ErrorSurfacesProps) {
+export function ErrorSurfaces({
+  errors,
+  notifications,
+  version,
+  onRequestStoragePermission
+}: ErrorSurfacesProps) {
   const banner = useStore(errors, (state) => state.banner)
   const sheet = useStore(errors, (state) => state.sheet)
   const queue = useStore(notifications, (state) => state.queue)
@@ -53,6 +60,7 @@ export function ErrorSurfaces({ errors, notifications, version }: ErrorSurfacesP
         onClose={dismissSheet}
         onNotice={notify}
         version={version}
+        onRequestStoragePermission={onRequestStoragePermission}
       />
       <Snackbar notice={notice} onDismiss={dismissNotice} />
     </>

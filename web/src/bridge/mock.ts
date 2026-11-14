@@ -24,6 +24,11 @@ interface Node {
 
 const now = () => Date.now()
 const THEME_KEY = "leocode.theme"
+/** Same per-operation ceiling as the host (`fs.write`, `saf.save`). */
+const MAX_WRITE_BYTES = 4 * 1024 * 1024
+
+/** Bytes, like the host's `FileEntry.size`, not characters. */
+const byteLength = (text: string) => new TextEncoder().encode(text).length
 
 const SEED: Array<[string, Node]> = [
   [".", { kind: "dir", content: "", mtime: now() }],
@@ -121,7 +126,7 @@ export class MockBridge implements Bridge {
         name: key.split("/").pop() ?? key,
         path: key,
         kind: node.kind,
-        size: node.content.length,
+        size: byteLength(node.content),
         mtime: node.mtime
       })
     }
@@ -132,35 +137,54 @@ export class MockBridge implements Bridge {
 
   async read(path: string): Promise<string> {
     const node = this.nodes.get(path)
-    if (!node) throw new Error(`ENOENT: ${path}`)
-    if (node.kind !== "file") throw new Error(`EISDIR: ${path}`)
+    // Contract codes, not ENOENT strings: store tests must exercise the same
+    // branches as the real host (W-36).
+    if (!node) throw new BridgeError("E_NOT_FOUND", `${path} does not exist`)
+    if (node.kind !== "file") throw new BridgeError("E_NOT_DIR", `${path} is a folder`)
+    if (node.content.includes("\u0000")) {
+      throw new BridgeError("E_BINARY", `${path} is not a text file`)
+    }
     return node.content
   }
 
   async write(path: string, content: string): Promise<void> {
+    const bytes = byteLength(content)
+    if (bytes > MAX_WRITE_BYTES) {
+      throw new BridgeError("E_LIMIT", `${path} is larger than the 4 MB write limit`)
+    }
     const existing = this.nodes.get(path)
+    if (existing?.kind === "dir") {
+      throw new BridgeError("E_NOT_DIR", `${path} is a folder`)
+    }
     this.nodes.set(path, { kind: "file", content, mtime: now() })
     if (!existing) this.ensureParents(path)
   }
 
   async mkdir(path: string): Promise<void> {
+    const existing = this.nodes.get(path)
+    // The host never replaces an entry, file or folder, with mkdir.
+    if (existing) throw new BridgeError("E_EXISTS", `${path} already exists`)
     this.nodes.set(path, { kind: "dir", content: "", mtime: now() })
     this.ensureParents(path)
   }
 
   async remove(path: string): Promise<void> {
+    if (!this.nodes.has(path)) throw new BridgeError("E_NOT_FOUND", `${path} does not exist`)
     for (const key of [...this.nodes.keys()]) {
       if (key === path || key.startsWith(path + "/")) this.nodes.delete(key)
     }
   }
 
   async rename(from: string, to: string): Promise<void> {
+    if (!this.nodes.has(from)) throw new BridgeError("E_NOT_FOUND", `${from} does not exist`)
+    // A rename never replaces an existing entry (the host replies E_EXISTS).
+    if (this.nodes.has(to)) throw new BridgeError("E_EXISTS", `${to} already exists`)
     const moved: Array<[string, Node]> = []
     for (const [key, node] of this.nodes) {
       if (key === from) moved.push([to, node])
       else if (key.startsWith(from + "/")) moved.push([to + key.slice(from.length), node])
     }
-    if (moved.length === 0) throw new Error(`ENOENT: ${from}`)
+    if (moved.length === 0) throw new BridgeError("E_NOT_FOUND", `${from} does not exist`)
     for (const key of [...this.nodes.keys()]) {
       if (key === from || key.startsWith(from + "/")) this.nodes.delete(key)
     }

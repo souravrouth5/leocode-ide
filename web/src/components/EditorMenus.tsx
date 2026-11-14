@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { useSheetRegistration } from "../features/shell/useSheetRegistration"
 import {
   CodeIcon,
   EditIcon,
@@ -65,6 +66,10 @@ function Dropdown({
 }) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const menuId = useId()
+
+  // Back closes an open menu before it closes the view behind it (W-12).
+  useSheetRegistration(`menu-${menuId}`, open, () => setOpen(false))
 
   useEffect(() => {
     if (!open) return

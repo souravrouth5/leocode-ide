@@ -11,7 +11,7 @@ const RuntimeManager = lazyWithRetry(() =>
 )
 
 export function RuntimesView({ info }: { info: AppInfo | null }) {
-  const { bridge, shell } = useStores()
+  const { bridge, shell, run } = useStores()
   const view = useStore(shell, (state) => state.view)
 
   return (
@@ -34,6 +34,7 @@ export function RuntimesView({ info }: { info: AppInfo | null }) {
             bridge={bridge}
             info={info}
             onOpenTerminal={() => shell.getState().go("terminal")}
+            onRuntimeInstalled={() => run.getState().invalidatePythonProbe()}
           />
         </Suspense>
       </ErrorBoundary>

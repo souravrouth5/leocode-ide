@@ -66,7 +66,7 @@ describe("editor save safety (W-02/W-03/W-04)", () => {
     const bridge = new MockBridge()
     const stores = createAppStores(bridge)
     stores.editor.setState({
-      docs: [{ path: "Untitled-1", content: "draft", saved: null, isUntitled: true }],
+      docs: [{ path: "Untitled-1", content: "draft", saved: null, eol: "\n", isUntitled: true }],
       activePath: "Untitled-1"
     })
     const before = await bridge.read("main.py")

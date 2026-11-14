@@ -10,11 +10,16 @@ export interface SettingsState {
   update(patch: Partial<UserSettings>): void
 }
 
+export type SettingsStore = StoreApi<SettingsState> & {
+  /** Remove the window listeners this store installed. */
+  dispose(): void
+}
+
 /**
  * One settings store replaces the per-component hook. The storage event bridge
  * keeps a second window/tab in sync, as the hook did.
  */
-export function createSettingsStore(): StoreApi<SettingsState> {
+export function createSettingsStore(): SettingsStore {
   const store = createStore<SettingsState>((set, get) => ({
     settings: loadSettings(),
     update(patch) {
@@ -24,11 +29,18 @@ export function createSettingsStore(): StoreApi<SettingsState> {
     }
   }))
 
+  let dispose = () => {}
   if (typeof window !== "undefined") {
     const reload = () => store.setState({ settings: loadSettings() })
     window.addEventListener("leocode:settings-changed", reload)
     window.addEventListener("storage", reload)
+    dispose = () => {
+      window.removeEventListener("leocode:settings-changed", reload)
+      window.removeEventListener("storage", reload)
+    }
   }
 
-  return store
+  const api = store as SettingsStore
+  api.dispose = dispose
+  return api
 }

@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type { FileEntry } from "../bridge"
+import { useSheetRegistration } from "../features/shell/useSheetRegistration"
 import {
   ChevronRightIcon,
   EyeIcon,
@@ -153,6 +154,19 @@ export function FileTree({
 
   const timer = useRef<number | null>(null)
   const longPressed = useRef(false)
+  /** Set when a pointer/key already activated the row, so `click` does not repeat it. */
+  const handledPress = useRef(false)
+
+  // Local sheets register here so Android back closes them (W-12). The id is
+  // unique per mounted tree: the drawer and the Files view both render one.
+  const sheetScope = useId()
+  useSheetRegistration(`filetree-sort-${sheetScope}`, sortSheetOpen, () => setSortSheetOpen(false))
+  useSheetRegistration(`filetree-actions-${sheetScope}`, sheetFor !== null, () => setSheetFor(null))
+  useSheetRegistration(
+    `filetree-properties-${sheetScope}`,
+    propertiesFor !== null,
+    () => setPropertiesFor(null)
+  )
 
   const trail = useMemo(() => crumbs(path), [path])
 
@@ -246,14 +260,39 @@ export function FileTree({
     }, 420)
   }
 
+  const activate = (entry: FileEntry) => {
+    if (entry.kind === "dir") onNavigate(entry.path)
+    else onOpen(entry)
+  }
+
   const endPress = (entry: FileEntry) => {
     clearTimer()
     if (longPressed.current) {
       longPressed.current = false
+      handledPress.current = true
       return
     }
-    if (entry.kind === "dir") onNavigate(entry.path)
-    else onOpen(entry)
+    handledPress.current = true
+    activate(entry)
+  }
+
+  /**
+   * `onClick` covers keyboard Enter/Space and assistive activation (W-32); a
+   * pointer press already activated through `endPress`, so it is ignored here.
+   */
+  const handleClick = (entry: FileEntry) => {
+    if (handledPress.current) {
+      handledPress.current = false
+      return
+    }
+    activate(entry)
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, entry: FileEntry) => {
+    if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return
+    event.preventDefault()
+    handledPress.current = true
+    activate(entry)
   }
 
   return (
@@ -379,6 +418,8 @@ export function FileTree({
               onPointerUp={() => endPress(entry)}
               onPointerCancel={clearTimer}
               onPointerLeave={clearTimer}
+              onClick={() => handleClick(entry)}
+              onKeyDown={(event) => handleKeyDown(event, entry)}
               onContextMenu={(event) => {
                 event.preventDefault()
                 setSheetFor(entry)

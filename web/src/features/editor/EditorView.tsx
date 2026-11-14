@@ -65,38 +65,61 @@ export function EditorView() {
         </div>
       )}
 
-      {activeDoc ? (
+      {docs.length > 0 ? (
         <div className="editor-body">
-          <ErrorBoundary
-            resetKey={activeDoc.path}
-            fallback={(error, reset) => (
-              <PaneError
-                error={error}
-                onRetry={reset}
-                onNotice={(message) => shell.getState().flash(message)}
-              />
-            )}
-          >
-            <Suspense fallback={<div className="empty">Loading editor…</div>}>
-              <EditorPane
-                key={activeDoc.path}
-                path={activeDoc.path}
-                initialContent={activeDoc.content}
-                dark={dark}
-                fontSize={userSettings.fontSize}
-                fontFamily={userSettings.fontFamily}
-                editorTheme={userSettings.editorTheme}
-                tabSize={userSettings.tabSize}
-                wordWrap={userSettings.wordWrap}
-                lineNumbers={userSettings.lineNumbers}
-                formatOnSave={userSettings.formatOnSave}
-                onChange={(content) => editor.getState().setContent(activeDoc.path, content)}
-                onSave={() => void editor.getState().save()}
-                onReload={() => void editor.getState().reload()}
-                onNotification={(message) => shell.getState().flash(message)}
-              />
-            </Suspense>
-          </ErrorBoundary>
+          {/*
+            One EditorPane per open document, hidden when inactive (W-24). The
+            CodeMirror state (undo history, selection, scroll) survives a tab
+            switch, and closing the tab unmounts its pane, so nothing leaks.
+          */}
+          {docs.map((doc) => {
+            const active = doc.path === activePath
+            return (
+              <div
+                key={doc.path}
+                className="editor-pane-slot"
+                aria-hidden={!active}
+                style={{
+                  display: active ? "flex" : "none",
+                  flexDirection: "column",
+                  flex: "1 1 auto",
+                  minHeight: 0
+                }}
+              >
+                <ErrorBoundary
+                  resetKey={doc.path}
+                  fallback={(error, reset) => (
+                    <PaneError
+                      error={error}
+                      onRetry={reset}
+                      onNotice={(message) => shell.getState().flash(message)}
+                    />
+                  )}
+                >
+                  <Suspense fallback={<div className="empty">Loading editor…</div>}>
+                    <EditorPane
+                      key={doc.path}
+                      path={doc.path}
+                      active={active}
+                      initialContent={doc.content}
+                      dark={dark}
+                      fontSize={userSettings.fontSize}
+                      fontFamily={userSettings.fontFamily}
+                      editorTheme={userSettings.editorTheme}
+                      tabSize={userSettings.tabSize}
+                      wordWrap={userSettings.wordWrap}
+                      lineNumbers={userSettings.lineNumbers}
+                      formatOnSave={userSettings.formatOnSave}
+                      onChange={(content) => editor.getState().setContent(doc.path, content)}
+                      onSave={() => void editor.getState().save(doc.path)}
+                      onReload={() => void editor.getState().reload(doc.path)}
+                      onNotification={(message) => shell.getState().flash(message)}
+                    />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
+            )
+          })}
         </div>
       ) : (
         <div className="empty editor-empty">
@@ -110,6 +133,11 @@ export function EditorView() {
               + New File
             </button>
           </div>
+        </div>
+      )}
+      {docs.length > 0 && !activeDoc && (
+        <div className="empty editor-empty">
+          <p>No file selected</p>
         </div>
       )}
     </section>

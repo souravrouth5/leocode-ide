@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
 import type { FileEntry } from "../../bridge"
+import { createSheetStack, type SheetStack, type SheetStackEntry } from "./sheetStack"
 
 export type View = "files" | "editor" | "terminal" | "runtimes"
 
@@ -19,6 +20,11 @@ export interface ShellState {
   prompt: PromptState | null
   /** Transient status-bar text (2.2 s). */
   status: string | null
+  /**
+   * Local sheets (FileTree/EditorMenus) register here so the back button can
+   * close them (W-12). Not reactive: the stack is read on demand.
+   */
+  sheets: SheetStack
   setView(view: View): void
   go(view: View): void
   setSidebarOpen(open: boolean): void
@@ -27,10 +33,13 @@ export interface ShellState {
   openPrompt(prompt: PromptState): void
   closePrompt(): void
   flash(text: string): void
+  registerSheet(entry: SheetStackEntry): () => void
+  dismissTopSheet(): boolean
 }
 
 export function createShellStore(): StoreApi<ShellState> {
   let statusTimer: number | null = null
+  const sheets = createSheetStack()
 
   const store = createStore<ShellState>((set, get) => ({
     view: "editor",
@@ -39,6 +48,7 @@ export function createShellStore(): StoreApi<ShellState> {
     terminalMounted: false,
     prompt: null,
     status: null,
+    sheets,
 
     setView(view) {
       set({ view })
@@ -76,6 +86,14 @@ export function createShellStore(): StoreApi<ShellState> {
         statusTimer = null
         set((state) => (state.status === text ? { status: null } : state))
       }, 2_200)
+    },
+
+    registerSheet(entry) {
+      return get().sheets.register(entry)
+    },
+
+    dismissTopSheet() {
+      return get().sheets.dismissTop()
     }
   }))
 

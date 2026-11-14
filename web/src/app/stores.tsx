@@ -6,21 +6,23 @@ import {
   type NotificationsState
 } from "../notifications/notificationsStore"
 import { createErrorsStore, type ErrorsState } from "../errors/errorsStore"
-import { createSettingsStore, type SettingsState } from "../features/settings/settingsStore"
+import { createSettingsStore, type SettingsStore } from "../features/settings/settingsStore"
 import { createShellStore, type ShellState } from "../features/shell/shellStore"
 import { createFilesStore, type FilesState } from "../features/files/filesStore"
-import { createEditorStore, type EditorState } from "../features/editor/editorStore"
-import { createRunStore, type RunState } from "../features/run/runStore"
+import { createEditorStore, type EditorStore } from "../features/editor/editorStore"
+import { createRunStore, type RunStore } from "../features/run/runStore"
 
 export interface AppStores {
   bridge: Bridge
   notifications: StoreApi<NotificationsState>
   errors: StoreApi<ErrorsState>
-  settings: StoreApi<SettingsState>
+  settings: SettingsStore
   shell: StoreApi<ShellState>
   files: StoreApi<FilesState>
-  editor: StoreApi<EditorState>
-  run: StoreApi<RunState>
+  editor: EditorStore
+  run: RunStore
+  /** Remove listeners the stores installed on `window` (W-26). */
+  dispose(): void
 }
 
 /**
@@ -39,7 +41,24 @@ export function createAppStores(bridge: Bridge): AppStores {
   const editor = createEditorStore({ bridge, files, settings, shell, errors, notifications })
   const run = createRunStore({ bridge, editor, notifications })
 
-  return { bridge, notifications, errors, settings, shell, files, editor, run }
+  let disposed = false
+  return {
+    bridge,
+    notifications,
+    errors,
+    settings,
+    shell,
+    files,
+    editor,
+    run,
+    dispose() {
+      if (disposed) return
+      disposed = true
+      editor.dispose()
+      run.dispose()
+      settings.dispose()
+    }
+  }
 }
 
 const StoresContext = createContext<AppStores | null>(null)

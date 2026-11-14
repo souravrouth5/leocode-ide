@@ -12,6 +12,7 @@ import { AppStatusBar } from "../layout/AppStatusBar"
 import { BottomNav } from "../layout/BottomNav"
 import { RuntimesView } from "../runtimes/RuntimesView"
 import { TerminalView } from "../terminal/TerminalView"
+import { handleBack } from "./back"
 
 /**
  * The IDE frame, Task 13. Layout only: every pane is a feature view and all
@@ -19,13 +20,9 @@ import { TerminalView } from "../terminal/TerminalView"
  */
 export function Shell({ info }: { info: AppInfo | null }) {
   const stores = useStores()
-  const { shell, settings, files, editor, run } = stores
+  const { shell, settings } = stores
   const view = useStore(shell, (state) => state.view)
-  const sidebarOpen = useStore(shell, (state) => state.sidebarOpen)
-  const settingsOpen = useStore(shell, (state) => state.settingsOpen)
   const terminalMounted = useStore(shell, (state) => state.terminalMounted)
-  const prompt = useStore(shell, (state) => state.prompt)
-  const runOpen = useStore(run, (state) => state.run !== null)
   const userSettings = useStore(settings, (state) => state.settings)
   const { mode, setMode } = useTheme()
 
@@ -35,36 +32,19 @@ export function Shell({ info }: { info: AppInfo | null }) {
   }, [userSettings.appTheme, mode, setMode])
 
   useEffect(() => {
-    void files.getState().refresh()
-    void files.getState().loadStorage()
-    void editor.getState().restoreSession()
-  }, [files, editor])
+    void stores.files.getState().refresh()
+    void stores.files.getState().loadStorage()
+    void stores.editor.getState().restoreSession()
+  }, [stores])
 
   useEffect(() => {
-    window.__leocodeBack = () => {
-      if (sidebarOpen) {
-        shell.getState().setSidebarOpen(false)
-        return true
-      }
-      if (runOpen) {
-        run.getState().close()
-        return true
-      }
-      if (prompt || settingsOpen) {
-        shell.getState().closePrompt()
-        shell.getState().setSettingsOpen(false)
-        return true
-      }
-      if (view !== "editor") {
-        shell.getState().setView("editor")
-        return true
-      }
-      return false
-    }
+    // Everything the handler needs is read from the stores on demand, so this
+    // registers once instead of on every state change.
+    window.__leocodeBack = () => handleBack(stores)
     return () => {
       delete window.__leocodeBack
     }
-  }, [sidebarOpen, runOpen, prompt, settingsOpen, view, shell, run])
+  }, [stores])
 
   return (
     <div className={"app" + (view === "editor" ? " view-editor" : "")}>

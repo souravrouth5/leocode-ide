@@ -7,6 +7,8 @@ interface Props {
   bridge: Bridge
   info: AppInfo | null
   onOpenTerminal?: () => void
+  /** Fired after a successful install so cached probes can be dropped (W-13). */
+  onRuntimeInstalled?: (id: string) => void
 }
 
 export type RuntimeStatus = "ready" | "installed" | "missing" | "probing" | "error"
@@ -149,7 +151,7 @@ function installErrorHint(code: string, message: string): string {
   }
 }
 
-export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
+export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalled }: Props) {
   const [runtimes, setRuntimes] = useState<RuntimeCardData[]>(DEFAULT_RUNTIMES)
   const [env, setEnv] = useState<EnvState>({
     PATH: "/data/data/dev.leocode/files/usr/bin:/system/bin:/system/xbin",
@@ -298,6 +300,8 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
         }
       )
       setProgress({ phase: "done", bytes: 0, total: 0, message: `${rt.name} installed` })
+      // A fresh runtime must be picked up without a page reload (W-13).
+      onRuntimeInstalled?.(rt.id)
       await probeAll()
     } catch (err) {
       const code = err instanceof BridgeError ? err.code : "E_INTERNAL"

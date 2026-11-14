@@ -19,8 +19,6 @@ export interface UserSettings {
   // Navigation & Bookmarks
   recentFiles: string[]
   bookmarks: string[]
-  openTabs: string[]
-  activeTab: string | null
 
   // File Explorer Filtering & Sorting
   showHiddenFiles: boolean
@@ -42,6 +40,25 @@ export const FONT_FAMILIES = [
 
 export const FONT_SIZES = [11, 12, 13, 14, 15, 16, 18, 20]
 
+const EDITOR_THEME_IDS: readonly string[] = [
+  "tokyo-night",
+  "one-dark",
+  "dracula",
+  "monokai",
+  "github-light",
+  "solarized-light"
+]
+
+export const SORT_MODES = [
+  "name-asc",
+  "name-desc",
+  "size-desc",
+  "size-asc",
+  "mtime-desc",
+  "mtime-asc",
+  "ext"
+] as const
+
 export const DEFAULT_SETTINGS: UserSettings = {
   appTheme: "system",
   fontFamily: "'JetBrains Mono', monospace",
@@ -54,8 +71,6 @@ export const DEFAULT_SETTINGS: UserSettings = {
   resumeSession: true,
   recentFiles: [],
   bookmarks: ["/storage/emulated/0/Download"],
-  openTabs: [],
-  activeTab: null,
   showHiddenFiles: false,
   filterBinaryFiles: true,
   sortBy: "name-asc",
@@ -64,12 +79,68 @@ export const DEFAULT_SETTINGS: UserSettings = {
 
 const STORAGE_KEY = "leocode.user-settings"
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const stringList = (value: unknown, limit = 50): string[] | null => {
+  if (!Array.isArray(value)) return null
+  const items = value.filter((item): item is string => typeof item === "string" && item.length > 0)
+  return items.slice(0, limit)
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+/**
+ * Stored JSON is user-visible state that an older build or a hand edit can
+ * corrupt: a string where an array is expected crashes the tree during render
+ * (W-29/W-34). Every field is type-checked and falls back to its default.
+ */
+export function coerceSettings(input: unknown): UserSettings {
+  if (!isRecord(input)) return DEFAULT_SETTINGS
+  const base = DEFAULT_SETTINGS
+  const next: UserSettings = { ...base }
+
+  if (input.appTheme === "system" || input.appTheme === "light" || input.appTheme === "dark") {
+    next.appTheme = input.appTheme
+  }
+  if (typeof input.fontFamily === "string" && input.fontFamily.trim()) {
+    next.fontFamily = input.fontFamily
+  }
+  if (typeof input.fontSize === "number" && Number.isFinite(input.fontSize)) {
+    next.fontSize = clamp(Math.round(input.fontSize), 9, 32)
+  }
+  if (typeof input.editorTheme === "string" && EDITOR_THEME_IDS.includes(input.editorTheme)) {
+    next.editorTheme = input.editorTheme as EditorThemeId
+  }
+  if (input.tabSize === 2 || input.tabSize === 4) next.tabSize = input.tabSize
+  for (const key of ["wordWrap", "lineNumbers", "formatOnSave", "resumeSession"] as const) {
+    if (typeof input[key] === "boolean") next[key] = input[key] as boolean
+  }
+  const recent = stringList(input.recentFiles, 20)
+  if (recent) next.recentFiles = recent
+  const bookmarks = stringList(input.bookmarks)
+  if (bookmarks) next.bookmarks = bookmarks
+  if (typeof input.showHiddenFiles === "boolean") next.showHiddenFiles = input.showHiddenFiles
+  if (typeof input.filterBinaryFiles === "boolean") {
+    next.filterBinaryFiles = input.filterBinaryFiles
+  }
+  if (
+    typeof input.sortBy === "string" &&
+    (SORT_MODES as readonly string[]).includes(input.sortBy)
+  ) {
+    next.sortBy = input.sortBy as UserSettings["sortBy"]
+  }
+  if (typeof input.terminalFontSize === "number" && Number.isFinite(input.terminalFontSize)) {
+    next.terminalFontSize = clamp(Math.round(input.terminalFontSize), 8, 28)
+  }
+  return next
+}
+
 export function loadSettings(): UserSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_SETTINGS
-    const parsed = JSON.parse(raw) as Partial<UserSettings>
-    return { ...DEFAULT_SETTINGS, ...parsed }
+    return coerceSettings(JSON.parse(raw))
   } catch {
     return DEFAULT_SETTINGS
   }
