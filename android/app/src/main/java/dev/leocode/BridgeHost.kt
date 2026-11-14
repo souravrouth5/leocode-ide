@@ -11,6 +11,7 @@ import androidx.webkit.WebViewCompat
 import dev.leocode.bridge.BridgeJson
 import dev.leocode.bridge.BridgeRouter
 import dev.leocode.bridge.EventSink
+import dev.leocode.bridge.EventThrottle
 import dev.leocode.bridge.SafeEnvelope
 import dev.leocode.bridge.StreamSink
 import dev.leocode.bridge.ThemePort
@@ -215,8 +216,18 @@ class BridgeHost(
     ) : StreamSink {
         private val coalescer = EventSink(post = { event, payload -> sendEvent(proxy, id, event, payload) })
 
+        /**
+         * `saf.progress` used to post one WebView message per imported file or
+         * restore entry (PD-05). At most one progress event per 100 ms is
+         * forwarded; the next event carries the cumulative counters, so no
+         * information the UI shows is lost. Search and other events are not
+         * throttled.
+         */
+        private val progressThrottle = EventThrottle()
+
         override fun event(name: String, payload: JsonElement) {
             coalescer.flush()
+            if (EventThrottle.isProgressEvent(name) && !progressThrottle.allow(name)) return
             sendEvent(proxy, id, name, payload)
         }
 

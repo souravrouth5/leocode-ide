@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import dev.leocode.core.CrashStore
+import dev.leocode.core.ScratchSweeper
 import kotlin.concurrent.thread
 
 /**
@@ -86,6 +87,22 @@ class LeoApp : Application() {
             thread(name = "leocode-reap", isDaemon = true) {
                 val reaped = runCatching { created.reapOrphans() }.getOrDefault(0)
                 if (reaped > 0) Log.i("LeoCode", "reaped $reaped orphan process group(s)")
+                // A killed import/export/restore leaves staging and archive files
+                // behind; nothing else deletes them (PD-07). Only entries older
+                // than the TTL are touched, so a still-running operation from a
+                // previous Activity instance survives.
+                val swept = runCatching {
+                    ScratchSweeper().sweep(
+                        listOf(
+                            ScratchSweeper.Rule(cacheDir, listOf("restore-")),
+                            ScratchSweeper.Rule(
+                                created.workspace.tmp,
+                                listOf("backup-", "import-")
+                            )
+                        )
+                    )
+                }.getOrDefault(0)
+                if (swept > 0) Log.i("LeoCode", "swept $swept stale scratch entr(ies)")
             }
         } catch (error: Throwable) {
             startupError = error.message ?: error.javaClass.simpleName

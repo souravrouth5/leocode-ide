@@ -37,6 +37,13 @@ class FsHandler(
     private val jail: PathJail,
     private val trash: Trash,
     private val json: Json = BridgeJson.value,
+    /**
+     * Hash function used by `fs.stat`/`fs.read`/`fs.write`. Injectable so tests
+     * can count hashes; the default is the real SHA-256.
+     */
+    private val hashFile: (File) -> String? = FileHash::safeHash,
+    /** Entries kept by the `fs.stat` hash cache (LRU). */
+    private val maxStatHashes: Int = MAX_STAT_HASHES,
     private val activeRoot: () -> File = { workspace.defaultWorkspace }
 ) : BridgeHandler {
 
@@ -57,12 +64,59 @@ class FsHandler(
         private const val TRASH_DIR = ".trash"
         private const val SHARED_TRASH_DIR = ".leocode-trash"
 
+        /**
+         * `fs.stat` is polled every 5 s for every open document (external-change
+         * detection). Hashing a multi-megabyte file each time burned battery
+         * (PD-12), so a stat hash is reused while size and mtime are unchanged.
+         * 64 entries covers a normal set of open tabs.
+         */
+        private const val MAX_STAT_HASHES = 64
+
         val METHODS = setOf(
             "fs.list", "fs.read", "fs.write", "fs.mkdir", "fs.rename", "fs.delete", "fs.stat"
         )
     }
 
     override fun methods(): Set<String> = METHODS
+
+    // ------------------------------------------------------- stat hash cache
+
+    private data class CachedHash(val size: Long, val mtime: Long, val hash: String)
+
+    /** Access-ordered LRU; guarded by its own monitor (stat runs on bridge threads). */
+    private val statHashes: LinkedHashMap<String, CachedHash> =
+        object : LinkedHashMap<String, CachedHash>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedHash>): Boolean =
+                size > maxStatHashes
+        }
+
+    /**
+     * Hash for [file], reused while `(size, mtime)` are unchanged. Any mutation
+     * this handler performs clears the whole cache, and an external change is
+     * caught by the timestamp/size check.
+     */
+    private fun statHash(file: File, size: Long, mtime: Long): String {
+        val key = try {
+            file.canonicalPath
+        } catch (e: IOException) {
+            file.absolutePath
+        }
+        synchronized(statHashes) {
+            val cached = statHashes[key]
+            if (cached != null && cached.size == size && cached.mtime == mtime) {
+                return cached.hash
+            }
+        }
+        val computed = hashFile(file) ?: return ""
+        synchronized(statHashes) {
+            statHashes[key] = CachedHash(size, mtime, computed)
+        }
+        return computed
+    }
+
+    private fun clearStatHashes() {
+        synchronized(statHashes) { statHashes.clear() }
+    }
 
     override fun handle(method: String, payload: JsonObject): JsonElement = when (method) {
         "fs.list" -> list(pathOf(payload, method))
@@ -162,7 +216,7 @@ class FsHandler(
                 size = length,
                 nextOffset = nextOffset,
                 mtime = file.lastModified(),
-                hash = FileHash.safeHash(file) ?: ""
+                hash = hashFile(file) ?: ""
             )
         )
     }
@@ -174,14 +228,16 @@ class FsHandler(
         if (!isDir && !isRegularFile(file)) {
             throw BridgeException(ErrorCode.E_NOT_DIR, "not a regular file")
         }
+        val size = if (isDir) 0L else file.length()
+        val mtime = file.lastModified()
         return json.encodeToJsonElement(
             StatReply.serializer(),
             StatReply(
                 path = rel(file),
                 kind = if (isDir) "dir" else "file",
-                size = if (isDir) 0L else file.length(),
-                mtime = file.lastModified(),
-                hash = if (isDir) "" else (FileHash.safeHash(file) ?: "")
+                size = size,
+                mtime = mtime,
+                hash = if (isDir) "" else statHash(file, size, mtime)
             )
         )
     }
@@ -196,7 +252,7 @@ class FsHandler(
             // The editor's baseline is the whole file. A missing file with a
             // baseline is a conflict too: someone deleted it underneath us.
             if (!file.isFile) throw BridgeException(ErrorCode.E_CONFLICT, "file changed on disk")
-            val current = FileHash.safeHash(file)
+            val current = hashFile(file)
             if (current == null || current != expectedHash) {
                 throw BridgeException(ErrorCode.E_CONFLICT, "file changed on disk")
             }
@@ -210,13 +266,14 @@ class FsHandler(
         } catch (e: IOException) {
             throw BridgeException(ErrorCode.E_IO, "cannot write ${rel(file)}")
         }
+        clearStatHashes()
         return json.encodeToJsonElement(
             WriteReply.serializer(),
             WriteReply(
                 path = rel(file),
                 size = file.length(),
                 mtime = file.lastModified(),
-                hash = FileHash.safeHash(file) ?: ""
+                hash = hashFile(file) ?: ""
             )
         )
     }
@@ -228,6 +285,7 @@ class FsHandler(
             return json.encodeToJsonElement(PathReply.serializer(), PathReply(rel(dir)))
         }
         if (!dir.mkdirs()) throw BridgeException(ErrorCode.E_IO, "cannot create directory")
+        clearStatHashes()
         return json.encodeToJsonElement(PathReply.serializer(), PathReply(rel(dir)))
     }
 
@@ -261,6 +319,8 @@ class FsHandler(
                 throw BridgeException(ErrorCode.E_IO, "rename failed")
             }
         }
+        // Cached stat hashes are keyed by path; both names are now wrong.
+        clearStatHashes()
         return json.encodeToJsonElement(
             RenameReply.serializer(),
             RenameReply(rel(from), rel(to))
@@ -285,6 +345,7 @@ class FsHandler(
         } catch (e: IOException) {
             throw BridgeException(ErrorCode.E_IO, "delete failed")
         }
+        clearStatHashes()
         return json.encodeToJsonElement(DeleteReply.serializer(), DeleteReply(rel(target)))
     }
 
