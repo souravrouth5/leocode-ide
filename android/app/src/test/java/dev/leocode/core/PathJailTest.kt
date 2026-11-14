@@ -132,4 +132,91 @@ class PathJailTest {
         assertTrue(jail(ws, shared, granted = true).allowedRoots().contains(shared.canonicalFile))
         assertFalse(jail(ws, shared, granted = false).isAllowed(File(shared, "a.txt")))
     }
+
+    // ------------------------------------------------------- resolveEntry (S-05)
+
+    private fun symlink(link: File, target: File) {
+        try {
+            Files.createSymbolicLink(link.toPath(), target.toPath())
+        } catch (e: Exception) {
+            assumeNoException("symlinks unavailable", e)
+        }
+    }
+
+    @Test
+    fun `resolveEntry keeps the final name unresolved`() {
+        val ws = createTempDir().resolve("workspaces").apply { mkdirs() }
+        val outside = File(createTempDir(), "secret.txt").apply { writeText("secret") }
+        val link = File(ws, "default/escape").apply { parentFile.mkdirs() }
+        symlink(link, outside)
+
+        val entry = jail(ws).resolveEntry("default/escape")
+
+        assertEquals(File(File(ws, "default").canonicalPath, "escape").path, entry.path)
+        assertTrue("the entry is the link itself", Files.isSymbolicLink(entry.toPath()))
+        // `resolve` still follows it and refuses the outside target.
+        try {
+            jail(ws).resolve("default/escape")
+            throw AssertionError("resolve followed the link outside the root")
+        } catch (_: SecurityException) {
+            // expected
+        }
+    }
+
+    @Test
+    fun `resolveEntry canonicalises a symlinked parent`() {
+        val ws = createTempDir().resolve("workspaces").apply { mkdirs() }
+        val realDir = File(ws, "default/real").apply { mkdirs() }
+        symlink(File(ws, "default/alias"), realDir)
+
+        val entry = jail(ws).resolveEntry("default/alias/notes.txt")
+
+        assertEquals(File(realDir, "notes.txt").canonicalPath, entry.path)
+    }
+
+    @Test
+    fun `resolveEntry rejects a parent outside the root`() {
+        val ws = createTempDir().resolve("workspaces").apply { mkdirs() }
+        val outside = File(createTempDir(), "elsewhere").apply { mkdirs() }
+        symlink(File(ws, "escape-dir"), outside)
+
+        try {
+            jail(ws).resolveEntry("escape-dir/secret.txt")
+            throw AssertionError("a parent outside the root was accepted")
+        } catch (_: SecurityException) {
+            // expected
+        }
+    }
+
+    @Test
+    fun `resolveEntry rejects an entry outside the root and accepts a missing one`() {
+        val ws = createTempDir().resolve("workspaces").apply { mkdirs() }
+
+        try {
+            jail(ws).resolveEntry("/system/build.prop")
+            throw AssertionError("an absolute system path was accepted")
+        } catch (_: SecurityException) {
+            // expected
+        }
+
+        // A rename target does not exist yet; the parent check is what matters.
+        assertEquals(
+            File(ws, "default/new.txt").canonicalPath,
+            jail(ws).resolveEntry("default/new.txt").path
+        )
+    }
+
+    @Test
+    fun `resolveEntry falls back to resolve for dot paths so roots keep their identity`() {
+        val ws = createTempDir().resolve("workspaces").apply { mkdirs() }
+        File(ws, "default").mkdirs()
+
+        assertEquals(ws.canonicalPath, jail(ws).resolveEntry(".").path)
+        try {
+            jail(ws).resolveEntry("..")
+            throw AssertionError("parent of the root was accepted")
+        } catch (_: SecurityException) {
+            // expected
+        }
+    }
 }

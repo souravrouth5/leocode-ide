@@ -16,6 +16,10 @@ import java.util.UUID
  * either the old file or the new one, never a truncated file; a failed write
  * leaves the old target intact and removes the temp file. The caller owns
  * directory creation: a missing parent is an error, never a silent mkdir.
+ *
+ * The temp file is a new inode, so the target's POSIX mode is copied onto it
+ * before the move: saving an executable script keeps `+x`, and a `600` file stays
+ * `600` (S-07).
  */
 object AtomicWriter {
 
@@ -36,11 +40,26 @@ object AtomicWriter {
                 out.flush()
                 out.fd.sync()
             }
+            copyPermissions(destination, tmp)
             moveReplacing(tmp, destination)
         } finally {
             if (tmp.exists()) {
                 tmp.delete()
             }
+        }
+    }
+
+    /**
+     * Copies the target's POSIX mode onto [tmp] so the replacement keeps `+x` and
+     * restrictive modes. Best effort: a filesystem without POSIX modes (FAT, some
+     * FUSE mounts) keeps the default rather than failing the write.
+     */
+    private fun copyPermissions(target: File, tmp: File) {
+        try {
+            if (!Files.isRegularFile(target.toPath())) return
+            Files.setPosixFilePermissions(tmp.toPath(), Files.getPosixFilePermissions(target.toPath()))
+        } catch (e: UnsupportedOperationException) {
+            // No POSIX permissions here; nothing to preserve.
         }
     }
 

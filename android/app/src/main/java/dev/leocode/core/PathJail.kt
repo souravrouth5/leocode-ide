@@ -48,6 +48,48 @@ class PathJail(
         return candidate
     }
 
+    /**
+     * Canonical parent plus the unresolved last name: the path to act on when the
+     * operation must touch the directory entry itself instead of what a symlink
+     * points at (delete, rename). [resolve] follows the final component, so
+     * `fs.delete` on `notes -> real/notes.txt` would trash the target and leave a
+     * dangling link, and a link that points outside the jail could never be
+     * removed at all (S-05).
+     *
+     * The parent is canonicalised and must sit under an allowed root; the last
+     * component must be one plain name. `.` and `..` name a directory rather than
+     * an entry, so they are resolved fully and the caller's own protected-root
+     * checks decide.
+     *
+     * Throws [SecurityException] when the parent is outside every allowed root or
+     * the last component is not a plain name.
+     */
+    fun resolveEntry(rawPath: String, base: File = workspaceRoot): File {
+        val raw = if (rawPath.isEmpty()) "." else rawPath
+        if (raw.contains('\u0000')) {
+            throw SecurityException("path contains NUL")
+        }
+        val candidate = if (File(raw).isAbsolute) File(raw) else File(base, raw)
+        val name = candidate.name
+        if (name.isEmpty() || name == "." || name == "..") {
+            return resolve(raw, base)
+        }
+        // The name comes from File.name, so it cannot contain a separator; the
+        // check keeps it that way if that ever changes.
+        if (name.contains('/') || name.contains(File.separatorChar)) {
+            throw SecurityException("path does not end in a single name: $raw")
+        }
+        val parent = try {
+            candidate.parentFile?.canonicalFile
+        } catch (e: IOException) {
+            throw SecurityException("cannot resolve parent of: $raw", e)
+        } ?: throw SecurityException("path has no parent: $raw")
+        if (!underAnyRoot(parent, allowedRoots())) {
+            throw SecurityException("path outside root: $raw")
+        }
+        return File(parent, name)
+    }
+
     /** True when [candidate] canonicalises to an allowed root or a descendant. */
     fun isAllowed(candidate: File): Boolean {
         val canonicalCandidate = try {

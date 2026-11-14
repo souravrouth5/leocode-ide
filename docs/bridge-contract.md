@@ -32,8 +32,10 @@ handlers in Tasks 5–6), **planned** = added by the v9 task named.
   permission dialogs, host-key prompts). These are keyed by request `id`; there are no single-slot
   callbacks, so concurrent requests never overwrite each other.
 - **Size limits:** max incoming message 8 MB (`E_LIMIT`), which covers a 4 MB write plus JSON
-  escaping. `fs.read` returns at most 2 MB; chunked reads (`maxBytes` / `nextOffset`) are planned
-  with Task 15. `fs.write` content max 4 MB. SAF reads and writes are capped at 4 MB.
+  escaping. `fs.read` and `fs.write` share one 4 MB cap, so the app can always open what it wrote;
+  chunked reads (`maxBytes` / `nextOffset`) are planned with Task 15. Memory cost of one 4 MB read:
+  4 MB of bytes, the decoded string and the encoded reply, so budget roughly 12–16 MB of heap for
+  that request. SAF reads and writes are capped at 4 MB.
 - **Streaming:** process and terminal output is coalesced at 16 ms per stream. Terminal output is
   gated by `term.ack` credit (default window 256 KB); the host pauses reading the PTY when credit
   is exhausted.
@@ -119,11 +121,11 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `workspace.rename` | `{ id, name }` → `{}` | planned (Task 14) | |
 | `workspace.delete` | `{ id }` → `{}` | planned (Task 14) | Confirmation in UI; moves to trash |
 | `fs.list` | `{ path }` → `[{ name, path, kind, size, mtime }]` | live | No recursion |
-| `fs.read` | `{ path, offset?, maxBytes? }` → `{ content, nextOffset, mtime, hash }` | live (chunking + hash in Task 15) | UTF-8 only; binaries → `E_BINARY` |
+| `fs.read` | `{ path, offset?, maxBytes? }` → `{ content, nextOffset, mtime, hash }` | live (chunking + hash in Task 15) | UTF-8 only, 4 MB cap; binaries and malformed UTF-8 → `E_BINARY`; anything that is not a regular file (FIFO, socket, device) → `E_NOT_DIR` |
 | `fs.write` | `{ path, content, expectedHash? }` → `{ mtime, hash }` | live (atomic since Task 4; `expectedHash` Task 15) | temp → fsync → rename; mismatch → `E_CONFLICT` |
 | `fs.mkdir` | `{ path }` → `{}` | live | |
-| `fs.rename` | `{ from, to }` → `{}` | live | |
-| `fs.delete` | `{ path }` → `{}` | live | Moves to trash, never silent permanent delete |
+| `fs.rename` | `{ from, to }` → `{}` | live | Acts on the directory entry: renaming a symlink renames the link, not its target; a case-only rename is allowed when both names resolve to one file |
+| `fs.delete` | `{ path }` → `{}` | live | Moves to trash, never silent permanent delete; removing a symlink removes the link, not its target |
 | `fs.search` | `{ query, glob?, maxResults? }` → event stream `search.match`, then `{ count, truncated }` | planned (Task 16) | Ignores `.git`, `node_modules`, `.venv`; cancellable |
 | `term.open` | `{ cwd, cols, rows, root? }` → `{ sessionId, pid }` | live (`root` Task 18) | Spawns the PTY (or `su` in PTY) and attaches this request's stream; the reply is sent before the first `term.data` |
 | `term.attach` | `{ sessionId }` → `{ sessionId, scrollback, alive, exitCode }` then `term.data` events | live (Task 10) | Replays the ring-buffer scrollback, then streams live output; a session that exited while detached is removed, so attach returns `E_NOT_FOUND` and the page opens a new terminal |

@@ -4,14 +4,21 @@ import dev.leocode.core.AtomicWriter
 import dev.leocode.core.PathJail
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
-import java.io.File
-import java.io.IOException
 
 /**
  * `fs.*` methods, `docs/bridge-contract.md`.
@@ -27,8 +34,19 @@ class FsHandler(
 ) : BridgeHandler {
 
     companion object {
-        private const val MAX_READ = 2 * 1024 * 1024
+        /**
+         * Largest file `fs.read` returns. It matches `fs.write`, so the app can
+         * always open what it wrote (S-09; reads used to stop at 2 MB).
+         *
+         * Memory cost of one read at the cap: 4 MB of bytes, the decoded String
+         * (up to 2 bytes per char, so up to 8 MB for non-ASCII) and the JSON
+         * reply that is then encoded (about another 4 MB while it is built).
+         * Budget roughly 12–16 MB of heap for one 4 MB read on a bridge thread;
+         * the transport cap is 8 MB, so the reply still fits.
+         */
+        private const val MAX_READ = 4 * 1024 * 1024
         private const val MAX_WRITE_BYTES = 4 * 1024 * 1024
+        private const val READ_BUFFER = 64 * 1024
         private const val TRASH_DIR = ".trash"
         private const val SHARED_TRASH_DIR = ".leocode-trash"
 
@@ -88,16 +106,34 @@ class FsHandler(
         val file = resolve(rawPath)
         if (!file.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
         if (file.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "is a directory")
-        if (file.length() > MAX_READ) {
-            throw BridgeException(ErrorCode.E_LIMIT, "file is larger than 2 MB")
+        // A FIFO, socket or device reports no length and blocks the reader until a
+        // peer appears, which would park this bridge thread with no reply (S-03).
+        if (!isRegularFile(file)) {
+            throw BridgeException(ErrorCode.E_NOT_DIR, "not a regular file")
         }
-        val bytes = file.readBytes()
+        if (file.length() > MAX_READ) {
+            throw BridgeException(ErrorCode.E_LIMIT, "file is larger than 4 MB")
+        }
+        val bytes = try {
+            // Bounded at MAX_READ + 1: a file that grows after the length check
+            // still cannot overrun the cap.
+            readBounded(file, MAX_READ + 1)
+        } catch (e: IOException) {
+            throw BridgeException(ErrorCode.E_IO, "cannot read ${rel(file)}")
+        }
+        if (bytes.size > MAX_READ) {
+            throw BridgeException(ErrorCode.E_LIMIT, "file is larger than 4 MB")
+        }
         if (bytes.any { it == 0.toByte() }) {
             throw BridgeException(ErrorCode.E_BINARY, "binary file")
         }
+        // Strict: malformed UTF-8 is E_BINARY, never U+FFFD. Replacing the bytes
+        // on read would write the replacements back on the next save (S-08).
+        val content = decodeUtf8(bytes)
+            ?: throw BridgeException(ErrorCode.E_BINARY, "file is not valid UTF-8")
         return json.encodeToJsonElement(
             ReadReply.serializer(),
-            ReadReply(rel(file), String(bytes, Charsets.UTF_8), bytes.size)
+            ReadReply(rel(file), content, bytes.size)
         )
     }
 
@@ -133,21 +169,35 @@ class FsHandler(
     }
 
     private fun rename(rawFrom: String?, rawTo: String?): JsonElement {
-        val from = resolve(rawFrom)
-        val to = resolve(rawTo)
-        if (!from.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "source does not exist")
+        // Parent canonical, last name unresolved: renaming a link moves the link,
+        // not what it points at (S-05).
+        val from = resolveEntry(rawFrom)
+        val to = resolveEntry(rawTo)
+        if (!existsNoFollow(from)) throw BridgeException(ErrorCode.E_NOT_FOUND, "source does not exist")
         // Renaming the workspace root would leave no default workspace until the
         // next process start (S-13); the trash must stay where it is (S-02).
-        val protectedRoots = protectedRoots()
-        if (from.canonicalFile in protectedRoots) {
+        if (from in protectedRoots()) {
             throw BridgeException(ErrorCode.E_PERMISSION, "refusing to rename root storage")
         }
-        if (to.exists()) throw BridgeException(ErrorCode.E_EXISTS, "target already exists")
+        // On case-insensitive shared storage `to` already resolves to the source
+        // for a case-only rename, so existence alone cannot mean "would overwrite"
+        // (S-12). A link source is excluded: rename(2) would replace the target
+        // with the link and leave a self-referential entry.
+        val sameEntry = !isSymlink(from) && isSameFile(from, to)
+        if (existsNoFollow(to) && !sameEntry) {
+            throw BridgeException(ErrorCode.E_EXISTS, "target already exists")
+        }
         val parent = to.parentFile ?: throw BridgeException(ErrorCode.E_IO, "target has no parent")
         if (!parent.exists() && !parent.mkdirs()) {
             throw BridgeException(ErrorCode.E_IO, "cannot create target parent")
         }
-        if (!from.renameTo(to)) throw BridgeException(ErrorCode.E_IO, "rename failed")
+        if (!from.renameTo(to)) {
+            // A case-only rename may still need two steps on case-insensitive
+            // storage: move the entry aside, then onto the requested name.
+            if (!sameEntry || !renameViaTemp(from, to)) {
+                throw BridgeException(ErrorCode.E_IO, "rename failed")
+            }
+        }
         return json.encodeToJsonElement(
             RenameReply.serializer(),
             RenameReply(rel(from), rel(to))
@@ -155,10 +205,14 @@ class FsHandler(
     }
 
     private fun delete(rawPath: String?): JsonElement {
-        val target = resolve(rawPath)
-        if (!target.exists()) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
+        // The trash must receive the directory entry, not the link target it
+        // resolves to (S-05).
+        val target = resolveEntry(rawPath)
+        if (!existsNoFollow(target)) throw BridgeException(ErrorCode.E_NOT_FOUND, "no such file")
 
-        if (target.canonicalFile in protectedRoots()) {
+        // Compare the entry path, not `canonicalFile`: removing a link is always
+        // allowed, even when it points at protected storage.
+        if (target in protectedRoots()) {
             throw BridgeException(ErrorCode.E_PERMISSION, "refusing to delete root storage")
         }
 
@@ -181,19 +235,29 @@ class FsHandler(
         trash.directories().forEach { add(it.canonicalFile) }
     }
 
-    private fun resolve(rawPath: String?): File {
-        val raw = rawPath ?: "."
-        return try {
-            jail.resolve(raw, workspace.defaultWorkspace)
-        } catch (e: SecurityException) {
-            throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
-        }
+    private fun resolve(rawPath: String?): File = try {
+        jail.resolve(rawPath ?: ".", workspace.defaultWorkspace)
+    } catch (e: SecurityException) {
+        throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
     }
 
-    /** Relative to the default workspace, absolute for shared storage. */
+    private fun resolveEntry(rawPath: String?): File = try {
+        jail.resolveEntry(rawPath ?: ".", workspace.defaultWorkspace)
+    } catch (e: SecurityException) {
+        throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
+    }
+
+    /**
+     * Relative to the default workspace, absolute for shared storage.
+     *
+     * The root is canonicalised once and cached: [PathJail.resolve] returns
+     * canonical paths, and on a device `filesDir` is `/data/user/0/...` while its
+     * canonical form is `/data/data/...`, so comparing against the uncanonicalised
+     * root made every reply absolute (S-04).
+     */
     private fun rel(file: File): String {
-        val root = workspace.defaultWorkspace.normalize()
-        val target = file.normalize()
+        val root = canonicalDefaultWorkspace
+        val target = file.absoluteFile.normalize()
         if (target == root) return "."
         val prefix = root.path + File.separator
         return if (target.path.startsWith(prefix)) {
@@ -201,6 +265,79 @@ class FsHandler(
         } else {
             target.absolutePath
         }
+    }
+
+    private val canonicalDefaultWorkspace: File by lazy {
+        try {
+            workspace.defaultWorkspace.canonicalFile
+        } catch (e: IOException) {
+            workspace.defaultWorkspace.absoluteFile
+        }
+    }
+
+    private fun isRegularFile(file: File): Boolean =
+        runCatching { Files.isRegularFile(file.toPath()) }.getOrDefault(false)
+
+    private fun isSymlink(file: File): Boolean =
+        runCatching { Files.isSymbolicLink(file.toPath()) }.getOrDefault(false)
+
+    /** Existence of the entry itself: a dangling link exists and can be deleted. */
+    private fun existsNoFollow(file: File): Boolean =
+        runCatching { Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS) }
+            .getOrDefault(file.exists())
+
+    private fun isSameFile(a: File, b: File): Boolean {
+        if (a.absoluteFile.normalize() == b.absoluteFile.normalize()) return true
+        return try {
+            Files.isSameFile(a.toPath(), b.toPath())
+        } catch (e: IOException) {
+            false
+        }
+    }
+
+    /** Reads at most [limit] bytes, so a growing file cannot overrun the buffer. */
+    private fun readBounded(file: File, limit: Int): ByteArray =
+        file.inputStream().use { input ->
+            val out = ByteArrayOutputStream(minOf(limit, READ_BUFFER))
+            val buffer = ByteArray(READ_BUFFER)
+            var total = 0
+            while (total < limit) {
+                val read = input.read(buffer, 0, minOf(buffer.size, limit - total))
+                if (read < 0) break
+                out.write(buffer, 0, read)
+                total += read
+            }
+            out.toByteArray()
+        }
+
+    /**
+     * Strict UTF-8 decode: `null` for malformed input instead of replacement
+     * characters. A leading BOM is kept as U+FEFF and round-trips, as before.
+     */
+    private fun decodeUtf8(bytes: ByteArray): String? = try {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+    } catch (e: CharacterCodingException) {
+        null
+    }
+
+    /**
+     * Renames through a unique intermediate name; used only when [from] and [to]
+     * are the same entry (a case-only rename) and a direct rename failed.
+     */
+    private fun renameViaTemp(from: File, to: File): Boolean {
+        val parent = from.parentFile ?: return false
+        val aside = File(parent, ".${from.name}.${UUID.randomUUID()}.rename")
+        if (!from.renameTo(aside)) return false
+        if (aside.renameTo(to)) return true
+        // Never leave the entry under the intermediate name.
+        if (!aside.renameTo(from)) {
+            throw BridgeException(ErrorCode.E_IO, "rename failed and the entry is left as ${rel(aside)}")
+        }
+        return false
     }
 
     private fun pathOf(payload: JsonObject, method: String): String? =
