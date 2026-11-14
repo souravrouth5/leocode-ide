@@ -17,6 +17,11 @@ import kotlinx.serialization.json.Json
  * atomically and redacted, then the previous handler runs unchanged so the
  * platform still shows its own crash flow. The next launch calls [consume] and
  * opens [dev.leocode.RecoveryActivity] instead of the IDE.
+ *
+ * The message and the stack are capped before the record is written or shared
+ * (L-20): the record travels as an Intent extra (1 MB Binder limit) and as
+ * `EXTRA_TEXT`, so a multi-megabyte stack would either throw in `startActivity`
+ * or produce a share payload nobody can read.
  */
 @Serializable
 data class CrashRecord(
@@ -37,6 +42,16 @@ object CrashStore {
     private const val DIR = "crash"
     private const val FILE = "last-crash.json"
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+
+    /** Message cap: enough for the exception text, small enough for any Intent. */
+    const val MAX_MESSAGE_CHARS = 4 * 1024
+
+    /** Stack caps: both apply, whichever is reached first wins. */
+    const val MAX_STACK_CHARS = 16 * 1024
+    const val MAX_STACK_LINES = 64
+
+    private const val MESSAGE_NOTE = "\n… (message truncated)"
+    private const val STACK_NOTE = "\n… (stack truncated)"
 
     /** Install once, in Application.onCreate, before anything can throw. */
     fun install(context: Context) {
@@ -63,28 +78,39 @@ object CrashStore {
         file(context).delete()
     }
 
-    /** Serialises for the Intent that opens RecoveryActivity. */
-    fun encode(record: CrashRecord): String = json.encodeToString(CrashRecord.serializer(), record)
+    /** Serialises for the Intent that opens RecoveryActivity. Always capped. */
+    fun encode(record: CrashRecord): String =
+        json.encodeToString(CrashRecord.serializer(), capped(record))
 
     fun decode(text: String?): CrashRecord? =
         if (text.isNullOrBlank()) null
         else runCatching { json.decodeFromString<CrashRecord>(text) }.getOrNull()
 
+    /**
+     * Applies the size caps (L-20). Every consumer — the file, the Intent and the
+     * Share sheet — goes through here so an oversized record cannot escape.
+     */
+    fun capped(record: CrashRecord): CrashRecord = record.copy(
+        message = capMessage(record.message),
+        stack = capStack(record.stack)
+    )
+
     /** Redacted, human-readable text for the system Share sheet. */
     fun shareText(record: CrashRecord): String {
+        val safe = capped(record)
         val whenText = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US)
-            .format(Date(record.timestamp))
+            .format(Date(safe.timestamp))
         val raw = buildString {
             appendLine("LeoCode diagnostics")
-            appendLine("App: ${record.appVersion}")
-            appendLine("Device: ${record.manufacturer} ${record.model}, Android ${record.release} (SDK ${record.sdk})")
+            appendLine("App: ${safe.appVersion}")
+            appendLine("Device: ${safe.manufacturer} ${safe.model}, Android ${safe.release} (SDK ${safe.sdk})")
             appendLine("When: $whenText")
-            appendLine("Thread: ${record.thread}")
-            appendLine("Exception: ${record.exception}")
-            appendLine("Message: ${record.message}")
+            appendLine("Thread: ${safe.thread}")
+            appendLine("Exception: ${safe.exception}")
+            appendLine("Message: ${safe.message}")
             appendLine()
             appendLine("Stack trace:")
-            appendLine(record.stack)
+            appendLine(safe.stack)
         }
         return Redactor.redact(raw)
     }
@@ -113,4 +139,32 @@ object CrashStore {
 
     private fun file(context: Context): File =
         File(File(context.filesDir, DIR), FILE)
+
+    private fun capMessage(message: String): String {
+        if (message.length <= MAX_MESSAGE_CHARS) return message
+        return takeChars(message, MAX_MESSAGE_CHARS - MESSAGE_NOTE.length) + MESSAGE_NOTE
+    }
+
+    private fun capStack(stack: String): String {
+        val lines = stack.split('\n')
+        val byLines = lines.size > MAX_STACK_LINES
+        val head = if (byLines) lines.take(MAX_STACK_LINES).joinToString("\n") else stack
+        if (byLines || head.length > MAX_STACK_CHARS) {
+            val room = MAX_STACK_CHARS - STACK_NOTE.length
+            return if (head.length > room) takeChars(head, room) + STACK_NOTE else head + STACK_NOTE
+        }
+        return head
+    }
+
+    /** `take` that never splits a surrogate pair, so the JSON stays valid UTF-16. */
+    private fun takeChars(text: String, limit: Int): String {
+        var end = limit.coerceIn(0, text.length)
+        if (end in 1 until text.length &&
+            Character.isHighSurrogate(text[end - 1]) &&
+            Character.isLowSurrogate(text[end])
+        ) {
+            end -= 1
+        }
+        return text.substring(0, end)
+    }
 }

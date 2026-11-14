@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
@@ -74,8 +73,8 @@ class MainActivity : ComponentActivity(), SafPort {
         const val DEV_URL_DEFAULT = "http://localhost:5173"
         const val DEV_URL_LOOPBACK = "http://127.0.0.1:5173"
 
-        /** Two renderer losses inside this window escalate to RecoveryActivity. */
-        private const val RENDERER_LOSS_WINDOW_MS = 60_000L
+        // The "two losses in 60 s" window lives in LeoApp together with the
+        // persisted timestamps, so a recreation cannot reset it (L-09).
         private const val PERMISSION_PREFS = "leocode.permissions"
         private const val ASKED_NOTIFICATIONS = "notifications_asked"
     }
@@ -85,12 +84,21 @@ class MainActivity : ComponentActivity(), SafPort {
 
     private var bridge: BridgeHost? = null
     private var webView: WebView? = null
-    private var rendererLossAt = 0L
     private var restoredBannerPending = false
     private var showingErrorPage = false
 
+    /**
+     * True between `onResume` and `onPause`. Renderer-loss handling branches on
+     * it: Android 10+ blocks background activity starts and rebuilding a WebView
+     * in the background starts a new renderer under the same memory pressure, so
+     * the rebuild and the recovery decision are deferred to `onResume` (L-09).
+     */
+    private var resumed = false
+
     private var insetTopPx = 0f
     private var insetBottomPx = 0f
+    private var insetLeftPx = 0f
+    private var insetRightPx = 0f
     private var imeBottomPx = 0f
 
     private var devUrlExtra: String? = null
@@ -252,7 +260,12 @@ class MainActivity : ComponentActivity(), SafPort {
         setContentView(rootLayout)
 
         installBackDispatcher()
-        (application as LeoApp).graphOrThrow().onFirstSession = firstSessionCallback
+        app.graphOrThrow().onFirstSession = firstSessionCallback
+        // A renderer lost while this Activity was not resumed is rebuilt in
+        // onResume, not here: onCreate can run in the background (L-09).
+        if (app.pendingRecovery || app.pendingRendererRebuild) {
+            return
+        }
         attachWebView()
     }
 
@@ -279,23 +292,55 @@ class MainActivity : ComponentActivity(), SafPort {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         if (!::themeManager.isInitialized) return
+        val app = application as LeoApp
+        // Deferred renderer-loss handling (L-09). This is the first point where
+        // starting RecoveryActivity and rebuilding the WebView are allowed.
+        if (app.pendingRecovery) {
+            app.pendingRecovery = false
+            app.pendingRendererRebuild = false
+            app.rendererLoss.reset()
+            startActivity(
+                Intent(this, RecoveryActivity::class.java)
+                    .putExtra(RecoveryActivity.EXTRA_REASON, RecoveryActivity.REASON_RENDERER)
+            )
+            finish()
+            return
+        }
+        if (app.pendingRendererRebuild && !isFinishing) {
+            app.pendingRendererRebuild = false
+            rebuildRenderer()
+        }
         themeManager.applyToWindow()
         webView?.onResume()
     }
 
     override fun onPause() {
+        resumed = false
         webView?.onPause()
         super.onPause()
     }
 
+    /**
+     * `configChanges` in the manifest now covers keyboard, navigation, fontScale,
+     * density, locale, layoutDirection and colorMode, so a Bluetooth keyboard or
+     * a font-size change no longer recreates the Activity and reloads the page
+     * (L-10). Nothing else here changes: the theme, the WebView background and
+     * the insets still have to be re-applied by hand.
+     */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (!::themeManager.isInitialized) return
         themeManager.applyToWindow()
         webView?.setBackgroundColor(themeManager.background())
         bridge?.pushTheme()
-        if (::rootLayout.isInitialized) rootLayout.requestApplyInsets()
+        if (::rootLayout.isInitialized) {
+            // Insets depend on orientation, cutout and navigation mode; the
+            // listener re-publishes --inset-* to the page.
+            rootLayout.requestApplyInsets()
+            pushInsets()
+        }
     }
 
     // ------------------------------------------------------------------ back
@@ -503,18 +548,27 @@ class MainActivity : ComponentActivity(), SafPort {
      * memory. Returning true from onRenderProcessGone prevents a process crash;
      * one loss rebuilds the WebView, two in a minute escalate to the native
      * recovery screen (the page may be stuck in a loop).
+     *
+     * A loss that arrives while the Activity is not resumed is only *recorded*
+     * (L-09): rebuilding would start a new renderer under the same memory
+     * pressure, and `startActivity(RecoveryActivity)` is a background activity
+     * start, which Android 10+ blocks — the old code then finished itself and
+     * left the process with no UI at all. `onResume` performs the deferred step.
      */
     private fun handleRendererGone(didCrash: Boolean) {
-        val now = SystemClock.elapsedRealtime()
-        val recent = rendererLossAt != 0L && now - rendererLossAt < RENDERER_LOSS_WINDOW_MS
-        rendererLossAt = now
-        Log.e(TAG, "WebView renderer gone (crash=$didCrash, rapid=$recent)")
+        val app = application as LeoApp
+        val escalate = app.rendererLoss.record()
+        val action = LeoApp.rendererLossAction(resumed = resumed, escalate = escalate)
+        Log.e(
+            TAG,
+            "WebView renderer gone (crash=$didCrash, escalate=$escalate, action=$action)"
+        )
 
         // Drop the dead view and transport first. Terminals survive for the
         // replacement view; jobs have no reattach path, so cancel them (B-09).
         val old = webView
         webView = null
-        (application as LeoApp).graphOrThrow().detachBridge(cancelJobs = true)
+        app.graphOrThrow().detachBridge(cancelJobs = true)
         bridge?.detach()
         bridge = null
         if (old != null) {
@@ -523,15 +577,30 @@ class MainActivity : ComponentActivity(), SafPort {
             runCatching { old.destroy() }
         }
 
-        if (recent) {
-            startActivity(
-                Intent(this, RecoveryActivity::class.java)
-                    .putExtra(RecoveryActivity.EXTRA_REASON, RecoveryActivity.REASON_RENDERER)
-            )
-            finish()
-            return
-        }
+        when (action) {
+            RendererLossAction.RECOVER_NOW -> {
+                app.rendererLoss.reset()
+                startActivity(
+                    Intent(this, RecoveryActivity::class.java)
+                        .putExtra(RecoveryActivity.EXTRA_REASON, RecoveryActivity.REASON_RENDERER)
+                )
+                finish()
+            }
 
+            // Never start an Activity from the background.
+            RendererLossAction.DEFER_RECOVERY -> {
+                app.pendingRecovery = true
+            }
+
+            RendererLossAction.REBUILD_NOW -> rebuildRenderer()
+
+            RendererLossAction.DEFER_REBUILD -> {
+                app.pendingRendererRebuild = true
+            }
+        }
+    }
+
+    private fun rebuildRenderer() {
         restoredBannerPending = true
         attachWebView()
         Toast.makeText(this, "Restored after a problem", Toast.LENGTH_SHORT).show()
@@ -590,35 +659,43 @@ class MainActivity : ComponentActivity(), SafPort {
 
     /**
      * Edge-to-edge: Android owns the real insets, CSS owns the layout. The page
-     * reads --inset-top (status bar), --inset-bottom (navigation bar) and
-     * --ime-bottom (keyboard above the navigation bar).
+     * reads --inset-top (status bar or cutout), --inset-left / --inset-right
+     * (side navigation bar or cutout, the landscape case), --inset-bottom
+     * (navigation bar) and --ime-bottom (keyboard above the navigation bar).
+     *
+     * Left and right were dropped before L-11, so in landscape with a three
+     * button navigation bar, or on a notch device, the shell drew its content
+     * under the bar. Each side takes the larger of the system bars and the
+     * display cutout, because the status bar insets do not include the cutout.
      */
     private fun applyWindowInsets(insets: WindowInsetsCompat) {
         val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
         val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
         val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+        val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
         val imePx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
         } else {
             @Suppress("DEPRECATION")
             insets.systemWindowInsetBottom
         }
-        insetTopPx = status.top / density
+        insetTopPx = InsetsScript.widest(status.top, cutout.top) / density
         insetBottomPx = nav.bottom / density
+        insetLeftPx = InsetsScript.widest(bars.left, cutout.left) / density
+        insetRightPx = InsetsScript.widest(bars.right, cutout.right) / density
         imeBottomPx = (imePx - nav.bottom).coerceAtLeast(0) / density
         pushInsets()
     }
 
     private fun pushInsets() {
         val view = webView ?: return
-        val js = String.format(
-            Locale.US,
-            "document.documentElement.style.setProperty('--inset-top','%.1fpx');" +
-                "document.documentElement.style.setProperty('--inset-bottom','%.1fpx');" +
-                "document.documentElement.style.setProperty('--ime-bottom','%.1fpx');",
-            insetTopPx,
-            insetBottomPx,
-            imeBottomPx
+        val js = InsetsScript.build(
+            topPx = insetTopPx,
+            bottomPx = insetBottomPx,
+            leftPx = insetLeftPx,
+            rightPx = insetRightPx,
+            imeBottomPx = imeBottomPx
         )
         view.post { runCatching { view.evaluateJavascript(js, null) } }
     }
@@ -856,4 +933,38 @@ class MainActivity : ComponentActivity(), SafPort {
             }
         }
     }
+}
+
+/**
+ * The JavaScript that publishes the window insets as CSS custom properties
+ * (L-11).
+ *
+ * Kept separate from the Activity so it can be unit-tested: the numbers must be
+ * formatted with a dot decimal separator whatever the device locale is,
+ * otherwise `--inset-top: 24,0px` is invalid CSS and every padded surface
+ * collapses to zero.
+ */
+internal object InsetsScript {
+
+    /** The larger of two insets; the cutout can exceed the system bar. */
+    fun widest(bars: Int, cutout: Int): Int = if (bars > cutout) bars else cutout
+
+    fun build(
+        topPx: Float,
+        bottomPx: Float,
+        leftPx: Float,
+        rightPx: Float,
+        imeBottomPx: Float
+    ): String = listOf(
+        "--inset-top" to topPx,
+        "--inset-bottom" to bottomPx,
+        "--inset-left" to leftPx,
+        "--inset-right" to rightPx,
+        "--ime-bottom" to imeBottomPx
+    ).joinToString(separator = "") { (name, value) ->
+        "document.documentElement.style.setProperty('$name','${pixels(value)}px');"
+    }
+
+    /** Locale-independent fixed precision, one decimal place. */
+    fun pixels(value: Float): String = String.format(Locale.US, "%.1f", value)
 }

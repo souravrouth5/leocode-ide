@@ -7,6 +7,15 @@
   background: var(--bg);
   padding-top: var(--inset-top);
   padding-bottom: var(--ime-bottom);
+  /*
+   * Landscape with a three-button navigation bar, and side display cutouts
+   * (L-11). The shell gets the full width, so it has to keep its own content
+   * out from under the bar itself: the host publishes --inset-left and
+   * --inset-right from systemBars | displayCutout. The 0px fallbacks cover the
+   * browser preview, where no host is publishing them.
+   */
+  padding-left: var(--inset-left, 0px);
+  padding-right: var(--inset-right, 0px);
 }
 
 .app-bar {

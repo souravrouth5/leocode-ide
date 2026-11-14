@@ -47,6 +47,14 @@ class BridgeHost(
         // a 20 s timeout because the E_LIMIT reply had no id.
         private const val MAX_MESSAGE_BYTES = 8 * 1024 * 1024
 
+        /**
+         * The asset loader only ever serves this origin on the default HTTPS
+         * port. Matching the host alone accepted `https://appassets…:8443`, a
+         * different origin entirely, so the port must be 443 (or absent, which
+         * `Uri`/`URI` report as -1) — B-17.
+         */
+        fun isDefaultHttpsPort(port: Int): Boolean = port == -1 || port == 443
+
         fun isOriginAllowed(
             scheme: String?,
             host: String?,
@@ -56,7 +64,7 @@ class BridgeHost(
             extraOrigins: Set<String> = emptySet()
         ): Boolean {
             if (scheme == "https" && host == "appassets.androidplatform.net") {
-                return true
+                return isDefaultHttpsPort(port)
             }
             if (isDebug) {
                 if (scheme == "http" && (host == "localhost" || host == "127.0.0.1") && (port == 5173 || port == -1)) {
@@ -155,8 +163,11 @@ class BridgeHost(
                 }
             }
         } catch (error: Throwable) {
-            // A rejected execute (pool shut down after detach) or any unexpected
-            // failure must not reach the framework's uncaught handler (B-01/B-17).
+            // `io.execute` throws RejectedExecutionException synchronously once
+            // detach()/close() has shut the pool down, so it is inside this try
+            // and becomes an E_INTERNAL reply, never an uncaught handler on the
+            // WebView thread (B-01/B-17). dispatchAsync runs inside the pool, so
+            // it cannot throw here; a throw before that point is also caught.
             Log.w(TAG, "request rejected: ${error.javaClass.simpleName}")
             sendError(replyProxy, id, "E_INTERNAL", "internal error")
         }

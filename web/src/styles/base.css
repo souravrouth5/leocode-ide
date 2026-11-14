@@ -6,6 +6,18 @@
   box-sizing: border-box;
 }
 
+/*
+ * Side insets (L-11). tokens.css forwards the top and bottom safe areas; a
+ * landscape navigation bar and a side display cutout need the horizontal ones
+ * too. The host overrides all five from the real WindowInsets with
+ * --inset-left / --inset-right; the env() fallback keeps the browser preview
+ * and older WebViews correct.
+ */
+:root {
+  --inset-left: env(safe-area-inset-left, 0px);
+  --inset-right: env(safe-area-inset-right, 0px);
+}
+
 html,
 body,
 #root {
