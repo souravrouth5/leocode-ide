@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MockBridge } from "../../bridge/mock"
 import { createAppStores } from "../../app/stores"
+import { nextDialog } from "../../test/dialogs"
 import { isDirty, normalizeText } from "./model"
 import { submitPrompt } from "../shell/promptActions"
 
@@ -62,7 +63,6 @@ describe("editor save safety (W-02/W-03/W-04)", () => {
   })
 
   it("asks before Save As replaces an existing file", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
     const bridge = new MockBridge()
     const stores = createAppStores(bridge)
     stores.editor.setState({
@@ -71,9 +71,13 @@ describe("editor save safety (W-02/W-03/W-04)", () => {
     })
     const before = await bridge.read("main.py")
 
-    await stores.editor.getState().saveAs("main.py")
+    const saving = stores.editor.getState().saveAs("main.py")
+    const dialog = await nextDialog(stores)
+    if (dialog.kind !== "confirm") throw new Error("expected a confirm dialog")
+    expect(dialog.options.message).toContain("already exists")
+    stores.dialogs.getState().cancel()
+    await saving
 
-    expect(confirm).toHaveBeenCalled()
     expect(await bridge.read("main.py")).toBe(before)
     expect(stores.editor.getState().docs[0].path).toBe("Untitled-1")
   })

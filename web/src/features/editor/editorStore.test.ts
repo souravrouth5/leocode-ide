@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MockBridge } from "../../bridge/mock"
 import { createAppStores } from "../../app/stores"
+import { answerConfirm } from "../../test/dialogs"
 
 describe("editor store (Task 13)", () => {
   beforeEach(() => {
@@ -60,8 +61,7 @@ describe("editor store (Task 13)", () => {
     expect(stores.notifications.getState().queue[0].message).toContain("1 restored tab")
   })
 
-  it("closes all tabs after confirmation", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+  it("closes all tabs after confirmation", async () => {
     const stores = createAppStores(new MockBridge())
     stores.editor.setState({
       docs: [
@@ -71,10 +71,26 @@ describe("editor store (Task 13)", () => {
       activePath: "a.txt"
     })
 
-    stores.editor.getState().closeAll()
-    expect(confirm).toHaveBeenCalled()
+    const closing = stores.editor.getState().closeAll()
+    await answerConfirm(stores, true)
+    await closing
+
     expect(stores.editor.getState().docs).toEqual([])
     expect(stores.editor.getState().activePath).toBeNull()
+  })
+
+  it("keeps the tabs when closing all is declined", async () => {
+    const stores = createAppStores(new MockBridge())
+    stores.editor.setState({
+      docs: [{ path: "a.txt", content: "changed", saved: "x", eol: "\n" }],
+      activePath: "a.txt"
+    })
+
+    const closing = stores.editor.getState().closeAll()
+    await answerConfirm(stores, false)
+    await closing
+
+    expect(stores.editor.getState().docs).toHaveLength(1)
   })
 
   it("does not create a duplicate tab when opened twice at once", async () => {

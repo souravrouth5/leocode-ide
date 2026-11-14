@@ -53,7 +53,7 @@ export function EditorView() {
                 aria-label={`Close ${baseName(doc.path)}`}
                 onClick={(event) => {
                   event.stopPropagation()
-                  editor.getState().close(doc.path)
+                  void editor.getState().close(doc.path)
                 }}
               >
                 <XIcon size={13} />

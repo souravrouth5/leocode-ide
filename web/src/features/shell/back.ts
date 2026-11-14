@@ -3,14 +3,22 @@ import type { AppStores } from "../../app/stores"
 /**
  * Android back button, in layer order (W-12):
  *
- * error sheet → error banner → local sheets (action sheets/menus) → drawer →
- * run sheet (hide, never cancel) → prompt/settings → non-editor view.
+ * modal dialog → error sheet → error banner → local sheets (action
+ * sheets/menus) → drawer → run sheet (hide, never cancel) → prompt/settings →
+ * non-editor view.
  *
  * Returning `false` lets the Activity leave, which only happens when nothing is
  * covering the editor.
  */
 export function handleBack(stores: AppStores): boolean {
-  const { errors, shell, run } = stores
+  const { errors, shell, run, dialogs } = stores
+
+  // A confirm/prompt sheet is the most recent modal layer: dismiss it (which
+  // resolves the wait as "cancelled") before anything behind it (PD-02).
+  if (dialogs.getState().request) {
+    dialogs.getState().cancel()
+    return true
+  }
 
   if (errors.getState().dismissTop()) return true
   if (shell.getState().dismissTopSheet()) return true

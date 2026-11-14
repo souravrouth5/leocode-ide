@@ -12,6 +12,7 @@ import { AppStatusBar } from "../layout/AppStatusBar"
 import { BottomNav } from "../layout/BottomNav"
 import { RuntimesView } from "../runtimes/RuntimesView"
 import { TerminalView } from "../terminal/TerminalView"
+import { BackupProgressBanner } from "../workspace/BackupProgressBanner"
 import { handleBack } from "./back"
 
 /**
@@ -34,8 +35,12 @@ export function Shell({ info }: { info: AppInfo | null }) {
   useEffect(() => {
     void stores.files.getState().refresh()
     void stores.files.getState().loadStorage()
-    void stores.editor.getState().restoreSession()
-    void stores.workspace.getState().load()
+    // The persisted session is tagged with its workspace id, so the registry
+    // (and the active id) must be known before restoring it (PD-11).
+    void stores.workspace
+      .getState()
+      .load()
+      .then(() => stores.editor.getState().restoreSession())
   }, [stores])
 
   // Task 15: compare mtime/hash while the user is looking at the editor. Five
@@ -61,6 +66,7 @@ export function Shell({ info }: { info: AppInfo | null }) {
   return (
     <div className={"app" + (view === "editor" ? " view-editor" : "")}>
       <AppHeader />
+      <BackupProgressBanner />
       <main className="views">
         <FilesView />
         <EditorView />

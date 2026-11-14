@@ -21,8 +21,10 @@ import {
 } from "../features/search/searchStore"
 import {
   createFindReplaceStore,
-  type FindReplaceState
+  type FindReplaceStore
 } from "../features/editor/findReplaceStore"
+import { createDialogStore, type DialogState } from "../features/dialogs/dialogStore"
+import { createBackupStore, type BackupState } from "../features/workspace/backupStore"
 
 export interface AppStores {
   bridge: Bridge
@@ -35,7 +37,10 @@ export interface AppStores {
   run: RunStore
   workspace: StoreApi<WorkspaceState>
   search: StoreApi<SearchState>
-  findReplace: StoreApi<FindReplaceState>
+  findReplace: FindReplaceStore
+  dialogs: StoreApi<DialogState>
+  /** Import/export/restore progress, shown outside the Settings sheet (PD-25). */
+  backup: StoreApi<BackupState>
   /** Remove listeners the stores installed on `window` (W-26). */
   dispose(): void
 }
@@ -53,15 +58,30 @@ export function createAppStores(bridge: Bridge): AppStores {
   const settings = createSettingsStore()
   const shell = createShellStore()
   const files = createFilesStore(bridge, errors)
-  const editor = createEditorStore({ bridge, files, settings, shell, errors, notifications })
+  const dialogs = createDialogStore()
+  // The editor store persists which workspace its tabs belong to (PD-11). The
+  // workspace store needs the editor, so the id is read lazily through this
+  // forward reference instead of creating the stores in a cycle.
+  let workspace: StoreApi<WorkspaceState> | null = null
+  const editor = createEditorStore({
+    bridge,
+    files,
+    settings,
+    shell,
+    errors,
+    notifications,
+    dialogs,
+    workspaceId: () => workspace?.getState().activeId ?? null
+  })
   const run = createRunStore({ bridge, editor, notifications })
-  const workspace = createWorkspaceStore({
+  workspace = createWorkspaceStore({
     bridge,
     files,
     editor,
     shell,
     notifications,
-    errors
+    errors,
+    dialogs
   })
   const search = createSearchStore({
     bridge,
@@ -71,6 +91,7 @@ export function createAppStores(bridge: Bridge): AppStores {
     errors
   })
   const findReplace = createFindReplaceStore()
+  const backup = createBackupStore()
 
   let disposed = false
   return {
@@ -85,12 +106,15 @@ export function createAppStores(bridge: Bridge): AppStores {
     workspace,
     search,
     findReplace,
+    dialogs,
+    backup,
     dispose() {
       if (disposed) return
       disposed = true
       editor.dispose()
       run.dispose()
       settings.dispose()
+      findReplace.dispose()
     }
   }
 }

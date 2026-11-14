@@ -1,7 +1,5 @@
-import { useState } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
-import type { SafProgress } from "../../bridge"
 import { PromptDialog } from "../../components/PromptDialog"
 import { RunSheet } from "../../components/RunSheet"
 import { SettingsDialog } from "../../components/SettingsDialog"
@@ -9,43 +7,39 @@ import { FindReplaceSheet } from "../../components/FindReplaceSheet"
 import { SearchPanel } from "../../components/SearchPanel"
 import { ErrorSurfaces } from "../../errors/ErrorSurfaces"
 import { PaneBoundary } from "../../errors/PaneBoundary"
+import { describeProgress } from "../workspace/backupStore"
+import { DialogHost } from "../dialogs/DialogHost"
 import { submitPrompt } from "../shell/promptActions"
 
 /** All sheets/dialogs, wired to their stores. */
 export function AppDialogs({ version }: { version: string }) {
   const stores = useStores()
-  const { run, shell, settings, errors, notifications, files, bridge, editor } = stores
+  const { run, shell, settings, errors, notifications, files, bridge, editor, backup, dialogs } =
+    stores
   const runState = useStore(run, (state) => state.run)
   const sheetOpen = useStore(run, (state) => state.sheetOpen)
   const prompt = useStore(shell, (state) => state.prompt)
   const settingsOpen = useStore(shell, (state) => state.settingsOpen)
   const userSettings = useStore(settings, (state) => state.settings)
   const storage = useStore(files, (state) => state.storage)
-  const [backupBusy, setBackupBusy] = useState(false)
-  const [backupStatus, setBackupStatus] = useState<string | null>(null)
+  const backupBusy = useStore(backup, (state) => state.busy)
+  const backupStatus = useStore(backup, (state) => state.status)
 
   const requestStoragePermission = () => {
     void files.getState().requestStoragePermission()
   }
 
-  const describe = (progress: SafProgress) =>
-    `${progress.phase}: ${progress.files} file${progress.files === 1 ? "" : "s"} (${(
-      progress.bytes /
-      1024
-    ).toFixed(1)} KB)`
-
   const importFolder = async () => {
-    setBackupBusy(true)
-    setBackupStatus("Choose a folder…")
+    backup.getState().begin("import", "Choose a folder…")
     try {
       const result = await bridge.importTree(null, (progress) =>
-        setBackupStatus(describe(progress))
+        backup.getState().update(describeProgress(progress), progress)
       )
       if (!result) {
-        setBackupStatus("Import cancelled")
+        backup.getState().finish("Import cancelled")
         return
       }
-      setBackupStatus(`Imported ${result.files} files into ${result.path}`)
+      backup.getState().finish(`Imported ${result.files} files into ${result.path}`)
       notifications.getState().enqueue({
         kind: "success",
         message: `Imported ${result.files} files`,
@@ -54,24 +48,23 @@ export function AppDialogs({ version }: { version: string }) {
       await files.getState().refresh()
     } catch (error) {
       errors.getState().report(error, { context: "Import folder" })
-      setBackupStatus(null)
-    } finally {
-      setBackupBusy(false)
+      backup.getState().fail()
     }
   }
 
   const exportBackup = async () => {
-    setBackupBusy(true)
-    setBackupStatus("Preparing backup…")
+    backup.getState().begin("export", "Preparing backup…")
     try {
       const result = await bridge.exportWorkspace("leocode-backup.zip", (progress) =>
-        setBackupStatus(describe(progress))
+        backup.getState().update(describeProgress(progress), progress)
       )
       if (!result) {
-        setBackupStatus("Export cancelled")
+        backup.getState().finish("Export cancelled")
         return
       }
-      setBackupStatus(`Backed up ${result.files} files (${(result.bytes / 1024).toFixed(1)} KB)`)
+      backup
+        .getState()
+        .finish(`Backed up ${result.files} files (${(result.bytes / 1024).toFixed(1)} KB)`)
       notifications.getState().enqueue({
         kind: "success",
         message: "Workspace backup exported",
@@ -79,29 +72,31 @@ export function AppDialogs({ version }: { version: string }) {
       })
     } catch (error) {
       errors.getState().report(error, { context: "Export backup" })
-      setBackupStatus(null)
-    } finally {
-      setBackupBusy(false)
+      backup.getState().fail()
     }
   }
 
   const restoreBackup = async () => {
-    if (
-      !window.confirm(
-        "Restore a backup into the active workspace?\n\nFiles with the same name are replaced. Unrelated files are kept."
-      )
-    ) {
-      return
-    }
-    setBackupBusy(true)
-    setBackupStatus("Choose a backup…")
+    const confirmed = await dialogs.getState().confirm({
+      title: "Restore from backup",
+      message: "Restore a backup into the active workspace?",
+      detail: "Files with the same name are replaced. Unrelated files are kept.",
+      confirmLabel: "Restore",
+      danger: true
+    })
+    if (!confirmed) return
+    backup.getState().begin("restore", "Choose a backup…")
     try {
-      const result = await bridge.restoreArchive((progress) => setBackupStatus(describe(progress)))
+      const result = await bridge.restoreArchive((progress) =>
+        backup.getState().update(describeProgress(progress), progress)
+      )
       if (!result) {
-        setBackupStatus("Restore cancelled")
+        backup.getState().finish("Restore cancelled")
         return
       }
-      setBackupStatus(`Restored ${result.files} files (${(result.bytes / 1024).toFixed(1)} KB)`)
+      backup
+        .getState()
+        .finish(`Restored ${result.files} files (${(result.bytes / 1024).toFixed(1)} KB)`)
       notifications.getState().enqueue({
         kind: "success",
         message: "Backup restored",
@@ -112,9 +107,7 @@ export function AppDialogs({ version }: { version: string }) {
       await editor.getState().checkExternal()
     } catch (error) {
       errors.getState().report(error, { context: "Restore backup" })
-      setBackupStatus(null)
-    } finally {
-      setBackupBusy(false)
+      backup.getState().fail()
     }
   }
 
@@ -171,6 +164,10 @@ export function AppDialogs({ version }: { version: string }) {
           onClose={() => shell.getState().closePrompt()}
           onConfirm={(value) => submitPrompt(stores, value)}
         />
+      </PaneBoundary>
+
+      <PaneBoundary title="The dialog crashed">
+        <DialogHost />
       </PaneBoundary>
 
       <PaneBoundary title="The error notifications crashed">

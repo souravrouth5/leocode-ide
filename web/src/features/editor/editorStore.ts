@@ -6,6 +6,7 @@ import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { FilesState } from "../files/filesStore"
 import type { SettingsState } from "../settings/settingsStore"
 import type { ShellState } from "../shell/shellStore"
+import type { DialogState } from "../dialogs/dialogStore"
 import {
   LARGE_FILE_BYTES,
   LARGE_FILE_CHUNK,
@@ -35,8 +36,8 @@ export interface EditorState {
   beginSaveAs(): void
   saveAs(target: string): Promise<void>
   reload(path?: string): Promise<void>
-  close(path: string): void
-  closeAll(): void
+  close(path: string): Promise<void>
+  closeAll(): Promise<void>
   restoreSession(): Promise<void>
   deleteEntry(entry: FileEntry): Promise<void>
   renamePath(from: string, to: string): void
@@ -47,7 +48,7 @@ export interface EditorState {
   /** Poll the host for mtime/hash changes behind the open buffers. */
   checkExternal(): Promise<void>
   /** Forget every buffer when the user switches workspace. */
-  clearWorkspace(): void
+  clearWorkspace(forgetWorkspaceId?: string): void
 }
 
 export type EditorStore = StoreApi<EditorState> & {
@@ -62,6 +63,12 @@ interface EditorDeps {
   shell: StoreApi<ShellState>
   errors: StoreApi<ErrorsState>
   notifications: StoreApi<NotificationsState>
+  dialogs: StoreApi<DialogState>
+  /**
+   * The workspace the open tabs belong to (PD-11). Null until the registry has
+   * loaded; the session is still restored then instead of being discarded.
+   */
+  workspaceId: () => string | null
 }
 
 /** Session state is written 300 ms after the last change, not on every key. */
@@ -74,11 +81,17 @@ export const DRAFT_AUTOSAVE_MS = 3_000
 const GONE_CODES = new Set(["E_NOT_FOUND", "E_BINARY"])
 
 export function createEditorStore(deps: EditorDeps): EditorStore {
-  const { bridge, files, settings, shell, errors, notifications } = deps
+  const { bridge, files, settings, shell, errors, notifications, dialogs, workspaceId } = deps
   let untitledCounter = 1
   let sessionLoaded = false
   let sessionSaveWarned = false
   let persistTimer: number | null = null
+  /**
+   * Set synchronously around `clearWorkspace()` so the subscription it triggers
+   * does not schedule the session write that would erase the previous
+   * workspace's tabs (PD-11).
+   */
+  let suppressScheduledPersist = false
   /**
    * Paths whose restore failed for a transient reason (timeout, permission).
    * They stay in the persisted session so the next launch can try again (W-26).
@@ -251,6 +264,10 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       const path = get().activePath
       const doc = path ? get().docs.find((item) => item.path === path) : undefined
       if (!doc) return
+      if (doc.readOnly || doc.large) {
+        notifyLargeFileSaveAs()
+        return
+      }
       if (isSafPath(doc.path)) {
         // There is no destination picker for Save As, and writing a `saf://`
         // name into the workspace would silently create a stray file (W-19).
@@ -275,6 +292,12 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       const path = get().activePath
       const doc = path ? get().docs.find((item) => item.path === path) : undefined
       if (!doc) return
+      // A large-file buffer holds only the first chunk: writing it to a new
+      // path would silently truncate the copy (PD-03).
+      if (doc.readOnly || doc.large) {
+        notifyLargeFileSaveAs()
+        return
+      }
       if (isSafPath(doc.path)) {
         get().beginSaveAs()
         return
@@ -292,11 +315,17 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         return
       }
       if (await entryExists(bridge, target)) {
-        if (!window.confirm(`${baseName(target)} already exists. Replace it?`)) return
+        const replace = await dialogs.getState().confirm({
+          title: "Save As",
+          message: `${baseName(target)} already exists. Replace it?`,
+          confirmLabel: "Replace",
+          danger: true
+        })
+        if (!replace) return
       }
       try {
         const result = await bridge.writeChecked(target, serialize(doc), null)
-        if (!doc.isUntitled && !isSafPath(doc.path)) void bridge.deleteDraft(doc.path).catch(() => {})
+        if (!doc.isUntitled && !isSafPath(doc.path)) deleteDraftQueued(doc.path)
         set((state) => ({
           docs: state.docs.map((item) =>
             item.path === doc.path
@@ -333,11 +362,14 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         })
         return
       }
-      if (
-        isDirty(doc) &&
-        !window.confirm(`Discard unsaved changes to ${baseName(path)} and reload from disk?`)
-      ) {
-        return
+      if (isDirty(doc)) {
+        const discard = await dialogs.getState().confirm({
+          title: "Reload from disk",
+          message: `Discard unsaved changes to ${baseName(path)} and reload from disk?`,
+          confirmLabel: "Reload",
+          danger: true
+        })
+        if (!discard) return
       }
       try {
         const fresh = await loadDocument(path, false)
@@ -361,11 +393,19 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       }
     },
 
-    close(path) {
+    async close(path) {
       const doc = get().docs.find((item) => item.path === path)
-      if (doc && isDirty(doc) && !window.confirm(`Discard unsaved changes to ${baseName(path)}?`)) {
-        return
+      if (doc && isDirty(doc)) {
+        const discard = await dialogs.getState().confirm({
+          title: "Close tab",
+          message: `Discard unsaved changes to ${baseName(path)}?`,
+          confirmLabel: "Discard",
+          danger: true
+        })
+        if (!discard) return
       }
+      // A dialog may have been open long enough for the tab to go away.
+      if (!get().docs.some((item) => item.path === path)) return
       set((state) => {
         const docs = state.docs.filter((item) => item.path !== path)
         return {
@@ -374,18 +414,22 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
             state.activePath === path ? (docs.length ? docs[docs.length - 1].path : null) : state.activePath
         }
       })
-      if (doc && !doc.isUntitled && !isSafPath(path)) void bridge.deleteDraft(path).catch(() => {})
+      if (doc && !doc.isUntitled && !isSafPath(path)) deleteDraftQueued(path)
       clearDraftTimer(path)
     },
 
-    closeAll() {
+    async closeAll() {
       if (get().docs.some(isDirty)) {
-        if (!window.confirm("You have unsaved changes. Discard and close all tabs?")) return
+        const discard = await dialogs.getState().confirm({
+          title: "Close all tabs",
+          message: "You have unsaved changes. Discard and close all tabs?",
+          confirmLabel: "Discard",
+          danger: true
+        })
+        if (!discard) return
       }
       for (const doc of get().docs) {
-        if (!doc.isUntitled && !isSafPath(doc.path)) {
-          void bridge.deleteDraft(doc.path).catch(() => {})
-        }
+        if (!doc.isUntitled && !isSafPath(doc.path)) deleteDraftQueued(doc.path)
         clearDraftTimer(doc.path)
       }
       set({ docs: [], activePath: null })
@@ -396,13 +440,33 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         sessionLoaded = true
         return
       }
+      // A session that belongs to another workspace is left in storage instead
+      // of being wiped by the persist in `finally` (PD-11).
+      let keepStoredSession = false
       try {
         const raw = localStorage.getItem(SESSION_KEY)
         if (!raw) {
           sessionLoaded = true
           return
         }
-        const session = JSON.parse(raw) as { paths?: unknown; active?: unknown }
+        const session = JSON.parse(raw) as {
+          paths?: unknown
+          active?: unknown
+          workspaceId?: unknown
+        }
+        const storedWorkspace =
+          typeof session.workspaceId === "string" && session.workspaceId.length > 0
+            ? session.workspaceId
+            : null
+        const currentWorkspace = workspaceId()
+        // Only reject the session when both ids are known: at first launch the
+        // registry may not have loaded yet, and discarding then would lose the
+        // tabs for good.
+        if (storedWorkspace && currentWorkspace && storedWorkspace !== currentWorkspace) {
+          keepStoredSession = true
+          sessionLoaded = true
+          return
+        }
         const paths = Array.isArray(session.paths)
           ? session.paths.filter(
               (path): path is string =>
@@ -470,8 +534,9 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       } finally {
         sessionLoaded = true
         // Rewrite the session immediately: tabs that are really gone must not be
-        // re-read on every launch (W-26).
-        persistSession()
+        // re-read on every launch (W-26). A session from another workspace is
+        // kept as-is so switching back can restore it (PD-11).
+        if (!keepStoredSession) persistSession()
       }
     },
 
@@ -485,9 +550,15 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
           : `Delete "${entry.name}"?`
       const message =
         dirty > 0
-          ? `${base}\n\n${dirty} open tab${dirty === 1 ? " has" : "s have"} unsaved changes, which will be lost.`
+          ? `${base} ${dirty} open tab${dirty === 1 ? " has" : "s have"} unsaved changes, which will be lost.`
           : base
-      if (!window.confirm(message)) return
+      const confirmed = await dialogs.getState().confirm({
+        title: entry.kind === "dir" ? "Delete folder" : "Delete file",
+        message,
+        confirmLabel: "Delete",
+        danger: true
+      })
+      if (!confirmed) return
       try {
         await bridge.remove(entry.path)
         set((state) => {
@@ -513,6 +584,12 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
     },
 
     renamePath(from, to) {
+      // A pending autosave for the old path must not fire after the move and
+      // recreate the draft that was just deleted (PD-24). Timers for every tab
+      // under a renamed folder are cleared too.
+      for (const doc of get().docs) {
+        if (isUnder(doc.path, from)) clearDraftTimer(doc.path)
+      }
       set((state) => {
         const seen = new Set<string>()
         const docs: OpenDoc[] = []
@@ -538,11 +615,17 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
         }
       })
       // A draft is keyed by path; move it with the file so recovery still works.
-      void bridge.readDraft(from).then((draft) => {
+      // The read → save → delete runs under both paths' locks, in sorted order,
+      // so an autosave cannot land between the read and the delete.
+      void withPathLocks([from, to], async () => {
+        const draft = await bridge.readDraft(from)
         if (!draft) return
-        void bridge.saveDraft(to, draft.content, draft.eol).catch(() => {})
-        void bridge.deleteDraft(from).catch(() => {})
-      }).catch(() => {})
+        await bridge.saveDraft(to, draft.content, draft.eol)
+        await bridge.deleteDraft(from)
+      }).catch(() => {
+        // A draft that cannot be moved is reported by the host; the rename of
+        // the file itself already happened.
+      })
     },
 
     restoreDraft(path) {
@@ -559,7 +642,7 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
             : doc
         )
       }))
-      void bridge.deleteDraft(path).catch(() => {})
+      deleteDraftQueued(path)
       shell.getState().flash("Draft restored")
     },
 
@@ -567,7 +650,7 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       set((state) => ({
         docs: state.docs.map((doc) => (doc.path === path ? { ...doc, draft: null } : doc))
       }))
-      void bridge.deleteDraft(path).catch(() => {})
+      deleteDraftQueued(path)
     },
 
     async keepMine(path) {
@@ -641,9 +724,32 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       }))
     },
 
-    clearWorkspace() {
+    clearWorkspace(forgetWorkspaceId) {
       for (const doc of get().docs) clearDraftTimer(doc.path)
-      set({ docs: [], activePath: null })
+      // The subscription below runs synchronously inside `set`. Suppress exactly
+      // the write it would schedule: an empty tab list belongs to the *new*
+      // workspace, and writing it now would erase the session we are leaving
+      // (PD-11). The next real change persists normally.
+      suppressScheduledPersist = true
+      try {
+        set({ docs: [], activePath: null })
+      } finally {
+        suppressScheduledPersist = false
+      }
+      // A deleted workspace can never be switched back to, so its stored
+      // session would otherwise stay forever and block the fallback workspace
+      // from restoring its own tabs (PD-11).
+      if (forgetWorkspaceId) {
+        try {
+          const raw = localStorage.getItem(SESSION_KEY)
+          const stored = raw
+            ? (JSON.parse(raw) as { workspaceId?: unknown })
+            : null
+          if (stored?.workspaceId === forgetWorkspaceId) localStorage.removeItem(SESSION_KEY)
+        } catch {
+          // An unreadable session is replaced by the next persist anyway.
+        }
+      }
     }
   }))
 
@@ -687,7 +793,7 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       if (!draft) return
       // A draft identical to the disk text has nothing to recover.
       if (normalizeText(draft.content) === doc.content) {
-        void bridge.deleteDraft(doc.path).catch(() => {})
+        void deleteDraftQueued(doc.path)
         return
       }
       doc.draft = {
@@ -701,6 +807,47 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
   }
 
   const draftTimers = new Map<string, number>()
+
+  /**
+   * Per-path promise chains for draft IO (PD-24). A save that is already in
+   * flight cannot be overtaken by the delete half of a rename, so the rename
+   * always reads the newest draft and the old key stays deleted.
+   */
+  const pathLocks = new Map<string, Promise<void>>()
+
+  function withPathLock<T>(path: string, task: () => Promise<T>): Promise<T> {
+    const previous = pathLocks.get(path) ?? Promise.resolve()
+    const run = previous.then(task, task)
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    )
+    pathLocks.set(path, tail)
+    void tail.then(() => {
+      // Drop the empty chain so renamed-away paths do not accumulate.
+      if (pathLocks.get(path) === tail) pathLocks.delete(path)
+    })
+    return run
+  }
+
+  /**
+   * Locks several paths, in sorted order, before running [task]. Sorting keeps
+   * two renames of the same pair (A→B and B→A) from deadlocking.
+   */
+  function withPathLocks<T>(paths: string[], task: () => Promise<T>): Promise<T> {
+    const ordered = [...new Set(paths)].sort()
+    const acquire = (index: number): Promise<T> =>
+      index >= ordered.length
+        ? task()
+        : withPathLock(ordered[index], () => acquire(index + 1))
+    return acquire(0)
+  }
+
+  function deleteDraftQueued(path: string): Promise<void> {
+    return withPathLock(path, () => bridge.deleteDraft(path)).catch(() => {
+      // A draft that was already gone needs no follow-up.
+    })
+  }
 
   function clearDraftTimer(path: string) {
     const timer = draftTimers.get(path)
@@ -718,13 +865,17 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       path,
       window.setTimeout(() => {
         draftTimers.delete(path)
-        const doc = store.getState().docs.find((item) => item.path === path)
-        if (!doc || doc.isUntitled || isSafPath(path) || doc.readOnly) return
-        if (!isDirty(doc)) {
-          void bridge.deleteDraft(path).catch(() => {})
-          return
-        }
-        void bridge.saveDraft(path, serialize(doc), doc.eol).catch(() => {
+        // Run the whole check-and-write under the path lock: a rename queued
+        // before this body runs must move the draft this body writes (PD-24).
+        void withPathLock(path, async () => {
+          const doc = store.getState().docs.find((item) => item.path === path)
+          if (!doc || doc.isUntitled || isSafPath(path) || doc.readOnly) return
+          if (!isDirty(doc)) {
+            await bridge.deleteDraft(path)
+            return
+          }
+          await bridge.saveDraft(path, serialize(doc), doc.eol)
+        }).catch(() => {
           // Autosave must never interrupt typing; the next idle period retries.
         })
       }, DRAFT_AUTOSAVE_MS)
@@ -733,7 +884,17 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
 
   function clearDraft(path: string) {
     clearDraftTimer(path)
-    void bridge.deleteDraft(path).catch(() => {})
+    void deleteDraftQueued(path)
+  }
+
+  function notifyLargeFileSaveAs(): void {
+    notifications.getState().enqueue({
+      kind: "info",
+      message: "This file is open in large-file mode",
+      detail:
+        "Only the first 1 MB is loaded, so Save As would write a truncated copy. Copy the file from the file manager instead.",
+      durationMs: 6_000
+    })
   }
 
   function saveSaf(
@@ -785,9 +946,36 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
       }
       const active = state.activePath
       const activeDoc = state.docs.find((doc) => doc.path === active)
+      const currentWorkspace = workspaceId()
+      // A just-cleared workspace has no tabs yet. Writing that empty list now
+      // would erase the session of the workspace we switched away from, so keep
+      // the stored one until something is actually opened (PD-11).
+      if (paths.length === 0 && currentWorkspace) {
+        try {
+          const raw = localStorage.getItem(SESSION_KEY)
+          const stored = raw
+            ? (JSON.parse(raw) as { workspaceId?: unknown; paths?: unknown })
+            : null
+          const storedWorkspace =
+            typeof stored?.workspaceId === "string" ? stored.workspaceId : null
+          const storedPaths = Array.isArray(stored?.paths) ? stored.paths.length : 0
+          if (storedWorkspace && storedWorkspace !== currentWorkspace && storedPaths > 0) {
+            return
+          }
+        } catch {
+          // An unreadable session is replaced by the one written below.
+        }
+      }
       localStorage.setItem(
         SESSION_KEY,
-        JSON.stringify({ paths, active: activeDoc?.isUntitled ? null : active })
+        JSON.stringify({
+          paths,
+          active: activeDoc?.isUntitled ? null : active,
+          // A session written before the registry loaded cannot be tagged; omit
+          // the id rather than writing `null`, which would later look like "this
+          // session belongs to no workspace" and be restored anywhere (PD-11).
+          ...(currentWorkspace ? { workspaceId: currentWorkspace } : {})
+        })
       )
     } catch {
       // Storage can be full or blocked. Warn once, not on every keystroke.
@@ -805,6 +993,15 @@ export function createEditorStore(deps: EditorDeps): EditorStore {
   /** Debounced: one `JSON.stringify` + `setItem` per burst, not per keystroke. */
   function schedulePersist() {
     if (typeof window === "undefined") return
+    if (suppressScheduledPersist) {
+      // `clearWorkspace` notified synchronously. Cancel anything pending and
+      // schedule nothing: the empty tab list must not be persisted (PD-11).
+      if (persistTimer !== null) {
+        window.clearTimeout(persistTimer)
+        persistTimer = null
+      }
+      return
+    }
     if (persistTimer !== null) window.clearTimeout(persistTimer)
     persistTimer = window.setTimeout(() => {
       persistTimer = null

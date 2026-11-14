@@ -5,6 +5,8 @@ import type { FilesState } from "../files/filesStore"
 import type { ShellState } from "../shell/shellStore"
 import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { ErrorsState } from "../../errors/errorsStore"
+import type { DialogState } from "../dialogs/dialogStore"
+import { dispatchWorkspaceSwitched } from "./workspaceEvents"
 
 export interface WorkspaceState {
   workspaces: WorkspaceInfo[]
@@ -26,6 +28,7 @@ interface WorkspaceDeps {
   shell: StoreApi<ShellState>
   notifications: StoreApi<NotificationsState>
   errors: StoreApi<ErrorsState>
+  dialogs: StoreApi<DialogState>
 }
 
 /**
@@ -37,7 +40,7 @@ interface WorkspaceDeps {
  * workspace.
  */
 export function createWorkspaceStore(deps: WorkspaceDeps): StoreApi<WorkspaceState> {
-  const { bridge, files, editor, shell, notifications, errors } = deps
+  const { bridge, files, editor, shell, notifications, errors, dialogs } = deps
 
   return createStore<WorkspaceState>((set, get) => ({
     workspaces: [],
@@ -92,6 +95,11 @@ export function createWorkspaceStore(deps: WorkspaceDeps): StoreApi<WorkspaceSta
         shell.getState().go("files")
         shell.getState().flash(`Workspace: ${record.name}`)
         await get().load()
+        // Search results and find/replace terms from the previous root must not
+        // be jumped into under the new one (PD-14).
+        dispatchWorkspaceSwitched(record.id)
+        // Restore this workspace's own session if it is still stored (PD-11).
+        await editor.getState().restoreSession()
         return true
       } catch (error) {
         errors.getState().report(error, { context: "Open workspace" })
@@ -121,21 +129,29 @@ export function createWorkspaceStore(deps: WorkspaceDeps): StoreApi<WorkspaceSta
       if (get().busy) return false
       const record = get().workspaces.find((item) => item.id === id)
       if (!record) return false
-      if (
-        !window.confirm(
-          `Delete the workspace “${record.name}”?\n\nIts files move to the trash and the tabs from it are closed.`
-        )
-      ) {
-        return false
-      }
+      const confirmed = await dialogs.getState().confirm({
+        title: "Delete workspace",
+        message: `Delete the workspace “${record.name}”?`,
+        detail: "Its files move to the trash and the tabs from it are closed.",
+        confirmLabel: "Delete",
+        danger: true
+      })
+      if (!confirmed) return false
       set({ busy: true })
+      const wasActive = get().activeId === id
       try {
         await bridge.deleteWorkspace(id)
-        if (get().activeId === id) {
-          editor.getState().clearWorkspace()
+        if (wasActive) {
+          editor.getState().clearWorkspace(id)
           await files.getState().refresh(".")
         }
         await get().load()
+        if (wasActive) {
+          // The old workspace's search results and find terms are stale under
+          // the fallback root too (PD-14).
+          const fallback = get().activeId
+          if (fallback) dispatchWorkspaceSwitched(fallback)
+        }
         notifications.getState().enqueue({
           kind: "info",
           message: `Workspace “${record.name}” moved to the trash`,
