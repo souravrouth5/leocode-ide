@@ -30,7 +30,7 @@ follow-up privacy, lifecycle and editor batches are fixed with tests and device 
 
 **Still open (narrow):** W-06 conflict detection (the reload-action plumbing exists), L-06 (reaper
 when the group leader is gone), L-08 (detach on `onStop`), L-15 (wake lock), L-24 (back timeout),
-S-15/S-16/S-17/S-18 (fsync, `.tmp` sweep, SAF binary, purge off-path), S-19/S-20, B-14/B-15/B-16,
+S-15/S-16/S-17/S-18 (fsync, `.tmp` sweep, SAF binary, purge off-path), S-19/S-20, B-15/B-16,
 W-25 (large-file perf), W-30/W-31/W-33/W-38. Device checks still pending: S-12 case-only rename on
 shared storage, L-09 renderer kill while backgrounded, W-24 visual scroll, W-18 CRLF, W-12 run-hide.
 B-09 uses the report's cancel-on-finish alternative; terminals still reattach. `runtime.install` has

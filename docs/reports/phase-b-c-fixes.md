@@ -111,6 +111,7 @@ Same APK installed on D1 and D2; screenshots under `docs/device-reports/`.
 | Error sheet offers Grant storage access (W-27) | — | PASS (`...-210708-final-storage-permission-...png`) |
 | Permission dialog + grant | — | PASS — READ/WRITE granted, row disappears (`...-210948-final-permission-dialog2-...png`, `...-211058-final-permission-granted-...png`) |
 | Downloads lists real files after grant | — | PASS (`...-211301-final-downloads-list-...png`) |
+| `setsid` present for group kill (B-14) | PASS — `/system/bin/setsid -> toybox` | PASS — `/system/bin/setsid -> toybox` |
 
 ## Behaviour changes worth knowing
 
@@ -138,7 +139,6 @@ Same APK installed on D1 and D2; screenshots under `docs/device-reports/`.
 - **L-24** back hook has no timeout fallback if the renderer hangs.
 - **S-15/S-16/S-17/S-18** directory fsync, `.tmp` sweep, SAF binary check, purge off the request path.
 - **S-19/S-20** debug origin surface and the meta-CSP `frame-ancestors`/extraction cap.
-- **B-14** group kill still relies on `/system/bin/setsid` (present on both phones).
 - **B-15/B-16** env override reporting and the unbounded bridge pool/per-path ordering.
 - **W-25** large-file/per-keystroke performance and file-list virtualisation (needs measurement).
 - **W-30** theme has three sources; **W-31** format-on-save only on Ctrl+S; **W-33** closed sheets
