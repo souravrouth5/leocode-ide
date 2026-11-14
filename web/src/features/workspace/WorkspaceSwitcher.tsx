@@ -9,7 +9,7 @@ import { FolderIcon, MoreVerticalIcon } from "../../components/Icons"
  * the store; the host moves the directory to the trash.
  */
 export function WorkspaceSwitcher() {
-  const { workspace } = useStores()
+  const { workspace, dialogs } = useStores()
   const workspaces = useStore(workspace, (state) => state.workspaces)
   const activeId = useStore(workspace, (state) => state.activeId)
   const busy = useStore(workspace, (state) => state.busy)
@@ -30,21 +30,29 @@ export function WorkspaceSwitcher() {
     }
   }, [open])
 
-  const create = () => {
-    const name = window.prompt("Name for the new workspace:", "Project")
-    if (!name?.trim()) return
-    void workspace.getState().create(name).then((ok) => {
-      if (ok) setOpen(false)
+  const create = async () => {
+    const name = await dialogs.getState().prompt({
+      title: "New workspace",
+      label: "Name for the new workspace:",
+      initial: "Project",
+      confirmLabel: "Create"
     })
+    if (!name) return
+    const ok = await workspace.getState().create(name)
+    if (ok) setOpen(false)
   }
 
-  const rename = () => {
+  const rename = async () => {
     if (!active) return
-    const name = window.prompt("Rename workspace:", active.name)
-    if (!name?.trim() || name.trim() === active.name) return
-    void workspace.getState().rename(active.id, name).then((ok) => {
-      if (ok) setOpen(false)
+    const name = await dialogs.getState().prompt({
+      title: "Rename workspace",
+      label: "Workspace name:",
+      initial: active.name,
+      confirmLabel: "Rename"
     })
+    if (!name || name === active.name) return
+    const ok = await workspace.getState().rename(active.id, name)
+    if (ok) setOpen(false)
   }
 
   const remove = () => {
@@ -90,15 +98,15 @@ export function WorkspaceSwitcher() {
             </button>
           ))}
           <div className="menu-divider" />
-          <button className="menu-item" onClick={create} disabled={busy}>
+          <button className="menu-item" onClick={() => void create()} disabled={busy}>
             <span>New workspace…</span>
           </button>
-          <button className="menu-item" onClick={rename} disabled={busy || !active}>
+          <button className="menu-item" onClick={() => void rename()} disabled={busy || !active}>
             <span>Rename current…</span>
           </button>
           <button
             className="menu-item danger"
-            onClick={remove}
+            onClick={() => void remove()}
             disabled={busy || !active || active.id === "default"}
           >
             <span>Delete current…</span>

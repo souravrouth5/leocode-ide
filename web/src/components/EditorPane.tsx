@@ -567,7 +567,9 @@ export function EditorPane({
           break
         }
         case "gotoPosition": {
-          const value = custom.detail.value as { line?: number; col?: number } | undefined
+          const value = custom.detail.value as
+            | { line?: number; col?: number; token?: string }
+            | undefined
           const lineNum = Number(value?.line)
           const colNum = Math.max(1, Number(value?.col) || 1)
           if (!isNaN(lineNum) && lineNum > 0 && lineNum <= view.state.doc.lines) {
@@ -579,6 +581,12 @@ export function EditorPane({
             })
             view.focus()
           }
+          // Confirm the command was handled so a sender that retries until the
+          // pane is mounted can stop (PD-17). An out-of-range line is still an
+          // acknowledgement: retrying would never make it valid.
+          const ack: { action: string; token?: string } = { action: "gotoPosition" }
+          if (typeof value?.token === "string") ack.token = value.token
+          window.dispatchEvent(new CustomEvent("leocode:editor-command-ack", { detail: ack }))
           break
         }
         case "findNext":

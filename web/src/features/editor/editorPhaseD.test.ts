@@ -44,6 +44,39 @@ describe("editor large-file mode (Task 15)", () => {
     expect(doc.hash).toMatch(/^[0-9a-f]{64}$/)
     expect(doc.mtime).toBeGreaterThan(0)
   })
+
+  it("refuses Save As for a large-file buffer instead of writing a truncated copy (PD-03)", async () => {
+    const bridge = new MockBridge()
+    const big = "x".repeat(LARGE_FILE_BYTES + 100)
+    await bridge.write("big.txt", big)
+    const stores = createAppStores(bridge)
+    await stores.editor.getState().openFile("big.txt")
+    const writeChecked = vi.spyOn(bridge, "writeChecked")
+
+    stores.editor.getState().beginSaveAs()
+    expect(stores.shell.getState().prompt).toBeNull()
+    const queued = stores.notifications.getState().queue
+    expect(queued[queued.length - 1].message).toContain("large-file mode")
+    expect(queued[queued.length - 1].detail).toContain("truncated")
+
+    await stores.editor.getState().saveAs("copy.txt")
+
+    expect(writeChecked).not.toHaveBeenCalled()
+    expect(stores.editor.getState().docs[0].path).toBe("big.txt")
+    expect(await bridge.read("big.txt")).toBe(big)
+  })
+
+  it("saves a normal document with Save As as before (PD-03)", async () => {
+    const bridge = new MockBridge()
+    const stores = createAppStores(bridge)
+    await stores.editor.getState().openFile("main.py")
+    const original = await bridge.read("main.py")
+
+    await stores.editor.getState().saveAs("copy.py")
+
+    expect(await bridge.read("copy.py")).toBe(original)
+    expect(stores.editor.getState().docs[0].path).toBe("copy.py")
+  })
 })
 
 describe("draft autosave and recovery (Task 15)", () => {

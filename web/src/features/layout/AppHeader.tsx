@@ -9,7 +9,7 @@ import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher"
 
 /** App bar: brand, workspace switcher, file/edit/overflow menus and the Run badge. */
 export function AppHeader() {
-  const { editor, run, shell, settings, findReplace, search } = useStores()
+  const { editor, run, shell, settings, findReplace, search, dialogs } = useStores()
   const docs = useStore(editor, (state) => state.docs)
   const activePath = useStore(editor, (state) => state.activePath)
   const runState = useStore(run, (state) => state.run)
@@ -40,6 +40,22 @@ export function AppHeader() {
     else void state.runFile()
   }
 
+  const gotoLine = async () => {
+    const line = await dialogs.getState().prompt({
+      title: "Goto line",
+      label: "Line number:",
+      initial: "1",
+      confirmLabel: "Go",
+      validate: (value) => {
+        const number = Number(value)
+        return Number.isInteger(number) && number >= 1
+          ? null
+          : "Enter a line number of 1 or more."
+      }
+    })
+    if (line) editorCommand("gotoLine", line)
+  }
+
   return (
     <PaneBoundary title="The app bar crashed">
       <header className="app-bar">
@@ -64,8 +80,8 @@ export function AppHeader() {
             onSave={() => void editor.getState().save()}
             onSaveAs={() => editor.getState().beginSaveAs()}
             onReload={() => void editor.getState().reload()}
-            onCloseTab={() => activePath && editor.getState().close(activePath)}
-            onCloseAllTabs={() => editor.getState().closeAll()}
+            onCloseTab={() => activePath && void editor.getState().close(activePath)}
+            onCloseAllTabs={() => void editor.getState().closeAll()}
             hasActiveDoc={activeDoc !== null}
             isDirty={activeDirty}
           />
@@ -101,10 +117,7 @@ export function AppHeader() {
           <OverflowMenu
             onFindReplace={() => findReplace.getState().openSheet()}
             onSearchWorkspace={() => search.getState().setOpen(true)}
-            onGotoLine={() => {
-              const line = window.prompt("Goto line number:")
-              if (line) editorCommand("gotoLine", line)
-            }}
+            onGotoLine={() => void gotoLine()}
             onSelectSyntax={selectSyntax}
             onOpenSettings={openSettings}
             wordWrap={userSettings.wordWrap}

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createAppStores } from "../../app/stores"
 import { MockBridge } from "../../bridge/mock"
+import { answerConfirm } from "../../test/dialogs"
+import { WORKSPACE_SWITCHED_EVENT } from "./workspaceEvents"
 
 beforeEach(() => {
   localStorage.clear()
@@ -67,7 +69,6 @@ describe("workspace store (Task 14)", () => {
   })
 
   it("renames and deletes a workspace, returning to the default root", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
     const bridge = new MockBridge()
     const stores = createAppStores(bridge)
     await stores.workspace.getState().load()
@@ -79,30 +80,78 @@ describe("workspace store (Task 14)", () => {
     await expect(stores.workspace.getState().rename(id, "Journal")).resolves.toBe(true)
     expect(projectId(stores, "Journal")).toBe(id)
 
-    await expect(stores.workspace.getState().remove(id)).resolves.toBe(true)
-    expect(confirm).toHaveBeenCalled()
+    const removing = stores.workspace.getState().remove(id)
+    await answerConfirm(stores, true)
+    await expect(removing).resolves.toBe(true)
     expect(stores.workspace.getState().workspaces.map((item) => item.id)).toEqual(["default"])
     expect(stores.workspace.getState().activeId).toBe("default")
     expect(stores.editor.getState().docs).toEqual([])
   })
 
   it("refuses to delete the default workspace", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true)
     const stores = createAppStores(new MockBridge())
     await stores.workspace.getState().load()
 
-    await expect(stores.workspace.getState().remove("default")).resolves.toBe(false)
+    const removing = stores.workspace.getState().remove("default")
+    await answerConfirm(stores, true)
+    await expect(removing).resolves.toBe(false)
     expect(stores.workspace.getState().workspaces).toHaveLength(1)
   })
 
   it("keeps the workspace when the delete confirmation is declined", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false)
     const stores = createAppStores(new MockBridge())
     await stores.workspace.getState().load()
     await stores.workspace.getState().create("Project")
     const id = projectId(stores, "Project")
 
-    await expect(stores.workspace.getState().remove(id)).resolves.toBe(false)
+    const removing = stores.workspace.getState().remove(id)
+    await answerConfirm(stores, false)
+    await expect(removing).resolves.toBe(false)
     expect(stores.workspace.getState().workspaces.map((item) => item.id)).toContain(id)
+  })
+
+  it("announces a switch so stale search and find state resets (PD-14)", async () => {
+    const bridge = new MockBridge()
+    const stores = createAppStores(bridge)
+    await stores.workspace.getState().load()
+    await stores.workspace.getState().create("Project")
+    const id = projectId(stores, "Project")
+    const seen: string[] = []
+    const listener = (event: Event) => {
+      seen.push((event as CustomEvent<{ id: string }>).detail.id)
+    }
+    window.addEventListener(WORKSPACE_SWITCHED_EVENT, listener)
+
+    try {
+      await stores.workspace.getState().open(id)
+    } finally {
+      window.removeEventListener(WORKSPACE_SWITCHED_EVENT, listener)
+    }
+
+    expect(seen).toEqual([id])
+  })
+
+  it("announces the fallback root when the active workspace is deleted", async () => {
+    const bridge = new MockBridge()
+    const stores = createAppStores(bridge)
+    await stores.workspace.getState().load()
+    await stores.workspace.getState().create("Project")
+    const id = projectId(stores, "Project")
+    await stores.workspace.getState().open(id)
+    const seen: string[] = []
+    const listener = (event: Event) => {
+      seen.push((event as CustomEvent<{ id: string }>).detail.id)
+    }
+    window.addEventListener(WORKSPACE_SWITCHED_EVENT, listener)
+
+    try {
+      const removing = stores.workspace.getState().remove(id)
+      await answerConfirm(stores, true)
+      await removing
+    } finally {
+      window.removeEventListener(WORKSPACE_SWITCHED_EVENT, listener)
+    }
+
+    expect(seen).toEqual(["default"])
   })
 })
