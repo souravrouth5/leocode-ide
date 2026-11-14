@@ -1,0 +1,34 @@
+/* ================================================================== tabs */
+
+.tabbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--inset-bottom);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.tabbar-item {
+  flex: 1 1 0;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  transition: color 130ms ease;
+}
+
+.tabbar-item.active {
+  color: var(--accent);
+}
+
+.tabbar-item:active {
+  background: var(--surface-2);
+}
+

@@ -3,6 +3,12 @@ import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import type { Bridge, TerminalHandle } from "../bridge"
+import {
+  clearSessionId,
+  readSessionId,
+  sanitizeTerminalTitle,
+  writeSessionId
+} from "../features/terminal/session"
 
 interface Props {
   bridge: Bridge
@@ -55,9 +61,6 @@ const NO_RUNTIME =
 
 const encoder = new TextEncoder()
 
-/** Survives a WebView/Activity recreation so the next page can `term.attach`. */
-const SESSION_KEY = "leocode.terminal.session"
-
 export function TerminalPane({
   bridge,
   cwd,
@@ -75,6 +78,8 @@ export function TerminalPane({
   )
   const [exited, setExited] = useState<number | null>(null)
   const [generation, setGeneration] = useState(0)
+  /** OSC 0/2 title, sanitised; "workspace" until the shell sends one. */
+  const [title, setTitle] = useState("")
 
   // -------------------------------------------------------- terminal instance
   useEffect(() => {
@@ -95,6 +100,16 @@ export function TerminalPane({
     term.open(host.current)
     termRef.current = term
     fitRef.current = fit
+
+    // Titles are untrusted PTY output: sanitise them before rendering. OSC 52
+    // would let a program write the device clipboard; swallow it (Task 13).
+    const onTitle = (data: string) => {
+      setTitle(sanitizeTerminalTitle(data))
+      return true
+    }
+    const oscTitle = term.parser.registerOscHandler(0, onTitle)
+    const oscTitle2 = term.parser.registerOscHandler(2, onTitle)
+    const oscClipboard = term.parser.registerOscHandler(52, () => true)
 
     let disposed = false
     let polling: number | null = null
@@ -139,13 +154,13 @@ export function TerminalPane({
         if (disposed) return
         term.write(`\r\n\x1b[90m[session ended, exit ${code}]\x1b[0m\r\n`)
         handleRef.current = null
-        window.localStorage.removeItem(SESSION_KEY)
+        clearSessionId()
         setExited(code)
         setStatus("closed")
       }
 
       const tryAttach = async (): Promise<boolean> => {
-        const saved = window.localStorage.getItem(SESSION_KEY)
+        const saved = readSessionId()
         if (!saved || !bridge.attachTerminal) return false
         try {
           const attached = await bridge.attachTerminal(saved, {
@@ -158,13 +173,13 @@ export function TerminalPane({
           }
           if (!attached) {
             // The PTY is gone (process restarted or user pressed Stop all).
-            window.localStorage.removeItem(SESSION_KEY)
+            clearSessionId()
             return false
           }
           if (!attached.alive) {
             attached.handle.detach()
             handleRef.current = null
-            window.localStorage.removeItem(SESSION_KEY)
+            clearSessionId()
             setExited(attached.exitCode)
             setStatus("closed")
             return true
@@ -193,7 +208,7 @@ export function TerminalPane({
         }
         if (handle) {
           handleRef.current = handle
-          window.localStorage.setItem(SESSION_KEY, handle.sessionId)
+          writeSessionId(handle.sessionId)
           if (!handle.alive) return
           setStatus("pty")
           term.onData((data) => handle.write(encoder.encode(data)))
@@ -256,6 +271,9 @@ export function TerminalPane({
       // session id stays in localStorage and a later mount calls term.attach.
       handleRef.current?.detach()
       handleRef.current = null
+      oscTitle.dispose()
+      oscTitle2.dispose()
+      oscClipboard.dispose()
       term.dispose()
       termRef.current = null
     }
@@ -322,7 +340,9 @@ export function TerminalPane({
                 ? `exited${exited === null ? "" : " " + exited}`
                 : "starting"}
         </span>
-        <span className="terminal-cwd">{cwd === "." ? "workspace" : cwd}</span>
+        <span className="terminal-cwd" title={title || undefined}>
+          {title || (cwd === "." ? "workspace" : cwd)}
+        </span>
         {status === "closed" ? (
           <button
             className="btn tiny"

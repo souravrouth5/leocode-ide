@@ -67,7 +67,7 @@ export function Sidebar({
   loading,
   docs,
   activePath,
-  storageInfo,
+  storageInfo: _storageInfo,
   bookmarks,
   recentFiles,
   onOpenDoc,

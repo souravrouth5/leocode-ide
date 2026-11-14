@@ -1,0 +1,24 @@
+/* ============================================================== responsive */
+
+@media (min-width: 720px) {
+  .app {
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .tabbar-item {
+    flex-direction: row;
+    gap: 8px;
+    font-size: 12.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+

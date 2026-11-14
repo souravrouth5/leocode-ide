@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react"
 import type { EditorThemeId } from "../components/editorThemes"
 
 export interface UserSettings {
@@ -83,33 +82,4 @@ export function saveSettings(settings: UserSettings): void {
   } catch {
     // quota exceeded or blocked
   }
-}
-
-export function useUserSettings(): [UserSettings, (update: Partial<UserSettings>) => void] {
-  const [settings, setSettings] = useState<UserSettings>(() => loadSettings())
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const custom = e as CustomEvent<UserSettings>
-      if (custom.detail) {
-        setSettings(custom.detail)
-      } else {
-        setSettings(loadSettings())
-      }
-    }
-    window.addEventListener("leocode:settings-changed", handler)
-    window.addEventListener("storage", handler)
-    return () => {
-      window.removeEventListener("leocode:settings-changed", handler)
-      window.removeEventListener("storage", handler)
-    }
-  }, [])
-
-  const update = (patch: Partial<UserSettings>) => {
-    const next = { ...settings, ...patch }
-    setSettings(next)
-    saveSettings(next)
-  }
-
-  return [settings, update]
 }

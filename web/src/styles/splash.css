@@ -1,0 +1,45 @@
+/* ================================================================== splash */
+
+.splash {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  background: var(--bg);
+}
+
+.splash-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  font-family: ui-monospace, monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(145deg, #4f8cff, #6f5cff);
+  box-shadow: 0 10px 28px rgba(79, 140, 255, 0.35);
+}
+
+.splash-mark.warn {
+  background: linear-gradient(145deg, #ff8a4c, #ff5c5c);
+  box-shadow: 0 10px 28px rgba(255, 92, 92, 0.3);
+}
+
+.splash-name {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.splash-note {
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 13px;
+}
+

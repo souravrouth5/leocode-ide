@@ -1,0 +1,101 @@
+/* ==========================================================================
+   LeoCode — bundled fonts (Task 8)
+   App assets, not a network request. The variable subsets cover 100–900, so
+   the 400/500/600 weights used by the editor and terminal need one file each.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/fira-code.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Roboto Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/roboto-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Code Pro";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/source-code-pro.woff2") format("woff2");
+}
+
+/* ==========================================================================
+   LeoCode — theme tokens
+   The boot script in index.html sets data-theme before first paint, so there is
+   no flash. Everything below only swaps custom properties; no layout changes.
+   ========================================================================== */
+
+/* Android forwards real insets as CSS pixels; these fallbacks keep the browser
+   preview and older WebViews usable. */
+:root {
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+  --ime-bottom: 0px;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --bg-elev: #14171d;
+  --surface: #171b22;
+  --surface-2: #1d222b;
+  --surface-3: #242a35;
+  --border: #262c36;
+  --border-strong: #333a47;
+  --text: #e6e9ef;
+  --text-dim: #b9c0cc;
+  --muted: #8b93a3;
+  --accent: #6f9dff;
+  --accent-strong: #4f8cff;
+  --accent-soft: rgba(111, 157, 255, 0.14);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --term-bg: #0f1115;
+  --term-fg: #d7dae0;
+  --term-cursor: #7aa2f7;
+  --term-selection: #2c3550;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f7f8fa;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f1f3f7;
+  --surface-3: #e7eaf0;
+  --border: #e3e6ec;
+  --border-strong: #d2d7e0;
+  --text: #1b2028;
+  --text-dim: #3f4753;
+  --muted: #6e7787;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.1);
+  --danger: #d92d20;
+  --danger-soft: rgba(217, 45, 32, 0.1);
+  --shadow: 0 16px 40px rgba(20, 28, 45, 0.18);
+  --term-bg: #fbfbfd;
+  --term-fg: #1c2027;
+  --term-cursor: #2563eb;
+  --term-selection: #cfe1ff;
+  color-scheme: light;
+}
+

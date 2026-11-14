@@ -1,9 +1,5 @@
 import { useState } from "react"
-import {
-  FONT_FAMILIES,
-  FONT_SIZES,
-  type UserSettings
-} from "../settings/userSettings"
+import { FONT_FAMILIES, type UserSettings } from "../settings/userSettings"
 import {
   EDITOR_THEMES,
   type EditorThemeId
