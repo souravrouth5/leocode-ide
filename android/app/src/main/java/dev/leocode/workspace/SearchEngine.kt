@@ -65,13 +65,21 @@ class SearchEngine(
         onMatch: (SearchMatch) -> Unit = {}
     ): SearchResult {
         if (query.isEmpty()) return SearchResult(0, false)
-        val cap = maxResults.coerceIn(1, HARD_MAX_RESULTS)
+        val cap = when {
+            maxResults <= 0 -> DEFAULT_MAX_RESULTS
+            maxResults > HARD_MAX_RESULTS -> HARD_MAX_RESULTS
+            else -> maxResults
+        }
         val matcher = GlobMatcher(glob)
-        val needle = if (caseSensitive) query else query.lowercase()
         var count = 0
+        var sawExtra = false
+        var cancelled = false
 
         fun scan(file: File, relative: String, depth: Int): Boolean {
-            if (isCancelled()) return false
+            if (isCancelled()) {
+                cancelled = true
+                return false
+            }
             if (depth > maxDepth) return true
             if (file.isDirectory) {
                 if (file.name in IGNORED_DIRECTORIES) return true
@@ -84,7 +92,6 @@ class SearchEngine(
                 for (child in children.sortedBy { it.name.lowercase() }) {
                     val childRelative = if (relative.isEmpty()) child.name else "$relative/${child.name}"
                     if (!scan(child, childRelative, depth + 1)) return false
-                    if (count >= cap) return false
                 }
                 return true
             }
@@ -105,10 +112,19 @@ class SearchEngine(
             }
             var lineNumber = 1
             for (line in text.lineSequence()) {
-                if (isCancelled()) return false
-                val haystack = if (caseSensitive) line else line.lowercase()
-                var index = haystack.indexOf(needle)
+                if (isCancelled()) {
+                    cancelled = true
+                    return false
+                }
+                // Match on the original line: a locale-dependent lowercase or a
+                // case mapping that changes length would shift `col` (PD-10).
+                var index = line.indexOf(query, 0, ignoreCase = !caseSensitive)
                 while (index >= 0) {
+                    if (count >= cap) {
+                        // One real match beyond the cap means the list was cut.
+                        sawExtra = true
+                        return false
+                    }
                     count += 1
                     onMatch(
                         SearchMatch(
@@ -118,8 +134,11 @@ class SearchEngine(
                             preview = preview(line)
                         )
                     )
-                    if (count >= cap) return false
-                    index = haystack.indexOf(needle, index + needle.length.coerceAtLeast(1))
+                    index = line.indexOf(
+                        query,
+                        index + query.length.coerceAtLeast(1),
+                        ignoreCase = !caseSensitive
+                    )
                 }
                 lineNumber += 1
             }
@@ -127,7 +146,7 @@ class SearchEngine(
         }
 
         scan(root, "", 0)
-        return SearchResult(count, truncated = count >= cap)
+        return SearchResult(count, truncated = sawExtra && !cancelled)
     }
 
     private fun preview(line: String): String {

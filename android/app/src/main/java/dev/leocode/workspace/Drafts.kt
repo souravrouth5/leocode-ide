@@ -95,7 +95,11 @@ class Drafts(
     /** Deletes every draft that belongs to a workspace, e.g. after a workspace delete. */
     fun deleteWorkspace(id: String): Int = synchronized(lock) {
         val dir = directory(id)
-        (dir.listFiles() ?: return 0).count { it.isFile && it.delete() }
+        val removed = (dir.listFiles() ?: return 0).count { it.isFile && it.delete() }
+        // Remove the now-empty directory as well, so a deleted workspace leaves
+        // nothing behind and `drafts.list()` for a re-used id starts clean (PD-09).
+        dir.delete()
+        removed
     }
 
     private fun directory(id: String = workspaceId()): File = File(root, safeComponent(id))

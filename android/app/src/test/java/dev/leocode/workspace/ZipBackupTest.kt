@@ -1,12 +1,14 @@
 package dev.leocode.workspace
 
 import java.io.File
+import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class ZipBackupTest {
@@ -73,7 +75,83 @@ class ZipBackupTest {
     }
 
     @Test
-    fun `restore skips trash directories`() {
+    fun `export skips symlinks outside the root and keeps archiving`() {
+        write("keep.txt", "keep")
+        write("real.txt", "real")
+        val outside = File(createTempDir("zip-outside"), "secret.txt").also { it.writeText("secret") }
+        val escape = File(source, "escape.txt")
+        val alias = File(source, "alias.txt")
+        val linked = try {
+            Files.createSymbolicLink(escape.toPath(), outside.toPath())
+            Files.createSymbolicLink(alias.toPath(), File("real.txt").toPath())
+            true
+        } catch (_: Exception) {
+            false
+        }
+        assumeTrue("this filesystem does not support symbolic links", linked)
+
+        val zip = File(target, "backup.zip")
+        val result = backup.export(source, zip)
+
+        assertEquals(2, result.files)
+        assertEquals(2, result.skipped)
+        val restored = File(target, "restored")
+        backup.restore(zip, restored)
+        assertEquals("keep", File(restored, "keep.txt").readText())
+        assertEquals("real", File(restored, "real.txt").readText())
+        assertFalse(File(restored, "escape.txt").exists())
+        assertFalse(File(restored, "alias.txt").exists())
+    }
+
+    @Test
+    fun `export enforces the byte cap`() {
+        write("big.txt", "x".repeat(100))
+
+        try {
+            ZipBackup(maxExportBytes = 10).export(source, File(target, "backup.zip"))
+            fail("oversized export was accepted")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("too large"))
+        }
+    }
+
+    @Test
+    fun `export enforces the file cap`() {
+        write("a.txt", "a")
+        write("b.txt", "b")
+        write("c.txt", "c")
+
+        try {
+            ZipBackup(maxExportFiles = 2).export(source, File(target, "backup.zip"))
+            fail("oversized file count was accepted")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("too many"))
+        }
+    }
+
+    @Test
+    fun `restore stages temps under the scratch directory and leaves none behind`() {
+        write("a.txt", "a")
+        write("dir/b.txt", "b")
+        val zip = File(target, "backup.zip")
+        backup.export(source, zip)
+        val destination = File(target, "restored")
+        val scratch = File(target, "restore-scratch")
+
+        backup.restore(zip, destination, scratch)
+
+        assertEquals("a", File(destination, "a.txt").readText())
+        assertEquals("b", File(destination, "dir/b.txt").readText())
+        assertTrue(scratch.isDirectory)
+        assertTrue(scratch.listFiles()!!.isEmpty())
+        val leftovers = destination.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".tmp") }
+            .toList()
+        assertTrue("restore left temp files: $leftovers", leftovers.isEmpty())
+    }
+
+    @Test
+    fun `restore ignores trash directories`() {
         val zip = File(target, "trash.zip")
         ZipOutputStream(zip.outputStream()).use { out ->
             out.putNextEntry(ZipEntry(".trash/old.txt"))

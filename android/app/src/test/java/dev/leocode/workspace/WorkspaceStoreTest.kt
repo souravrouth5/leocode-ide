@@ -110,14 +110,92 @@ class WorkspaceStoreTest {
     }
 
     @Test
-    fun `a corrupt index is replaced by the default workspace`() {
+    fun `a corrupt index is quarantined and its directories are recovered`() {
         val index = File(workspace.root, "workspaces.json")
-        index.writeText("{not json")
+        val corrupt = "{not json"
+        index.writeText(corrupt)
+        val recovered = File(workspace.workspacesRoot, "abc123").also { it.mkdirs() }
+        File(recovered, "note.txt").writeText("hello")
+        // Not a valid id, so the sweep must leave it alone.
+        File(workspace.workspacesRoot, "notes space").mkdirs()
 
         val store = store()
 
+        val quarantined = workspace.root.listFiles()!!
+            .filter { it.name.startsWith("workspaces.json.corrupt-") }
+        assertEquals(1, quarantined.size)
+        assertEquals(corrupt, quarantined.single().readText())
+        assertTrue(File(workspace.root, "workspaces.json").isFile)
+        assertTrue(store.list().any { it.id == "abc123" && it.name == "abc123" })
+        assertFalse(store.list().any { it.id == "notes space" })
+        val default = store.list().first { it.id == WorkspaceStore.DEFAULT_ID }
+        assertEquals(WorkspaceStore.DEFAULT_NAME, default.name)
         assertEquals(WorkspaceStore.DEFAULT_ID, store.activeId())
-        assertEquals(1, store.list().size)
+        assertTrue(store.directory(WorkspaceStore.DEFAULT_ID).isDirectory)
+    }
+
+    @Test
+    fun `a directory missing from the index is adopted`() {
+        val first = store()
+        val extra = File(workspace.workspacesRoot, "extra1").also { it.mkdirs() }
+        File(extra, "main.py").writeText("print(1)")
+
+        val reloaded = store()
+
+        val adopted = reloaded.list().firstOrNull { it.id == "extra1" }
+        assertTrue("orphan directory was not adopted", adopted != null)
+        assertEquals("extra1", adopted!!.name)
+        assertEquals(extra.lastModified(), adopted.createdAt)
+        assertTrue(reloaded.list().any { it.id == WorkspaceStore.DEFAULT_ID })
+        assertTrue(first.list().none { it.id == "extra1" })
+    }
+
+    @Test
+    fun `create rolls back the directory when the index cannot be written`() {
+        val store = store()
+        val before = store.list().map { it.id }.toSet()
+        breakIndex()
+
+        try {
+            store.create("Rollback")
+            fail("create succeeded with an unwritable index")
+        } catch (_: IllegalStateException) {
+            // expected
+        }
+
+        assertEquals(before, store.list().map { it.id }.toSet())
+        assertTrue(store.list().none { it.name == "Rollback" })
+        val dirs = workspace.workspacesRoot.listFiles()!!
+            .filter { it.isDirectory }
+            .map { it.name }
+            .toSet()
+        assertEquals(before, dirs)
+    }
+
+    @Test
+    fun `open restores the previous active workspace when persist fails`() {
+        val store = store()
+        val created = store.create("Other")
+        assertEquals(WorkspaceStore.DEFAULT_ID, store.activeId())
+        breakIndex()
+
+        try {
+            store.open(created.id)
+            fail("open succeeded with an unwritable index")
+        } catch (_: IllegalStateException) {
+            // expected
+        }
+
+        assertEquals(WorkspaceStore.DEFAULT_ID, store.activeId())
+        assertTrue(store.directory(WorkspaceStore.DEFAULT_ID).isDirectory)
+    }
+
+    /** Makes `persist()` fail by replacing the index file with a non-empty directory. */
+    private fun breakIndex() {
+        val index = File(workspace.root, "workspaces.json")
+        index.delete()
+        index.mkdirs()
+        File(index, "keep").writeText("x")
     }
 
     @Test

@@ -2,6 +2,7 @@ package dev.leocode.bridge
 
 import dev.leocode.workspace.SearchEngine
 import java.io.File
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -44,7 +45,7 @@ class SearchHandlerTest {
     }
 
     @Test
-    fun `matches stream as search match events and the reply counts them`() {
+    fun `matches stream as batched events and the reply counts them`() {
         file("a.txt", "needle one\nneedle two\n")
         file("b.txt", "nothing")
         val sink = Recorder()
@@ -60,12 +61,38 @@ class SearchHandlerTest {
 
         assertEquals("2", reply["count"]!!.jsonPrimitive.content)
         assertEquals("false", reply["truncated"]!!.jsonPrimitive.content)
-        assertEquals(2, sink.events.size)
-        assertTrue(sink.events.all { it.first == "search.match" })
-        val first = sink.events.first().second.jsonObject
+        assertEquals(listOf("search.matches"), sink.events.map { it.first })
+        val matches = sink.events.single().second as JsonArray
+        assertEquals(2, matches.size)
+        val first = matches[0].jsonObject
         assertEquals("a.txt", first["path"]!!.jsonPrimitive.content)
         assertEquals("1", first["line"]!!.jsonPrimitive.content)
         assertEquals("needle one", first["preview"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `matches are batched at 64 and keep their order`() {
+        file("many.txt", (1..100).joinToString("\n") { "needle $it" })
+        val sink = Recorder()
+
+        val reply = handler.handle(
+            "fs.search",
+            buildJsonObject {
+                put("query", "needle")
+                put("searchId", "batch-1")
+            },
+            sink
+        ).jsonObject
+
+        assertEquals(listOf("search.matches", "search.matches"), sink.events.map { it.first })
+        val first = sink.events[0].second as JsonArray
+        val second = sink.events[1].second as JsonArray
+        assertEquals(64, first.size)
+        assertEquals(36, second.size)
+        val lines = (first + second).map { it.jsonObject["line"]!!.jsonPrimitive.content.toInt() }
+        assertEquals((1..100).toList(), lines)
+        assertEquals("100", reply["count"]!!.jsonPrimitive.content)
+        assertEquals("false", reply["truncated"]!!.jsonPrimitive.content)
     }
 
     @Test

@@ -4,6 +4,7 @@ import dev.leocode.workspace.ZipBackup
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -43,6 +44,14 @@ class SafHandler(
         private const val MAX_WRITE_BYTES = 4 * 1024 * 1024
         private const val BACKUP_NAME = "leocode-backup.zip"
     }
+
+    /**
+     * One heavy SAF operation at a time: export, import and restore all walk the
+     * same workspace and a restore during an export would bake a half-restored
+     * tree into the backup. `saf.open`/`saf.save` are single-document and stay
+     * unlocked.
+     */
+    private val backupLock = AtomicBoolean(false)
 
     override fun methods(): Set<String> = METHODS
 
@@ -149,33 +158,35 @@ class SafHandler(
         respond: (AsyncReply) -> Unit,
         sink: StreamSink
     ) {
-        val request = json.decodePayload(SafImportRequest.serializer(), payload, "saf.importTree")
-        port.importTree(
-            request.dest,
-            onProgress = { files, bytes ->
-                progress(sink, "import", files, bytes)
-            },
-            onResult = { result ->
-                val error = result.exceptionOrNull()
-                if (error != null) {
-                    respond(AsyncReply.Error(safError(error), safMessage(error)))
-                    return@importTree
-                }
-                val tree = result.getOrNull()
-                if (tree == null) {
-                    respond(AsyncReply.Ok(JsonNull))
-                    return@importTree
-                }
-                respond(
-                    AsyncReply.Ok(
-                        json.encodeToJsonElement(
-                            SafImportReply.serializer(),
-                            SafImportReply(tree.path, tree.files, tree.bytes)
+        withBackupLock(respond) { reply ->
+            val request = json.decodePayload(SafImportRequest.serializer(), payload, "saf.importTree")
+            port.importTree(
+                request.dest,
+                onProgress = { files, bytes ->
+                    progress(sink, "import", files, bytes)
+                },
+                onResult = { result ->
+                    val error = result.exceptionOrNull()
+                    if (error != null) {
+                        reply(AsyncReply.Error(safError(error), safMessage(error)))
+                        return@importTree
+                    }
+                    val tree = result.getOrNull()
+                    if (tree == null) {
+                        reply(AsyncReply.Ok(JsonNull))
+                        return@importTree
+                    }
+                    reply(
+                        AsyncReply.Ok(
+                            json.encodeToJsonElement(
+                                SafImportReply.serializer(),
+                                SafImportReply(tree.path, tree.files, tree.bytes)
+                            )
                         )
                     )
-                )
-            }
-        )
+                }
+            )
+        }
     }
 
     private fun exportWorkspace(
@@ -183,44 +194,51 @@ class SafHandler(
         respond: (AsyncReply) -> Unit,
         sink: StreamSink
     ) {
-        val request = json.decodePayload(SafExportRequest.serializer(), payload, "saf.exportWorkspace")
-        val name = request.name?.takeIf { it.isNotBlank() } ?: BACKUP_NAME
-        val archive = try {
-            File(scratchDirectory(), "backup-${UUID.randomUUID()}.zip")
-        } catch (e: IOException) {
-            throw BridgeException(ErrorCode.E_IO, "cannot prepare the backup")
-        }
-        val result = try {
-            backups.export(workspaceRoot(), archive) { files, bytes ->
-                progress(sink, "export", files, bytes)
+        withBackupLock(respond) { reply ->
+            val request = json.decodePayload(
+                SafExportRequest.serializer(),
+                payload,
+                "saf.exportWorkspace"
+            )
+            val name = request.name?.takeIf { it.isNotBlank() } ?: BACKUP_NAME
+            val archive = try {
+                File(scratchDirectory(), "backup-${UUID.randomUUID()}.zip")
+            } catch (e: IOException) {
+                throw BridgeException(ErrorCode.E_IO, "cannot prepare the backup")
             }
-        } catch (e: IOException) {
-            archive.delete()
-            throw BridgeException(ErrorCode.E_IO, "cannot create the backup")
-        }
-        val counts = result
-        port.exportArchive(name, archive, { files, bytes ->
-            progress(sink, "export", files, bytes)
-        }) { exportResult ->
-            archive.delete()
-            val error = exportResult.exceptionOrNull()
-            if (error != null) {
-                respond(AsyncReply.Error(safError(error), safMessage(error)))
-                return@exportArchive
+            val counts = try {
+                backups.export(workspaceRoot(), archive) { files, bytes ->
+                    progress(sink, "export", files, bytes)
+                }
+            } catch (e: IOException) {
+                archive.delete()
+                throw BridgeException(ErrorCode.E_IO, "cannot create the backup")
             }
-            val uri = exportResult.getOrNull()
-            if (uri == null) {
-                respond(AsyncReply.Ok(JsonNull))
-                return@exportArchive
-            }
-            respond(
-                AsyncReply.Ok(
-                    json.encodeToJsonElement(
-                        SafExportReply.serializer(),
-                        SafExportReply(name, uri, counts.files, counts.bytes)
+            port.exportArchive(name, archive, { _, bytes ->
+                // The ZIP is already complete; report its file count, not the
+                // copy-out's byte pacing (PD-21).
+                progress(sink, "export", counts.files, bytes)
+            }) { exportResult ->
+                archive.delete()
+                val error = exportResult.exceptionOrNull()
+                if (error != null) {
+                    reply(AsyncReply.Error(safError(error), safMessage(error)))
+                    return@exportArchive
+                }
+                val uri = exportResult.getOrNull()
+                if (uri == null) {
+                    reply(AsyncReply.Ok(JsonNull))
+                    return@exportArchive
+                }
+                reply(
+                    AsyncReply.Ok(
+                        json.encodeToJsonElement(
+                            SafExportReply.serializer(),
+                            SafExportReply(name, uri, counts.files, counts.bytes)
+                        )
                     )
                 )
-            )
+            }
         }
     }
 
@@ -229,35 +247,71 @@ class SafHandler(
         respond: (AsyncReply) -> Unit,
         sink: StreamSink
     ) {
-        json.decodePayload(SafRestoreRequest.serializer(), payload, "saf.restoreArchive")
-        port.openArchive { result ->
-            val error = result.exceptionOrNull()
-            if (error != null) {
-                respond(AsyncReply.Error(safError(error), safMessage(error)))
-                return@openArchive
+        withBackupLock(respond) { reply ->
+            val request = json.decodePayload(
+                SafRestoreRequest.serializer(),
+                payload,
+                "saf.restoreArchive"
+            )
+            if (!request.confirm) {
+                throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "confirmation is required")
             }
-            val archive = result.getOrNull()
-            if (archive == null) {
-                respond(AsyncReply.Ok(JsonNull))
-                return@openArchive
-            }
-            try {
-                val restored = backups.restore(archive, workspaceRoot()) { files, bytes ->
-                    progress(sink, "restore", files, bytes)
+            port.openArchive { result ->
+                val error = result.exceptionOrNull()
+                if (error != null) {
+                    reply(AsyncReply.Error(safError(error), safMessage(error)))
+                    return@openArchive
                 }
-                respond(
-                    AsyncReply.Ok(
-                        json.encodeToJsonElement(
-                            SafRestoreReply.serializer(),
-                            SafRestoreReply(restored.files, restored.bytes)
+                val archive = result.getOrNull()
+                if (archive == null) {
+                    reply(AsyncReply.Ok(JsonNull))
+                    return@openArchive
+                }
+                try {
+                    val restored = backups.restore(
+                        archive,
+                        workspaceRoot(),
+                        scratchDirectory()
+                    ) { files, bytes ->
+                        progress(sink, "restore", files, bytes)
+                    }
+                    reply(
+                        AsyncReply.Ok(
+                            json.encodeToJsonElement(
+                                SafRestoreReply.serializer(),
+                                SafRestoreReply(restored.files, restored.bytes)
+                            )
                         )
                     )
-                )
-            } catch (e: IOException) {
-                respond(AsyncReply.Error(ErrorCode.E_IO, "the backup could not be restored"))
-            } finally {
-                archive.delete()
+                } catch (e: IOException) {
+                    reply(AsyncReply.Error(ErrorCode.E_IO, "the backup could not be restored"))
+                } finally {
+                    archive.delete()
+                }
             }
+        }
+    }
+
+    private fun withBackupLock(
+        respond: (AsyncReply) -> Unit,
+        block: (reply: (AsyncReply) -> Unit) -> Unit
+    ) {
+        if (!backupLock.compareAndSet(false, true)) {
+            throw BridgeException(ErrorCode.E_BUSY, "another backup operation is running")
+        }
+        val released = AtomicBoolean(false)
+        fun release() {
+            if (released.compareAndSet(false, true)) backupLock.set(false)
+        }
+        val reply: (AsyncReply) -> Unit = { result ->
+            release()
+            respond(result)
+        }
+        try {
+            block(reply)
+        } catch (e: Throwable) {
+            release()
+            throw e
         }
     }
 
@@ -284,6 +338,10 @@ class SafHandler(
         is SecurityException -> ErrorCode.E_PERMISSION
         is java.io.FileNotFoundException -> ErrorCode.E_NOT_FOUND
         is UnsupportedOperationException -> ErrorCode.E_UNSUPPORTED
+        // The import budget throws these with a fixed, user-facing reason: "the
+        // import exceeds the file or size limit" or "the folder is nested too
+        // deeply" (PD-06). Anything else keeps the generic I/O message.
+        is IllegalStateException -> ErrorCode.E_LIMIT
         is java.io.IOException -> ErrorCode.E_IO
         else -> ErrorCode.E_IO
     }
@@ -292,6 +350,8 @@ class SafHandler(
         ErrorCode.E_PERMISSION -> "the document provider denied access"
         ErrorCode.E_NOT_FOUND -> "the selected document is no longer available"
         ErrorCode.E_UNSUPPORTED -> "this build cannot use the system picker for that action"
+        // Only the fixed import reasons reach here; they are not provider text.
+        ErrorCode.E_LIMIT -> error.message ?: "the import exceeds the file or size limit"
         ErrorCode.E_IO -> "the document could not be read or written"
         else -> "the document could not be read or written"
     }

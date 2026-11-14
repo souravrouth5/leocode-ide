@@ -1,5 +1,6 @@
 package dev.leocode.bridge
 
+import dev.leocode.workspace.Drafts
 import dev.leocode.workspace.WorkspaceRecord
 import dev.leocode.workspace.WorkspaceStore
 import kotlinx.serialization.json.Json
@@ -10,12 +11,16 @@ import kotlinx.serialization.json.JsonObject
  * `workspace.*` — multiple projects with a recent list (Task 14).
  *
  * Deletion goes through [WorkspaceStore], which moves the directory to the trash;
- * nothing here can permanently erase a project. Relative `fs.*` paths follow the
- * active workspace chosen by `workspace.open`.
+ * nothing here can permanently erase a project. When a [Drafts] store is wired
+ * in, its per-workspace drafts are purged on delete so the editor cannot offer
+ * recovery for a project that no longer exists (PD-09).
+ *
+ * Relative `fs.*` paths follow the active workspace chosen by `workspace.open`.
  */
 class WorkspaceHandler(
     private val store: WorkspaceStore,
-    private val json: Json = BridgeJson.value
+    private val json: Json = BridgeJson.value,
+    private val drafts: Drafts? = null
 ) : BridgeHandler {
 
     companion object {
@@ -72,7 +77,9 @@ class WorkspaceHandler(
 
         "workspace.delete" -> {
             val request = json.decodePayload(WorkspaceIdRequest.serializer(), payload, method)
-            store.delete(idOf(request.id))
+            val id = idOf(request.id)
+            store.delete(id)
+            drafts?.deleteWorkspace(id)
             json.encodeToJsonElement(WorkspaceOk.serializer(), WorkspaceOk())
         }
 
