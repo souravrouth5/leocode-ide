@@ -220,6 +220,7 @@ export class AndroidBridge implements Bridge {
       const signal = options?.signal
       let timer: number | null = null
       let settled = false
+      let posted = false
 
       const cleanup = () => {
         if (timer !== null) {
@@ -237,14 +238,20 @@ export class AndroidBridge implements Bridge {
         fn(value)
       }
 
-      const fail = (error: AppError, remember: boolean) => {
+      const fail = (error: AppError, remember: boolean, stopWork = false) => {
         this.streams.delete(id)
         this.streamFailures.delete(id)
         if (remember) this.rememberLate(id, method, payload)
         settle(reject, error)
+        // A timed-out search keeps walking on the host unless it is told to
+        // stop; a request that was never posted has nothing to cancel (PD-13).
+        if (stopWork && posted && method === "fs.search") {
+          this.cancelSearchQuietly((payload as { searchId?: unknown } | null)?.searchId)
+        }
       }
 
-      const onAbort = () => fail(new AppError("E_CANCELLED", `${method} was cancelled`), true)
+      const onAbort = () =>
+        fail(new AppError("E_CANCELLED", `${method} was cancelled`), true, true)
 
       this.pending.set(id, {
         resolve: (value) => settle(resolve, value),
@@ -271,6 +278,7 @@ export class AndroidBridge implements Bridge {
               `${method} timed out after ${Math.round(timeoutMs / 1000)} s`,
               true
             ),
+            true,
             true
           )
           if (this.consecutiveTimeouts >= 3) this.disconnect()
@@ -291,6 +299,7 @@ export class AndroidBridge implements Bridge {
       }
       try {
         this.channel.postMessage(text)
+        posted = true
       } catch {
         fail(new AppError("E_IO", `${method} could not be sent`), false)
       }
@@ -409,7 +418,22 @@ export class AndroidBridge implements Bridge {
           /* the install may have finished */
         })
       }
+    } else if (late.method === "fs.search") {
+      // The reply carries the summary, not the id, so use the request payload.
+      this.cancelSearchQuietly(
+        (late.payload as { searchId?: unknown } | null)?.searchId
+      )
     }
+  }
+
+  /** Stop a search the client abandoned; "already gone" is not an error. */
+  private cancelSearchQuietly(searchId: unknown) {
+    if (typeof searchId !== "string" || !searchId) return
+    void this.request("fs.search.cancel", { searchId }, { timeoutMs: 2_000 }).catch(
+      () => {
+        /* the search may already have finished */
+      }
+    )
   }
 
   // ------------------------------------------------------------------ files
@@ -538,7 +562,14 @@ export class AndroidBridge implements Bridge {
       },
       request,
       (event, payload) => {
-        if (event === "search.match") onMatch(payload as SearchMatch)
+        if (event === "search.matches") {
+          if (Array.isArray(payload)) {
+            for (const match of payload) onMatch(match as SearchMatch)
+          }
+        } else if (event === "search.match") {
+          // Older hosts and the mock stream one match per event.
+          onMatch(payload as SearchMatch)
+        }
       }
     )
   }

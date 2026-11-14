@@ -31,13 +31,35 @@ describe("MockBridge parity (W-36)", () => {
     })
   })
 
-  it("never overwrites on mkdir or rename", async () => {
+  it("accepts mkdir on an existing directory but never on a file", async () => {
     const bridge = new MockBridge()
 
+    await expect(bridge.mkdir("src")).resolves.toBeUndefined()
     await expect(bridge.mkdir("README.md")).rejects.toMatchObject({ code: "E_EXISTS" })
-    await expect(bridge.mkdir("src")).rejects.toMatchObject({ code: "E_EXISTS" })
     await expect(bridge.rename("README.md", "main.py")).rejects.toMatchObject({
       code: "E_EXISTS"
+    })
+  })
+
+  it("does not create a directory when its parent is missing", async () => {
+    const bridge = new MockBridge()
+
+    await expect(bridge.mkdir("missing/child")).rejects.toMatchObject({ code: "E_NOT_FOUND" })
+    await expect(bridge.stat("missing")).rejects.toMatchObject({ code: "E_NOT_FOUND" })
+  })
+
+  it("enforces the 4 MB read limit like the host", async () => {
+    const bridge = new MockBridge()
+    // `write` enforces the same cap, so seed the over-size file directly.
+    bridge["nodes"].set("huge.txt", {
+      kind: "file",
+      content: "x".repeat(4 * 1024 * 1024 + 1),
+      mtime: Date.now()
+    })
+
+    await expect(bridge.read("huge.txt")).rejects.toMatchObject({
+      code: "E_LIMIT",
+      message: "file is larger than 4 MB"
     })
   })
 

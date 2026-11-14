@@ -113,7 +113,7 @@ describe("MockBridge Phase D (Tasks 14–16)", () => {
       expect(other).toMatchObject({ content: "other draft", eol: "\r\n" })
       const drafts = await bridge.listDrafts()
       expect(drafts).toHaveLength(1)
-      expect(drafts[0].size).toBe(new TextEncoder().encode("other draft").length)
+      expect(drafts[0].size).toBe("other draft".length)
     })
   })
 
@@ -130,6 +130,16 @@ describe("MockBridge Phase D (Tasks 14–16)", () => {
       await bridge.deleteDraft("a.txt")
       expect(await bridge.readDraft("a.txt")).toBeNull()
       expect(await bridge.listDrafts()).toEqual([])
+    })
+
+    it("reports draft sizes in characters like the host", async () => {
+      const bridge = new MockBridge()
+      const content = "é\n"
+      await bridge.saveDraft("unicode.txt", content, "\n")
+
+      const [draft] = await bridge.listDrafts()
+      expect(draft.size).toBe(content.length)
+      expect(draft.size).not.toBe(new TextEncoder().encode(content).length)
     })
   })
 
@@ -177,16 +187,85 @@ describe("MockBridge Phase D (Tasks 14–16)", () => {
       ).toBe(0)
     })
 
-    it("caps results and reports truncation", async () => {
+    it("matches a name-only glob against the basename in subdirectories", async () => {
       const bridge = new MockBridge()
-      await bridge.write("extra.py", "print(1)\nprint(2)\n")
-      const { matches, summary } = await collect(bridge, "print", { maxResults: 1 })
+      await bridge.write("nested/deep/needle.py", "findme\n")
+      await bridge.write("nested/deep/needle.txt", "findme\n")
 
-      expect(summary).toEqual({ count: 1, truncated: true })
-      expect(matches).toHaveLength(1)
+      const renamed = await collect(bridge, "findme", { glob: "*.py" })
+      expect(renamed.matches.map((match) => match.path)).toEqual([
+        "nested/deep/needle.py"
+      ])
+
+      const trimmed = await collect(bridge, "findme", { glob: "  *.py  " })
+      expect(trimmed.matches.map((match) => match.path)).toEqual([
+        "nested/deep/needle.py"
+      ])
     })
 
-    it("stops after the client cancels the search id", async () => {
+    it("matches a glob with a slash against the full relative path", async () => {
+      const bridge = new MockBridge()
+      await bridge.write("nested/only.py", "findme\n")
+      await bridge.write("other/nested/only.py", "findme\n")
+
+      const nested = await collect(bridge, "findme", { glob: "nested/*.py" })
+      expect(nested.matches.map((match) => match.path)).toEqual(["nested/only.py"])
+
+      // A path glob is never matched against the basename alone.
+      const basename = await collect(bridge, "findme", { glob: "other/only.py" })
+      expect(basename.summary.count).toBe(0)
+    })
+
+    it("skips the host's ignored directory names", async () => {
+      const bridge = new MockBridge()
+      for (const dir of [
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".gradle",
+        "build",
+        "dist",
+        ".idea",
+        ".trash",
+        ".leocode-trash"
+      ]) {
+        await bridge.write(`${dir}/ignored.txt`, "hiddenneedle\n")
+      }
+
+      const { matches, summary } = await collect(bridge, "hiddenneedle", {
+        caseSensitive: true
+      })
+      expect(summary.count).toBe(0)
+      expect(matches).toEqual([])
+    })
+
+    it("reports truncation only when a match beyond the cap exists", async () => {
+      const bridge = new MockBridge()
+      await bridge.write("exact.txt", "needle\nneedle\nneedle\n")
+
+      const exact = await collect(bridge, "needle", { maxResults: 3 })
+      expect(exact.summary).toEqual({ count: 3, truncated: false })
+
+      await bridge.write("exact.txt", "needle\nneedle\nneedle\nneedle\n")
+      const over = await collect(bridge, "needle", { maxResults: 3 })
+      expect(over.summary).toEqual({ count: 3, truncated: true })
+      expect(over.matches).toHaveLength(3)
+    })
+
+    it("treats maxResults 0 as the 500-match default", async () => {
+      const bridge = new MockBridge()
+      await bridge.write("many.txt", `${"needle\n".repeat(501)}`)
+
+      const { matches, summary } = await collect(bridge, "needle", { maxResults: 0 })
+      expect(summary).toEqual({ count: 500, truncated: true })
+      expect(matches).toHaveLength(500)
+    })
+
+    it("stops after the client cancels the search id without reporting truncation", async () => {
       const bridge = new MockBridge()
       await bridge.write("a.txt", "needle\n")
       await bridge.write("b.txt", "needle\n")
@@ -195,11 +274,11 @@ describe("MockBridge Phase D (Tasks 14–16)", () => {
       const summary = await bridge.search("needle", { searchId: "run-1" }, (match) => {
         seen.push(match)
         // `cancelSearch` has no await before it flips the flag, so the next
-        // file iteration sees the cancellation.
+        // match iteration sees the cancellation.
         if (seen.length === 1) void bridge.cancelSearch("run-1")
       })
 
-      expect(summary.truncated).toBe(true)
+      expect(summary.truncated).toBe(false)
       expect(seen).toHaveLength(1)
       await expect(bridge.cancelSearch("run-1")).resolves.toBe(false)
     })
