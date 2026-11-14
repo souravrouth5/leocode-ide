@@ -55,6 +55,9 @@ const NO_RUNTIME =
 
 const encoder = new TextEncoder()
 
+/** Survives a WebView/Activity recreation so the next page can `term.attach`. */
+const SESSION_KEY = "leocode.terminal.session"
+
 export function TerminalPane({
   bridge,
   cwd,
@@ -132,26 +135,66 @@ export function TerminalPane({
     }
 
     void (async () => {
-      try {
+      const onExit = (code: number) => {
+        if (disposed) return
+        term.write(`\r\n\x1b[90m[session ended, exit ${code}]\x1b[0m\r\n`)
+        handleRef.current = null
+        window.localStorage.removeItem(SESSION_KEY)
+        setExited(code)
+        setStatus("closed")
+      }
+
+      const tryAttach = async (): Promise<boolean> => {
+        const saved = window.localStorage.getItem(SESSION_KEY)
+        if (!saved || !bridge.attachTerminal) return false
+        try {
+          const attached = await bridge.attachTerminal(saved, {
+            onData: (bytes) => term.write(bytes),
+            onExit
+          })
+          if (disposed) {
+            attached?.handle.detach()
+            return true
+          }
+          if (!attached) {
+            // The PTY is gone (process restarted or user pressed Stop all).
+            window.localStorage.removeItem(SESSION_KEY)
+            return false
+          }
+          if (!attached.alive) {
+            attached.handle.detach()
+            handleRef.current = null
+            window.localStorage.removeItem(SESSION_KEY)
+            setExited(attached.exitCode)
+            setStatus("closed")
+            return true
+          }
+          handleRef.current = attached.handle
+          setStatus("pty")
+          term.onData((data) => attached.handle.write(encoder.encode(data)))
+          term.focus()
+          return true
+        } catch {
+          return false
+        }
+      }
+
+      const startPty = async () => {
         const handle = await bridge.openTerminal({
           cwd,
           cols: size.cols,
           rows: size.rows,
           onData: (bytes) => term.write(bytes),
-          onExit: (code) => {
-            if (disposed) return
-            term.write(`\r\n\x1b[90m[session ended, exit ${code}]\x1b[0m\r\n`)
-            handleRef.current = null
-            setExited(code)
-            setStatus("closed")
-          }
+          onExit
         })
         if (disposed) {
-          handle?.close()
+          handle?.detach()
           return
         }
         if (handle) {
           handleRef.current = handle
+          window.localStorage.setItem(SESSION_KEY, handle.sessionId)
+          if (!handle.alive) return
           setStatus("pty")
           term.onData((data) => handle.write(encoder.encode(data)))
           term.write("\x1b[2J\x1b[H")
@@ -182,6 +225,10 @@ export function TerminalPane({
             }
           })
         }
+      }
+
+      try {
+        if (!(await tryAttach())) await startPty()
       } catch (error) {
         if (disposed) return
         setStatus("fallback")
@@ -205,7 +252,9 @@ export function TerminalPane({
       disposed = true
       observer.disconnect()
       if (polling !== null) window.cancelAnimationFrame(polling)
-      handleRef.current?.close()
+      // Keep the PTY alive: background survival is the point of Task 10. The
+      // session id stays in localStorage and a later mount calls term.attach.
+      handleRef.current?.detach()
       handleRef.current = null
       term.dispose()
       termRef.current = null

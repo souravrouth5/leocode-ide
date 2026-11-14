@@ -144,6 +144,26 @@ data class TermAckRequest(val sessionId: String? = null, val bytes: Int? = null)
 @Serializable
 data class TermCloseReply(val closed: Boolean)
 
+/** `term.attach` reply. Scrollback is base64 terminal bytes. */
+@Serializable
+data class TermAttachReply(
+    val sessionId: String,
+    val scrollback: String,
+    val alive: Boolean,
+    val exitCode: Int
+)
+
+/** One entry in the `term.list` array. */
+@Serializable
+data class TermInfo(
+    val sessionId: String,
+    val root: Boolean = false,
+    val alive: Boolean,
+    val title: String,
+    val pid: Int,
+    val cwd: String
+)
+
 @Serializable
 data class TermData(val b64: String)
 

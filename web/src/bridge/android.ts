@@ -1,20 +1,25 @@
 import {
-  BridgeError,
+  AppError,
   isErrorCode,
   type AppInfo,
   type Bridge,
   type FileEntry,
   type ProcessEvent,
+  type RequestOptions,
   type RunHandle,
   type RuntimeInstallHandle,
   type RuntimeInstallProgress,
   type SafDocument,
   type StorageInfo,
+  type TerminalAttach,
+  type TerminalAttachOptions,
   type TerminalHandle,
+  type TerminalInfo,
   type TerminalOptions,
   type ThemeMode,
   type ThemeState
 } from "./types"
+import { isIdempotentRead, timeoutMsFor } from "./timeouts"
 
 /** The object injected by WebViewCompat.addWebMessageListener. */
 export interface InjectedChannel {
@@ -33,45 +38,155 @@ interface Reply {
 
 type StreamHandler = (event: string, payload: any) => void
 
+interface Pending {
+  resolve: (value: unknown) => void
+  reject: (reason: unknown) => void
+  cleanup: () => void
+}
+
+/**
+ * The real bridge, Task 11.
+ *
+ * Every request carries a per-method timeout, an optional `AbortSignal` and a
+ * pending slot that is always removed: a late reply after a timeout, abort or
+ * disconnect is ignored instead of resolving a settled promise. Idempotent reads
+ * are retried once after a timeout; writes and streams never are.
+ */
 export class AndroidBridge implements Bridge {
   readonly mode = "android" as const
 
   private seq = 0
-  private readonly pending = new Map<
-    string,
-    { resolve: (value: any) => void; reject: (reason: unknown) => void }
-  >()
+  private readonly pending = new Map<string, Pending>()
   private readonly streams = new Map<string, StreamHandler>()
   private readonly themeListeners = new Set<(state: ThemeState) => void>()
+  private readonly onDisconnect = () => this.disconnect()
 
   constructor(private readonly channel: InjectedChannel) {
     channel.onmessage = (event) => this.receive(event.data)
     ;(window as any).__leocodeThemeEvent = (state: ThemeState) => {
       this.themeListeners.forEach((listener) => listener(state))
     }
+    window.addEventListener("leocode:bridge-disconnected", this.onDisconnect)
+  }
+
+  /** Reject everything outstanding, for a detached WebView or renderer loss. */
+  disconnect() {
+    const outstanding = [...this.pending.values()]
+    this.pending.clear()
+    this.streams.clear()
+    const error = new AppError(
+      "E_BRIDGE_DISCONNECTED",
+      "The LeoCode host stopped responding. Reload the page.",
+      true
+    )
+    for (const entry of outstanding) {
+      entry.cleanup()
+      entry.reject(error)
+    }
   }
 
   // ------------------------------------------------------------- transport
 
-  private send<T>(method: string, payload: unknown, onEvent?: StreamHandler): {
-    id: string
-    result: Promise<T>
-  } {
+  private send<T>(
+    method: string,
+    payload: unknown,
+    onEvent?: StreamHandler,
+    options?: RequestOptions
+  ): { id: string; result: Promise<T> } {
     const id = String(++this.seq)
     if (onEvent) this.streams.set(id, onEvent)
 
     const result = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const signal = options?.signal
+      let timer: number | null = null
+      let settled = false
+
+      const cleanup = () => {
+        if (timer !== null) {
+          window.clearTimeout(timer)
+          timer = null
+        }
+        signal?.removeEventListener("abort", onAbort)
+      }
+
+      const settle = (fn: (value: any) => void, value: unknown) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        this.pending.delete(id)
+        fn(value)
+      }
+
+      const fail = (error: AppError) => {
+        this.streams.delete(id)
+        settle(reject, error)
+      }
+
+      const onAbort = () => fail(new AppError("E_CANCELLED", `${method} was cancelled`))
+
+      this.pending.set(id, {
+        resolve: (value) => settle(resolve, value),
+        reject: (error) => {
+          this.streams.delete(id)
+          settle(reject, error)
+        },
+        cleanup
+      })
+
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
+
+      const timeoutMs = timeoutMsFor(method, options)
+      if (timeoutMs !== null) {
+        timer = window.setTimeout(
+          () =>
+            fail(
+              new AppError(
+                "E_TIMEOUT",
+                `${method} timed out after ${Math.round(timeoutMs / 1000)} s`,
+                true
+              )
+            ),
+          timeoutMs
+        )
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
+
       try {
         this.channel.postMessage(JSON.stringify({ v: 1, id, method, payload }))
       } catch (error) {
-        this.pending.delete(id)
         this.streams.delete(id)
-        reject(error)
+        settle(reject, error)
       }
     })
 
     return { id, result }
+  }
+
+  /**
+   * Sends a request, retrying an idempotent read once after a timeout. The
+   * retry only happens while the caller's signal is still live.
+   */
+  private request<T>(
+    method: string,
+    payload: unknown,
+    options?: RequestOptions,
+    onEvent?: StreamHandler
+  ): Promise<T> {
+    const attempt = () => this.send<T>(method, payload, onEvent, options).result
+    return attempt().catch((error: unknown) => {
+      if (!this.canRetry(method, error, options)) throw error
+      return attempt()
+    })
+  }
+
+  private canRetry(method: string, error: unknown, options?: RequestOptions): boolean {
+    if (!(error instanceof AppError) || error.code !== "E_TIMEOUT") return false
+    if (!isIdempotentRead(method)) return false
+    if (options?.signal?.aborted) return false
+    return timeoutMsFor(method, options) !== null
   }
 
   private receive(raw: string) {
@@ -90,16 +205,14 @@ export class AndroidBridge implements Bridge {
     if (!message.id) return
     const pending = this.pending.get(message.id)
     if (!pending) return
-    this.pending.delete(message.id)
 
     if (message.ok) {
       pending.resolve(message.payload)
     } else {
-      this.streams.delete(message.id)
       // An unknown code from the host is a contract mismatch, not a user error.
       const code = message.error?.code
       pending.reject(
-        new BridgeError(
+        new AppError(
           isErrorCode(code) ? code : "E_INTERNAL",
           message.error?.message ?? "unknown bridge error"
         )
@@ -109,33 +222,33 @@ export class AndroidBridge implements Bridge {
 
   // ------------------------------------------------------------------ files
 
-  async info(): Promise<AppInfo> {
-    return this.send<AppInfo>("app.info", {}).result
+  async info(options?: RequestOptions): Promise<AppInfo> {
+    return this.request<AppInfo>("app.info", {}, options)
   }
 
-  async list(path: string): Promise<FileEntry[]> {
-    return this.send<FileEntry[]>("fs.list", { path }).result
+  async list(path: string, options?: RequestOptions): Promise<FileEntry[]> {
+    return this.request<FileEntry[]>("fs.list", { path }, options)
   }
 
-  async read(path: string): Promise<string> {
-    const reply = await this.send<{ content: string }>("fs.read", { path }).result
+  async read(path: string, options?: RequestOptions): Promise<string> {
+    const reply = await this.request<{ content: string }>("fs.read", { path }, options)
     return reply.content
   }
 
-  async write(path: string, content: string): Promise<void> {
-    await this.send("fs.write", { path, content }).result
+  async write(path: string, content: string, options?: RequestOptions): Promise<void> {
+    await this.request("fs.write", { path, content }, options)
   }
 
-  async mkdir(path: string): Promise<void> {
-    await this.send("fs.mkdir", { path }).result
+  async mkdir(path: string, options?: RequestOptions): Promise<void> {
+    await this.request("fs.mkdir", { path }, options)
   }
 
-  async remove(path: string): Promise<void> {
-    await this.send("fs.delete", { path }).result
+  async remove(path: string, options?: RequestOptions): Promise<void> {
+    await this.request("fs.delete", { path }, options)
   }
 
-  async rename(from: string, to: string): Promise<void> {
-    await this.send("fs.rename", { from, to }).result
+  async rename(from: string, to: string, options?: RequestOptions): Promise<void> {
+    await this.request("fs.rename", { from, to }, options)
   }
 
   // --------------------------------------------------------------- processes
@@ -144,18 +257,24 @@ export class AndroidBridge implements Bridge {
     argv: string[],
     cwd: string,
     onEvent: (event: ProcessEvent) => void,
-    onStart?: (handle: RunHandle) => void
+    onStart?: (handle: RunHandle) => void,
+    options?: RequestOptions
   ): Promise<number> {
     let finish: (code: number) => void = () => {}
     const exit = new Promise<number>((resolve) => {
       finish = resolve
     })
 
-    const { id, result } = this.send<{ jobId: string }>("proc.run", { argv, cwd }, (event, payload) => {
-      if (event === "proc.stdout") onEvent({ stream: "stdout", data: payload.data })
-      else if (event === "proc.stderr") onEvent({ stream: "stderr", data: payload.data })
-      else if (event === "proc.exit") finish(payload.code ?? 0)
-    })
+    const { id, result } = this.send<{ jobId: string }>(
+      "proc.run",
+      { argv, cwd },
+      (event, payload) => {
+        if (event === "proc.stdout") onEvent({ stream: "stdout", data: payload.data })
+        else if (event === "proc.stderr") onEvent({ stream: "stderr", data: payload.data })
+        else if (event === "proc.exit") finish(payload.code ?? 0)
+      },
+      options
+    )
 
     let reply: { jobId: string }
     try {
@@ -167,7 +286,9 @@ export class AndroidBridge implements Bridge {
 
     onStart?.({
       cancel: () => {
-        void this.send("proc.cancel", { jobId: reply.jobId }).result.catch(() => {})
+        void this.request("proc.cancel", { jobId: reply.jobId }).catch(() => {
+          /* cancellation is best effort; the exit event is authoritative */
+        })
       }
     })
 
@@ -176,12 +297,12 @@ export class AndroidBridge implements Bridge {
 
   // ----------------------------------------------------------------- theme
 
-  async getTheme(): Promise<ThemeState> {
-    return this.send<ThemeState>("app.theme.get", {}).result
+  async getTheme(options?: RequestOptions): Promise<ThemeState> {
+    return this.request<ThemeState>("app.theme.get", {}, options)
   }
 
-  async setTheme(mode: ThemeMode): Promise<ThemeState> {
-    return this.send<ThemeState>("app.theme.set", { mode }).result
+  async setTheme(mode: ThemeMode, options?: RequestOptions): Promise<ThemeState> {
+    return this.request<ThemeState>("app.theme.set", { mode }, options)
   }
 
   onThemeChanged(listener: (state: ThemeState) => void): () => void {
@@ -191,86 +312,116 @@ export class AndroidBridge implements Bridge {
 
   // -------------------------------------------------------------- terminal
 
-  async openTerminal(options: TerminalOptions): Promise<TerminalHandle | null> {
-    let sessionId = ""
-    let closed = false
-    // Initial credit is 256 KB. Data can arrive before the open reply assigns
-    // sessionId, so hold the byte count until the id is known.
-    let pendingAck = 0
-    const ack = (bytes: number) => {
-      if (bytes <= 0) return
-      if (!sessionId) {
-        pendingAck += bytes
-        return
-      }
-      void this.send("term.ack", { sessionId, bytes }).result.catch(() => {})
-    }
-    // IME/user input arrives in small bursts; coalesce to at most one bridge
-    // message per frame so typing never floods the WebView channel.
-    let queued: Uint8Array[] = []
-    let flushScheduled = false
-    const flush = () => {
-      flushScheduled = false
-      if (queued.length === 0 || closed) return
-      const batch = queued
-      queued = []
-      const total = batch.reduce((sum, part) => sum + part.length, 0)
-      const joined = new Uint8Array(total)
-      let offset = 0
-      for (const part of batch) {
-        joined.set(part, offset)
-        offset += part.length
-      }
-      void this.send("term.write", { sessionId, b64: bytesToBase64(joined) }).result.catch(
-        () => {}
-      )
-    }
+  async openTerminal(
+    options: TerminalOptions,
+    request?: RequestOptions
+  ): Promise<TerminalHandle | null> {
+    const channel = new TerminalChannel(
+      (method, payload) => {
+        void this.request(method, payload).catch(() => {
+          /* stream cleanup is handled by term.exit / term.attach */
+        })
+      },
+      options.onData,
+      options.onExit,
+      false
+    )
 
     const { id, result } = this.send<{ sessionId: string }>(
       "term.open",
       { cwd: options.cwd, cols: options.cols, rows: options.rows },
       (event, payload) => {
         if (event === "term.data") {
-          const chunk = base64ToBytes(payload.b64 ?? "")
-          options.onData(chunk)
-          ack(chunk.length)
+          channel.receive(base64ToBytes(payload.b64 ?? ""))
         } else if (event === "term.exit") {
           this.streams.delete(id)
-          options.onExit(payload.code ?? -1)
+          channel.receiveExit(payload.code ?? -1)
         }
-      }
+      },
+      { ...request, signal: request?.signal ?? options.signal }
+    )
+    channel.bind(() => this.streams.delete(id))
+
+    let reply: { sessionId: string }
+    try {
+      reply = await result
+    } catch (error) {
+      this.streams.delete(id)
+      channel.detach()
+      throw error
+    }
+    channel.setSession(reply.sessionId)
+    return channel.handle()
+  }
+
+  async attachTerminal(
+    sessionId: string,
+    options: TerminalAttachOptions,
+    request?: RequestOptions
+  ): Promise<TerminalAttach | null> {
+    const channel = new TerminalChannel(
+      (method, payload) => {
+        void this.request(method, payload).catch(() => {
+          /* the PTY is gone; term.exit drives the UI */
+        })
+      },
+      options.onData,
+      options.onExit,
+      true
     )
 
-    const reply = await result
-    sessionId = reply.sessionId
-    if (pendingAck > 0) {
-      const bytes = pendingAck
-      pendingAck = 0
-      ack(bytes)
-    }
-
-    return {
-      sessionId,
-      write: (data) => {
-        if (closed || data.length === 0) return
-        queued.push(data)
-        if (!flushScheduled) {
-          flushScheduled = true
-          requestAnimationFrame(flush)
+    const { id, result } = this.send<{
+      sessionId: string
+      scrollback: string
+      alive: boolean
+      exitCode: number
+    }>(
+      "term.attach",
+      { sessionId },
+      (event, payload) => {
+        if (event === "term.data") {
+          channel.receive(base64ToBytes(payload.b64 ?? ""))
+        } else if (event === "term.exit") {
+          this.streams.delete(id)
+          channel.receiveExit(payload.code ?? -1)
         }
       },
-      resize: (cols, rows) => {
-        if (closed) return
-        void this.send("term.resize", { sessionId, cols, rows }).result.catch(() => {})
-      },
-      close: () => {
-        if (closed) return
-        flush()
-        closed = true
-        this.streams.delete(id)
-        void this.send("term.close", { sessionId }).result.catch(() => {})
+      request
+    )
+    channel.bind(() => this.streams.delete(id))
+
+    let reply: { sessionId?: string; scrollback?: string; alive?: boolean; exitCode?: number }
+    try {
+      reply = await result
+    } catch (error) {
+      this.streams.delete(id)
+      channel.detach()
+      if (
+        error instanceof AppError &&
+        (error.code === "E_NOT_FOUND" || error.code === "E_BRIDGE_DISCONNECTED")
+      ) {
+        return null
       }
+      throw error
     }
+
+    channel.setSession(reply.sessionId || sessionId)
+    // Scrollback first, then live events that arrived while the reply was in flight.
+    channel.deliverScrollback(base64ToBytes(reply.scrollback ?? ""))
+    channel.markReady()
+
+    const ended = channel.exited
+    const alive = Boolean(reply.alive) && ended === null
+    if (!alive) channel.detach()
+    return {
+      handle: channel.handle(),
+      alive,
+      exitCode: ended ?? reply.exitCode ?? -1
+    }
+  }
+
+  async listTerminals(options?: RequestOptions): Promise<TerminalInfo[]> {
+    return this.request<TerminalInfo[]>("term.list", {}, options)
   }
 
   // --------------------------------------------------------------- runtimes
@@ -278,19 +429,23 @@ export class AndroidBridge implements Bridge {
   async installRuntime(
     id: string,
     onProgress: (progress: RuntimeInstallProgress) => void,
-    onStart?: (handle: RuntimeInstallHandle) => void
+    onStart?: (handle: RuntimeInstallHandle) => void,
+    options?: RequestOptions
   ): Promise<void> {
     const { id: requestId, result } = this.send<{ installed: boolean }>(
       "runtime.install",
       { id },
       (event, payload) => {
         if (event === "runtime.progress") onProgress(payload as RuntimeInstallProgress)
-      }
+      },
+      options
     )
 
     onStart?.({
       cancel: () => {
-        void this.send("runtime.cancel", { id }).result.catch(() => {})
+        void this.request("runtime.cancel", { id }).catch(() => {
+          /* the install's own progress/exit drives the UI */
+        })
       }
     })
 
@@ -303,27 +458,191 @@ export class AndroidBridge implements Bridge {
 
   // -------------------------------------------------------- storage & SAF
 
-  async getStorageInfo(): Promise<StorageInfo> {
-    return this.send<StorageInfo>("storage.info", {}).result
+  async getStorageInfo(options?: RequestOptions): Promise<StorageInfo> {
+    return this.request<StorageInfo>("storage.info", {}, options)
   }
 
-  async requestStoragePermission(): Promise<boolean> {
-    const reply = await this.send<{ granted: boolean }>("storage.requestPermission", {}).result
+  async requestStoragePermission(options?: RequestOptions): Promise<boolean> {
+    const reply = await this.request<{ granted: boolean }>(
+      "storage.requestPermission",
+      {},
+      options
+    )
     return Boolean(reply.granted)
   }
 
-  async openSafDocument(): Promise<SafDocument | null> {
-    return this.send<SafDocument | null>("saf.open", {}).result
+  async openSafDocument(options?: RequestOptions): Promise<SafDocument | null> {
+    return this.request<SafDocument | null>("saf.open", {}, options)
   }
 
   async saveSafDocument(
     filename: string,
-    content: string
+    content: string,
+    options?: RequestOptions
   ): Promise<{ name: string; uri: string } | null> {
-    return this.send<{ name: string; uri: string } | null>("saf.save", {
-      name: filename,
-      content
-    }).result
+    return this.request<{ name: string; uri: string } | null>(
+      "saf.save",
+      { name: filename, content },
+      options
+    )
+  }
+}
+
+/**
+ * One bridge stream for a terminal. Keeps the 256 KB ack window, coalesces typed
+ * input to one message per frame, and can hold live data until attach has
+ * delivered its scrollback reply.
+ */
+class TerminalChannel {
+  private sessionId = ""
+  private closed = false
+  private ready = false
+  private exitedCode: number | null = null
+  private pendingAck = 0
+  private queued: Uint8Array[] = []
+  private flushScheduled = false
+  private early: Uint8Array[] = []
+  private pendingExit: number | null = null
+  private detachStream: () => void = () => {}
+
+  constructor(
+    private readonly post: (method: string, payload: unknown) => void,
+    private readonly onData: (bytes: Uint8Array) => void,
+    private readonly onExit: (code: number) => void,
+    private readonly holdUntilReady: boolean
+  ) {}
+
+  bind(detachStream: () => void) {
+    this.detachStream = detachStream
+  }
+
+  setSession(sessionId: string) {
+    this.sessionId = sessionId
+    if (this.pendingAck > 0) {
+      const bytes = this.pendingAck
+      this.pendingAck = 0
+      this.post("term.ack", { sessionId, bytes })
+    }
+    if (this.queued.length > 0) this.scheduleFlush()
+  }
+
+  get exited(): number | null {
+    return this.exitedCode
+  }
+
+  /** Live data; during attach this waits for [markReady]. */
+  receive(bytes: Uint8Array) {
+    if (this.closed || bytes.length === 0) return
+    if (this.holdUntilReady && !this.ready) {
+      this.early.push(bytes)
+      return
+    }
+    this.deliver(bytes)
+  }
+
+  /** Attach scrollback is part of the reply, so it is not credited twice. */
+  deliverScrollback(bytes: Uint8Array) {
+    if (bytes.length === 0) return
+    this.onData(bytes)
+  }
+
+  markReady() {
+    if (this.ready) return
+    this.ready = true
+    const early = this.early
+    this.early = []
+    for (const chunk of early) this.deliver(chunk)
+    const exit = this.pendingExit
+    this.pendingExit = null
+    if (exit !== null) this.finish(exit)
+  }
+
+  receiveExit(code: number) {
+    if (this.closed) return
+    if (this.holdUntilReady && !this.ready) {
+      this.pendingExit = code
+      return
+    }
+    this.finish(code)
+  }
+
+  write(data: Uint8Array) {
+    if (this.closed || !this.sessionId || data.length === 0) return
+    this.queued.push(data)
+    this.scheduleFlush()
+  }
+
+  resize(cols: number, rows: number) {
+    if (this.closed || !this.sessionId) return
+    this.post("term.resize", { sessionId: this.sessionId, cols, rows })
+  }
+
+  detach() {
+    if (this.closed) return
+    this.closed = true
+    this.detachStream()
+  }
+
+  close() {
+    if (this.closed) return
+    this.flush()
+    this.closed = true
+    this.detachStream()
+    if (this.sessionId) this.post("term.close", { sessionId: this.sessionId })
+  }
+
+  handle(): TerminalHandle {
+    return {
+      sessionId: this.sessionId,
+      alive: this.exitedCode === null,
+      write: (data) => this.write(data),
+      resize: (cols, rows) => this.resize(cols, rows),
+      close: () => this.close(),
+      detach: () => this.detach()
+    }
+  }
+
+  private deliver(bytes: Uint8Array) {
+    if (this.closed) return
+    this.onData(bytes)
+    this.ack(bytes.length)
+  }
+
+  private ack(bytes: number) {
+    if (bytes <= 0) return
+    if (!this.sessionId) {
+      this.pendingAck += bytes
+      return
+    }
+    this.post("term.ack", { sessionId: this.sessionId, bytes })
+  }
+
+  private finish(code: number) {
+    this.exitedCode = code
+    this.closed = true
+    this.detachStream()
+    this.onExit(code)
+  }
+
+  private scheduleFlush() {
+    if (this.flushScheduled) return
+    this.flushScheduled = true
+    window.requestAnimationFrame(() => this.flush())
+  }
+
+  private flush() {
+    this.flushScheduled = false
+    if (this.closed || !this.sessionId || this.queued.length === 0) return
+    const batch = this.queued
+    this.queued = []
+    const total = batch.reduce((sum, part) => sum + part.length, 0)
+    const joined = new Uint8Array(total)
+    let offset = 0
+    for (const part of batch) {
+      joined.set(part, offset)
+      offset += part.length
+    }
+    this.post("term.write", { sessionId: this.sessionId, b64: bytesToBase64(joined) })
   }
 }
 

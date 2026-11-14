@@ -7,6 +7,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -99,6 +100,36 @@ class ProcessSupervisorTest {
             assertTrue("cancel did not finish", done.await(5, TimeUnit.SECONDS))
             assertEquals(1, codes.size)
             assertFalse(supervisor.cancel("no-such-job"))
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `writes a pidfile while a job runs and removes it on exit`() {
+        val store = PidFileStore(Files.createTempDirectory("leocode-pid").toFile())
+        val done = CountDownLatch(1)
+        val supervisor = ProcessSupervisor(pidFiles = store)
+
+        try {
+            val handle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "sleep 5"),
+                    cwd = workDir(),
+                    timeoutMs = 30_000
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = { done.countDown() }
+            )
+
+            assertTrue(
+                "pidfile missing for ${handle.jobId}",
+                store.list().any { it.name == "${handle.jobId}.pid" }
+            )
+            assertTrue(supervisor.cancel(handle.jobId))
+            assertTrue("cancel did not finish", done.await(5, TimeUnit.SECONDS))
+            assertTrue("pidfile was not removed", store.list().isEmpty())
         } finally {
             supervisor.close()
         }

@@ -25,7 +25,7 @@
     root.style.backgroundColor = dark ? DARK : LIGHT
     var meta = document.querySelector('meta[name="theme-color"]')
     if (meta) meta.setAttribute("content", dark ? DARK : LIGHT)
-  } catch (e) {
+  } catch {
     document.documentElement.dataset.theme = "dark"
   }
 })()

@@ -171,18 +171,23 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 
 ## Background survival and lifecycle (Task 10)
 
+> JVM tests: `RingBufferTest` (drop-oldest + tail of oversized write), `TerminalRegistryTest`
+> (scrollback snapshot, live attach, detach/reattach, exited session), `OrphanReaperTest`
+> (SIGTERM → SIGKILL, recycled pid ignored) and the pidfile case in `ProcessSupervisorTest`
+> pass. Device runs on 2026-11-14 used an APK built from the synced web bundle.
+
 | Test | D1 | D2 |
 |---|---|---|
-| Foreground notification "N processes running" + Stop all | | |
-| Notification permission prompt (A13+, targetSdk ≤ 32 behaviour) | N/A | **not shown** — no channel yet; permission grant and app importance not measured; Task 10 creates the first channel |
-| `sleep 600; echo done` survives 10 min in background | | |
-| Terminal reattaches with scrollback (`term.attach`) | | |
-| Survives rotation / theme change | | |
-| Phantom-process killer effect (A12+) | N/A | |
-| Root option: `max_phantom_processes` applied | N/A | |
-| MIUI "no restrictions" + autostart documented | | N/A |
-| low-memory kill behaviour | | |
-| storage pressure (< 500 MB) | | |
+| Foreground notification "N processes running" + Stop all | **PASS** — `isForeground=true`, notification `1 process running` with the Stop-all action (`docs/device-reports/20261114-160039-devicectl-*`) | **PASS** — same dump (`docs/device-reports/20261114-160036-devicectl-*`) |
+| Notification permission prompt (A13+, targetSdk ≤ 32 behaviour) | N/A | **PASS** — dialog shown on the first job, then remembered; app importance not measured |
+| `sleep 600; echo done` survives 10 min in background | **PASS** — the shell (pid 7638) stayed alive through rotation and a forced Activity recreation; adb `input text` duplicates characters on this WebView, so the typed line is garbled (see report) | **PASS** — typed at 15:22, backgrounded >10 min, returned at 15:34: `done` plus a fresh prompt, no new banner |
+| Terminal reattaches with scrollback (`term.attach`) | **PASS** — same pid before/after recreation, scrollback replayed (`...-155805-d1-reattach-fresh-*.png`) | **PASS** — reattached from background (`...-153434-task10-done-*.png`) |
+| Survives rotation / theme change | **PASS** — portrait→landscape→portrait, then `wm density` recreation; pid unchanged | not needed (covered by the background/reattach run) |
+| Phantom-process killer effect (A12+) | N/A | pending |
+| Root option: `max_phantom_processes` applied | N/A | pending |
+| MIUI "no restrictions" + autostart documented | **PASS** — Settings → Environment (`SettingsDialog.tsx`) | N/A |
+| low-memory kill behaviour | pending | pending |
+| storage pressure (< 500 MB) | pending | pending |
 | thermal throttling during long job | | |
 
 ## Crash recovery and errors (Tasks 8, 11, 12)

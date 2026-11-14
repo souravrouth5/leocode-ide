@@ -10,6 +10,15 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Plain browser script copied verbatim into the shipped assets (Task 8).
+    files: ["public/**/*.js"],
+    languageOptions: {
+      globals: {
+        ...globals.browser
+      }
+    }
+  },
+  {
     files: ["src/**/*.{ts,tsx}"],
     languageOptions: {
       globals: {

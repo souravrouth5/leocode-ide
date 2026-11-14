@@ -1,0 +1,189 @@
+package dev.leocode.core
+
+import java.nio.file.Files
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TerminalRegistryTest {
+
+    /** A PTY whose output and lifetime the test controls. */
+    private class FakePty(override val pid: Int = 4242) : PtyProcess {
+        private val output = LinkedBlockingQueue<ByteArray>()
+        private val exited = CountDownLatch(1)
+
+        @Volatile
+        private var closed = false
+
+        override val isClosed: Boolean get() = closed
+
+        fun emit(text: String) {
+            output.put(text.toByteArray(Charsets.UTF_8))
+        }
+
+        override fun write(bytes: ByteArray): Int = bytes.size
+
+        override fun readBlocking(maxBytes: Int): ByteArray? {
+            // LinkedBlockingQueue rejects null, so destroy() wakes the reader with
+            // an empty chunk and the closed flag turns that into EOF.
+            val chunk = output.take()
+            if (closed && chunk.isEmpty()) return null
+            return chunk
+        }
+
+        override fun resize(rows: Int, cols: Int) = Unit
+
+        override fun waitFor(): Int {
+            exited.await()
+            return 0
+        }
+
+        override fun destroy() {
+            if (closed) return
+            closed = true
+            output.offer(ByteArray(0))
+            exited.countDown()
+        }
+    }
+
+    private class Collector : TerminalRegistry.Listener {
+        val chunks = CopyOnWriteArrayList<ByteArray>()
+        val exits = CopyOnWriteArrayList<Int>()
+        val exited = CountDownLatch(1)
+
+        override fun data(bytes: ByteArray) {
+            chunks += bytes
+        }
+
+        override fun exit(code: Int) {
+            exits += code
+            exited.countDown()
+        }
+
+        fun text(): String = chunks.joinToString("") { String(it, Charsets.UTF_8) }
+    }
+
+    private fun workDir() = Files.createTempDirectory("leocode-term").toFile()
+
+    private fun awaitUntil(timeoutMs: Long = 2_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (condition()) return
+            Thread.sleep(10)
+        }
+        assertTrue("condition was not met within ${timeoutMs}ms", condition())
+    }
+
+    @Test
+    fun `snapshots scrollback and streams live output after attach`() {
+        val fake = FakePty()
+        val counts = CopyOnWriteArrayList<Int>()
+        val registry = TerminalRegistry(
+            spawn = { _, _, _, _ -> fake },
+            onCountChanged = { counts += it }
+        )
+        try {
+            val opened = registry.open(workDir(), emptyMap(), 24, 80)
+            assertNotNull(opened)
+            val sessionId = opened!!.sessionId
+            assertEquals(1, registry.activeCount())
+            assertTrue(counts.contains(1))
+
+            fake.emit("hello")
+            awaitUntil { snapshot(registry, sessionId).contentEquals("hello".toByteArray()) }
+
+            val collector = Collector()
+            val attachment = registry.attach(sessionId, collector)!!
+            assertArrayEquals("hello".toByteArray(), attachment.snapshot.scrollback)
+            assertTrue(attachment.snapshot.alive)
+            attachment.start()
+
+            fake.emit(" world")
+            awaitUntil { collector.text() == " world" }
+            assertEquals(" world", collector.text())
+        } finally {
+            registry.closeAll()
+        }
+        awaitUntil { counts.lastOrNull() == 0 }
+    }
+
+    @Test
+    fun `detach keeps the session and a second attach replays everything`() {
+        val fake = FakePty()
+        val registry = TerminalRegistry(spawn = { _, _, _, _ -> fake })
+        try {
+            val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
+            fake.emit("one")
+            awaitUntil { snapshot(registry, sessionId).contentEquals("one".toByteArray()) }
+
+            val first = Collector()
+            val attachment = registry.attach(sessionId, first)!!
+            attachment.start()
+            fake.emit("two")
+            awaitUntil { first.text() == "two" }
+
+            registry.detach(sessionId)
+            fake.emit("three")
+            awaitUntil {
+                snapshot(registry, sessionId).contentEquals("onetwothree".toByteArray())
+            }
+
+            val second = Collector()
+            val again = registry.attach(sessionId, second)!!
+            assertEquals("onetwothree", String(again.snapshot.scrollback))
+            again.start()
+            fake.emit("four")
+            awaitUntil { second.text() == "four" }
+
+            // The session id and pid survive a WebView detach/attach cycle.
+            assertEquals(1, registry.list().size)
+            assertEquals(fake.pid, registry.list().first().pid)
+        } finally {
+            registry.closeAll()
+        }
+    }
+
+    @Test
+    fun `attach to an exited session reports scrollback and the exit code`() {
+        val fake = FakePty()
+        val counts = CopyOnWriteArrayList<Int>()
+        val registry = TerminalRegistry(
+            spawn = { _, _, _, _ -> fake },
+            onCountChanged = { counts += it }
+        )
+        try {
+            val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
+            fake.emit("bye")
+            awaitUntil { snapshot(registry, sessionId).contentEquals("bye".toByteArray()) }
+
+            fake.destroy()
+            awaitUntil { registry.activeCount() == 0 }
+
+            // The registry removes an exited session, so attach is a miss.
+            assertEquals(null, registry.attach(sessionId, Collector()))
+        } finally {
+            registry.closeAll()
+        }
+        assertTrue(counts.contains(0))
+    }
+
+    @Test
+    fun `unknown session ids are rejected`() {
+        val registry = TerminalRegistry(spawn = { _, _, _, _ -> null })
+        assertEquals(null, registry.open(workDir(), emptyMap(), 24, 80))
+        assertEquals(null, registry.attach("missing", Collector()))
+        assertEquals(false, registry.write("missing", byteArrayOf(1)))
+        assertEquals(false, registry.ack("missing", 1))
+    }
+
+    private fun snapshot(registry: TerminalRegistry, sessionId: String): ByteArray {
+        val attachment = registry.attach(sessionId, Collector()) ?: return ByteArray(0)
+        registry.detach(sessionId)
+        return attachment.snapshot.scrollback
+    }
+}

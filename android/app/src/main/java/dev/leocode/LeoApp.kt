@@ -1,6 +1,7 @@
 package dev.leocode
 
 import android.app.Application
+import android.util.Log
 import dev.leocode.core.CrashStore
 
 /**
@@ -21,5 +22,7 @@ class LeoApp : Application() {
         CrashStore.install(this)
         graph = AppGraph(this)
         graph.workspace.ensure()
+        val reaped = graph.reapOrphans()
+        if (reaped > 0) Log.i("LeoCode", "reaped $reaped orphan process group(s)")
     }
 }

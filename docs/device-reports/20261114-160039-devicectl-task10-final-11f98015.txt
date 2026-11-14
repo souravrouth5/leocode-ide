@@ -1,0 +1,26 @@
+# LeoCode device report: task10-final
+generated: 2026-11-14T10:30:39Z
+serial:    11f98015
+model:     Redmi Note 7S
+api:       28
+apk:           versionName=0.1.0
+
+## focus
+    mResumedActivity: ActivityRecord{f7d2462 u0 dev.leocode/.MainActivity t946}
+
+## foreground service
+  * ServiceRecord{b6dc654 u0 dev.leocode/org.chromium.content.app.SandboxedProcessService0}
+  * ServiceRecord{8e3d54d u0 dev.leocode/.SessionService}
+    isForeground=true foregroundId=24149 foregroundNoti=Notification(channel=leocode.sessions pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=0x00000000 actions=1 vis=PRIVATE)
+
+## notification
+
+## app processes
+u0_a90        7464  1247 21235176 171200 0                  0 S dev.leocode
+u0_a90        7638  7464    9592   2032 0                   0 S sh
+u0_a90        7638  7464    9592   2032 0                   0 S sh
+
+## logcat (100)
+--------- beginning of main
+--------- beginning of system
+--------- beginning of crash

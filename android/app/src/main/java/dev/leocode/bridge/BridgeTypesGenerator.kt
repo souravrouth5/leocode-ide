@@ -47,6 +47,8 @@ object BridgeTypesGenerator {
         "TermAckRequest" to TermAckRequest.serializer().descriptor,
         "TermSessionRequest" to TermSessionRequest.serializer().descriptor,
         "TermCloseReply" to TermCloseReply.serializer().descriptor,
+        "TermAttachReply" to TermAttachReply.serializer().descriptor,
+        "TermInfo" to TermInfo.serializer().descriptor,
         "TermData" to TermData.serializer().descriptor,
         "TermExit" to TermExit.serializer().descriptor,
         "SafOpenRequest" to SafOpenRequest.serializer().descriptor,

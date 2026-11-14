@@ -1,6 +1,7 @@
 package dev.leocode
 
 import android.annotation.SuppressLint
+import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -74,6 +75,8 @@ class MainActivity : ComponentActivity(), SafPort {
 
         /** Two renderer losses inside this window escalate to RecoveryActivity. */
         private const val RENDERER_LOSS_WINDOW_MS = 60_000L
+        private const val PERMISSION_PREFS = "leocode.permissions"
+        private const val ASKED_NOTIFICATIONS = "notifications_asked"
     }
 
     private lateinit var themeManager: ThemeManager
@@ -177,6 +180,15 @@ class MainActivity : ComponentActivity(), SafPort {
             pumpPermission()
         }
 
+    // Android 13+ hides foreground-service notifications without this permission.
+    // Ask when the first terminal/job starts, never at app launch.
+    private val notificationPermissionLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private val firstSessionCallback: () -> Unit = {
+        runOnUiThread { requestNotificationPermissionIfNeeded() }
+    }
+
     // ---------------------------------------------------------------- lifecycle
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -216,13 +228,21 @@ class MainActivity : ComponentActivity(), SafPort {
         setContentView(rootLayout)
 
         installBackDispatcher()
+        (application as LeoApp).graph.onFirstSession = firstSessionCallback
         attachWebView()
     }
 
     override fun onDestroy() {
+        val graph = (application as LeoApp).graph
+        if (graph.onFirstSession === firstSessionCallback) {
+            graph.onFirstSession = null
+        }
+        // The foreground service owns the PTYs now. Detach this WebView's listeners
+        // instead of killing sessions, so a new Activity can term.attach them.
+        graph.detachBridge()
         val old = webView
         webView = null
-        bridge?.close()
+        bridge?.detach()
         bridge = null
         if (old != null) {
             runCatching { (old.parent as? ViewGroup)?.removeView(old) }
@@ -468,6 +488,7 @@ class MainActivity : ComponentActivity(), SafPort {
         // graph (and its terminal/job state) alive for the replacement view.
         val old = webView
         webView = null
+        (application as LeoApp).graph.detachBridge()
         bridge?.detach()
         bridge = null
         if (old != null) {
@@ -577,6 +598,19 @@ class MainActivity : ComponentActivity(), SafPort {
     }
 
     // ------------------------------------------------------------- SAF / perms
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        val prefs = getSharedPreferences(PERMISSION_PREFS, MODE_PRIVATE)
+        if (prefs.getBoolean(ASKED_NOTIFICATIONS, false)) return
+        prefs.edit().putBoolean(ASKED_NOTIFICATIONS, true).apply()
+        runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+    }
 
     private fun checkStoragePermission(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

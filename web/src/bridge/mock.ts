@@ -8,7 +8,9 @@ import type {
   RuntimeInstallProgress,
   SafDocument,
   StorageInfo,
+  TerminalAttach,
   TerminalHandle,
+  TerminalInfo,
   TerminalOptions,
   ThemeMode,
   ThemeState
@@ -184,6 +186,14 @@ export class MockBridge implements Bridge {
 
   async openTerminal(_options: TerminalOptions): Promise<TerminalHandle | null> {
     return null
+  }
+
+  async attachTerminal(): Promise<TerminalAttach | null> {
+    return null
+  }
+
+  async listTerminals(): Promise<TerminalInfo[]> {
+    return []
   }
 
   async run(

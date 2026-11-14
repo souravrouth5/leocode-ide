@@ -198,6 +198,22 @@ export interface TermCloseReply {
   closed: boolean
 }
 
+export interface TermAttachReply {
+  sessionId: string
+  scrollback: string
+  alive: boolean
+  exitCode: number
+}
+
+export interface TermInfo {
+  sessionId: string
+  root?: boolean
+  alive: boolean
+  title: string
+  pid: number
+  cwd: string
+}
+
 export interface TermData {
   b64: string
 }

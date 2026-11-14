@@ -293,6 +293,31 @@ export function SettingsDialog({
                 <dd>28 (Unrooted Process Exec)</dd>
               </dl>
             </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Background survival</label>
+              <p className="guide-intro">
+                A notification reports running terminals and jobs, with a{" "}
+                <strong>Stop all</strong> action. Some vendors still kill background
+                processes aggressively.
+              </p>
+              <ul className="guide">
+                <li>
+                  <strong>MIUI / HyperOS:</strong> Settings → Apps → LeoCode → Autostart
+                  on; Battery saver → No restrictions.
+                </li>
+                <li>
+                  <strong>Android 12+ phantom-process killer:</strong> Settings →
+                  Developer options → Disable child process restrictions. Some builds
+                  call it “Don't keep activities” nearby; leave that off.
+                </li>
+                <li>
+                  <strong>Rooted phones:</strong> keep more background children with
+                  <code>device_config put activity_manager max_phantom_processes 2147483647</code>
+                  (reverts on reboot).
+                </li>
+              </ul>
+            </div>
           </div>
         )}
       </div>

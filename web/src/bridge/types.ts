@@ -4,11 +4,14 @@ import type {
   FileEntry as GeneratedFileEntry,
   RuntimeProgress as GeneratedRuntimeProgress,
   SafDocument as GeneratedSafDocument,
-  StorageInfo as GeneratedStorageInfo
+  StorageInfo as GeneratedStorageInfo,
+  TermInfo as GeneratedTermInfo
 } from "./types.gen"
+import type { RequestOptions } from "./timeouts"
 
 export type { ErrorCode } from "./types.gen"
 export { isErrorCode } from "./types.gen"
+export type { RequestOptions } from "./timeouts"
 
 export type EntryKind = "file" | "dir"
 
@@ -51,14 +54,36 @@ export interface TerminalOptions {
   rows: number
   onData: (bytes: Uint8Array) => void
   onExit: (code: number) => void
+  signal?: AbortSignal
+}
+
+/** Attach has no cwd/size: the PTY already exists and keeps its geometry. */
+export interface TerminalAttachOptions {
+  onData: (bytes: Uint8Array) => void
+  onExit: (code: number) => void
 }
 
 export interface TerminalHandle {
   sessionId: string
+  /** False when the PTY had already exited by the time open/attach replied. */
+  readonly alive: boolean
   write: (data: Uint8Array) => void
   resize: (cols: number, rows: number) => void
+  /** Kill the PTY and remove the persisted session. */
   close: () => void
+  /** Stop receiving events but leave the PTY alive (background/reattach). */
+  detach: () => void
 }
+
+export interface TerminalAttach {
+  handle: TerminalHandle
+  alive: boolean
+  /** Exit code when `alive` is false, otherwise -1. */
+  exitCode: number
+}
+
+/** Generated from the Kotlin `TermInfo` DTO. */
+export type TerminalInfo = GeneratedTermInfo
 
 export type StorageInfo = GeneratedStorageInfo
 
@@ -85,51 +110,78 @@ export interface RuntimeInstallHandle {
  */
 export interface Bridge {
   readonly mode: "mock" | "android"
-  info(): Promise<AppInfo>
-  list(path: string): Promise<FileEntry[]>
-  read(path: string): Promise<string>
-  write(path: string, content: string): Promise<void>
-  mkdir(path: string): Promise<void>
-  remove(path: string): Promise<void>
-  rename(from: string, to: string): Promise<void>
+  info(options?: RequestOptions): Promise<AppInfo>
+  list(path: string, options?: RequestOptions): Promise<FileEntry[]>
+  read(path: string, options?: RequestOptions): Promise<string>
+  write(path: string, content: string, options?: RequestOptions): Promise<void>
+  mkdir(path: string, options?: RequestOptions): Promise<void>
+  remove(path: string, options?: RequestOptions): Promise<void>
+  rename(from: string, to: string, options?: RequestOptions): Promise<void>
   run(
     argv: string[],
     cwd: string,
     onEvent: (event: ProcessEvent) => void,
-    onStart?: (handle: RunHandle) => void
+    onStart?: (handle: RunHandle) => void,
+    options?: RequestOptions
   ): Promise<number>
-  getTheme(): Promise<ThemeState>
-  setTheme(mode: ThemeMode): Promise<ThemeState>
+  getTheme(options?: RequestOptions): Promise<ThemeState>
+  setTheme(mode: ThemeMode, options?: RequestOptions): Promise<ThemeState>
   onThemeChanged(listener: (state: ThemeState) => void): () => void
   /** Real PTY. Returns null when the bridge has no terminal (browser mock). */
-  openTerminal(options: TerminalOptions): Promise<TerminalHandle | null>
+  openTerminal(options: TerminalOptions, request?: RequestOptions): Promise<TerminalHandle | null>
+  /**
+   * Reattach to a PTY that survived Activity/WebView recreation. Resolves null
+   * when the session is gone, so the caller can fall back to [openTerminal].
+   */
+  attachTerminal?(
+    sessionId: string,
+    options: TerminalAttachOptions,
+    request?: RequestOptions
+  ): Promise<TerminalAttach | null>
+  /** Live sessions, for diagnostics and the background guide. */
+  listTerminals?(options?: RequestOptions): Promise<TerminalInfo[]>
   /**
    * Download and install a runtime package. Progress arrives as the install
    * advances; the returned promise resolves once the runtime is healthy and
-   * active. Rejects with a BridgeError code (E_OFFLINE, E_DISK_FULL, ...).
+   * active. Rejects with an AppError code (E_OFFLINE, E_DISK_FULL, ...).
    * Absent on bridges that cannot install (browser mock only).
    */
   installRuntime?(
     id: string,
     onProgress: (progress: RuntimeInstallProgress) => void,
-    onStart?: (handle: RuntimeInstallHandle) => void
+    onStart?: (handle: RuntimeInstallHandle) => void,
+    options?: RequestOptions
   ): Promise<void>
   /** Device Storage & SAF capabilities */
-  getStorageInfo?(): Promise<StorageInfo>
-  requestStoragePermission?(): Promise<boolean>
-  openSafDocument?(): Promise<SafDocument | null>
-  saveSafDocument?(filename: string, content: string): Promise<{ name: string; uri: string } | null>
+  getStorageInfo?(options?: RequestOptions): Promise<StorageInfo>
+  requestStoragePermission?(options?: RequestOptions): Promise<boolean>
+  openSafDocument?(options?: RequestOptions): Promise<SafDocument | null>
+  saveSafDocument?(
+    filename: string,
+    content: string,
+    options?: RequestOptions
+  ): Promise<{ name: string; uri: string } | null>
 }
 
-export class BridgeError extends Error {
+/**
+ * A typed bridge failure, `docs/bridge-contract.md` § Error codes.
+ *
+ * `code` is the generated union, so the catalog (Task 12) is exhaustive by
+ * construction. `BridgeError` stays as an alias for existing imports.
+ */
+export class AppError extends Error {
   constructor(
     readonly code: ErrorCode,
-    message: string
+    message: string,
+    readonly retryable = false
   ) {
     super(message)
-    this.name = "BridgeError"
+    this.name = "AppError"
   }
 }
+
+export const BridgeError = AppError
+export type BridgeError = AppError
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return value === "system" || value === "light" || value === "dark"

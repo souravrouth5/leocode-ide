@@ -1228,6 +1228,38 @@ ul {
   overflow-wrap: anywhere;
 }
 
+.guide-intro {
+  margin: 0;
+  padding: 0 20px 6px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.guide {
+  margin: 0;
+  padding: 0 20px 8px 36px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.guide li + li {
+  margin-top: 6px;
+}
+
+.guide code {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  color: var(--text);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 /* ================================================================ buttons */
 
 .btn {
@@ -2671,3 +2703,251 @@ ul {
   color: var(--text);
 }
 
+
+/* ============================================================== error UX (Task 12) */
+
+.banner-slot {
+  position: fixed;
+  top: calc(var(--inset-top) + 54px);
+  left: 8px;
+  right: 8px;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.inline-banner {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.inline-banner.warning {
+  border-left-color: #d9a441;
+}
+
+.inline-banner.error {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.inline-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-banner-text span {
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.inline-banner-close {
+  flex: 0 0 auto;
+}
+
+.snackbar {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(var(--inset-bottom) + 66px);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-3);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  animation: snackbar-in 160ms ease;
+}
+
+.snackbar.warning,
+.snackbar.error {
+  border-left: 3px solid var(--danger);
+}
+
+.snackbar.success {
+  border-left: 3px solid #47b881;
+}
+
+.snackbar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.snackbar-detail {
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.snackbar-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.snackbar-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px;
+  display: flex;
+}
+
+@keyframes snackbar-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.error-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 12px;
+}
+
+.error-explanation {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.error-message {
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.error-context {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pane-error {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.pane-error-mark,
+.crash-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 22px;
+}
+
+.pane-error h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.pane-error p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 46ch;
+  word-break: break-word;
+}
+
+.pane-error-actions,
+.crash-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.crash-screen {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.crash-mark {
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.crash-screen h1 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.crash-screen p {
+  margin: 0;
+  color: var(--text-dim);
+  max-width: 48ch;
+}
+
+.crash-message {
+  max-width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

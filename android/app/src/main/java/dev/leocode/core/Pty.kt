@@ -56,10 +56,25 @@ object NativePty {
     external fun probeFds(envPairs: Array<String>): String
 }
 
+/**
+ * The small surface [TerminalRegistry] needs from a PTY. Keeping it an interface
+ * lets the registry's attach/scrollback logic run on the JVM with a fake process
+ * (Task 10 tests).
+ */
+interface PtyProcess {
+    val pid: Int
+    val isClosed: Boolean
+    fun write(bytes: ByteArray): Int
+    fun readBlocking(maxBytes: Int = 16 * 1024): ByteArray?
+    fun resize(rows: Int, cols: Int)
+    fun waitFor(): Int
+    fun destroy()
+}
+
 class PtySession private constructor(
     private val descriptor: ParcelFileDescriptor,
-    val pid: Int
-) {
+    override val pid: Int
+) : PtyProcess {
     companion object {
         /** Opens an interactive `/system/bin/sh -i` in a new session/process group. */
         fun openShell(cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? =
@@ -85,9 +100,9 @@ class PtySession private constructor(
     @Volatile
     private var closed = false
 
-    val isClosed: Boolean get() = closed
+    override val isClosed: Boolean get() = closed
 
-    fun write(bytes: ByteArray): Int {
+    override fun write(bytes: ByteArray): Int {
         if (closed) return -1
         if (bytes.isEmpty()) return 0
         return try {
@@ -102,7 +117,7 @@ class PtySession private constructor(
      * reports when the child exits) or after [destroy]. Intended for a dedicated
      * reader thread.
      */
-    fun readBlocking(maxBytes: Int = 16 * 1024): ByteArray? {
+    override fun readBlocking(maxBytes: Int): ByteArray? {
         if (closed || maxBytes <= 0) return null
         val buf = ByteArray(maxBytes)
         val n = try {
@@ -122,20 +137,20 @@ class PtySession private constructor(
         val out = ByteArrayOutputStream()
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline && out.size() < maxBytes) {
-            val chunk = readBlocking() ?: break
+            val chunk = readBlocking(16 * 1024) ?: break
             out.write(chunk)
         }
         return out.toString("UTF-8")
     }
 
-    fun resize(rows: Int, cols: Int) {
+    override fun resize(rows: Int, cols: Int) {
         if (closed) return
         NativePty.setWindowSize(descriptor.fd, rows, cols)
     }
 
-    fun waitFor(): Int = NativePty.waitFor(pid)
+    override fun waitFor(): Int = NativePty.waitFor(pid)
 
-    fun destroy() {
+    override fun destroy() {
         if (closed) return
         closed = true
         // Kill the group first: that closes the slave side and unblocks any reader.
