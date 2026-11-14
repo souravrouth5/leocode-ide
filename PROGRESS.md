@@ -3,8 +3,9 @@
 **Last updated:** 2026-11-14
 **Current phase:** Plan v9. Phase A fix-ups A-01…A-10 are done and the local exit gate was green
 (2026-11-11). Phase B: **Tasks 4–7 are done**; **Tasks 8–10 are code-complete and verified on
-D1/D2** (2026-11-14). **Phase B/C review fixes, batches 1–3, are done** (2026-11-14;
-[`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md)); batches 4–6 remain open. Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed,
+D1/D2** (2026-11-14). **Phase B/C review fixes are done through batch 6** (2026-11-14;
+[`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md)); only the narrow remainders
+listed there stay open. Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed,
 but the repo token cannot read Actions results, so the owner must confirm the run. D2 is measured
 but **unrooted** (no `su`); the owner will root it before Phase E.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
@@ -13,21 +14,28 @@ Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocke
 
 ### Review fixes (Phase B/C analysis, 2026-11-14)
 
-The read-only review produced 105 findings. The hand-off asked for batches 1–3 before Phase D/Python;
-those are fixed with tests and device smoke:
+The read-only review produced 105 findings. The crash/data-loss/contract/concurrency batches and the
+follow-up privacy, lifecycle and editor batches are fixed with tests and device smoke:
 
 | Batch | Commit | IDs fixed |
 |---|---|---|
 | 1. Data loss/crashes | `8889bac` | S-01, S-02, S-13, L-01, L-02, L-07, B-01, S-10/S-11/B-10, W-02, W-03, W-04, W-16 |
 | 2. Contract/timeouts | `4b4e9a1` | B-03/W-01, B-04, B-06, B-18, B-19, W-07, W-08, W-37 |
 | 3. Terminal/process | `cad444a` | B-02/L-04, B-05, B-11, B-12/L-03, L-05, L-12, L-13, B-07, B-08, B-09, B-21, W-20, W-21, W-22 |
+| 4 web privacy | `640ac2d` | W-09, W-11, W-23 |
+| 4 Android lifecycle | `4f6c7f8` | L-09, L-10, L-11, L-14, L-20, B-17 |
+| 5 Android files | `4a72324` | S-03, S-04, S-05, S-07, S-08, S-09, S-12 |
+| 5/6 web editor+UX | `2467948` | W-05, W-10, W-12…W-19, W-24, W-26…W-29, W-32, W-34, W-35, W-36 |
+| 6 partial terminal | `56fc5bf` | L-16, L-17, L-18, L-19, L-21, L-22 |
 
-**Open (batches 4–6):** L-09…L-11, L-14, L-20, W-09, W-11, W-23, B-17 (batch 4); W-05/W-06,
-W-12…W-19, W-24, W-26…W-29, S-03…S-09, S-12 (batch 5); all Low items, `MockBridge` parity (W-36)
-and the remaining test gaps (batch 6). SUSPECTED device checks in report §7 are not run.
-B-09 is resolved by cancelling jobs on Activity finish/renderer loss (the report's alternative);
-terminals still reattach. `runtime.install` has no client timeout until Task 25. Copies of the
-review are in `docs/reports/review-parts/`.
+**Still open (narrow):** W-06 conflict detection (the reload-action plumbing exists), L-06 (reaper
+when the group leader is gone), L-08 (detach on `onStop`), L-15 (wake lock), L-24 (back timeout),
+S-15/S-16/S-17/S-18 (fsync, `.tmp` sweep, SAF binary, purge off-path), S-19/S-20, B-14/B-15/B-16,
+W-25 (large-file perf), W-30/W-31/W-33/W-38. Device checks still pending: S-12 case-only rename on
+shared storage, L-09 renderer kill while backgrounded, W-24 visual scroll, W-18 CRLF, W-12 run-hide.
+B-09 uses the report's cancel-on-finish alternative; terminals still reattach. `runtime.install` has
+no client timeout until Task 25. Full details: [`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md);
+the review copies are in `docs/reports/review-parts/`.
 
 ---
 
@@ -298,3 +306,4 @@ Completed under plan v8; kept for traceability.
 | 2026-11-14 | **Task 12 error UX.** Catalog for every generated `ErrorCode` with one action, notifications (snackbar) + errors (banner/sheet) stores, `InlineBanner` / `ErrorSheet` / `Snackbar`, per-pane `ErrorBoundary` + `PaneError`, app `CrashScreen`, `lazyWithRetry`, global `error`/`unhandledrejection` handlers, `?simulate=<code>` demo switch, and no silent `catch {}`. Device demo on D1: cancelled SAF picker → “No document selected” snackbar. 42 web tests. |
 | 2026-11-14 | **Task 13 features and stores.** `App.tsx` is boot only; `Shell` is 84 lines and composes `features/*`. Zustand vanilla stores (`settings`, `shell`, `files`, `editor`, `run`) built once by `createAppStores(bridge)` and provided by context; views read with `useStore`, actions via `getState`. Terminal OSC titles are sanitised and OSC 52 is swallowed; session helpers moved out of the component. `styles.css` split into 22 feature files. 57 web tests; D1 parity verified (files, editor, run `EXIT 0`, terminal, runtimes, rename, delete → trash). |
 | 2026-11-14 | **Phase B/C review fixes, batches 1–3.** Batch 1 (`8889bac`): trash purge by embedded time, trash protected/hidden, killGroup/lazy-startup guards, safe envelope ids, SAF failure handling, safe New File/Save As, save records what it wrote. Batch 2 (`4b4e9a1`): no install timeout, 8 MB transport cap with an id on `E_LIMIT`, fixed/redacted runtime errors, strict envelope, `encodeDefaults`, reachable disconnect with stream failure and late-reply cancellation, guarded stream handlers. Batch 3 (`cad444a`): PTY write outside the lock, ordered replay, exited sessions kept for reattach, session/geometry caps, fd close, stdin EOF, coalesced proc output + truncation notice, count ordering, `stopSelf(startId)`, ack-after-render, resize-after-attach, fallback only on `E_NOT_FOUND`, jobs cancelled on finish/renderer loss. 130 Android tests, lint, 16 KB check, 71 web tests; D1 smoke (PTY, SAF cancel, foreground service). Report: `docs/reports/phase-b-c-fixes.md`; batches 4–6 stay open. |
+| 2026-11-14 | **Phase B/C review, batches 4–6.** Batch 4 web (`640ac2d`): redaction on every message sink, benign-error/dedupe/re-entrancy/boot queue in global handlers, fire-and-forget reporting. Batch 4 Android (`4f6c7f8`): deferred background-safe renderer recovery with persisted loss time, full `configChanges`, side/cutout insets to CSS, wider `Redactor`, crash caps, default-port origin check. Batch 5 Android files (`4a72324`): non-regular read rejection, canonical `rel`, symlink entry delete/rename, POSIX permission preservation, strict UTF-8, 4 MB read, case-only rename. Batch 5/6 web (`2467948`): sheet stack + ordered back, run hide vs stop, run identity, file-list token, folder rename/delete tab state, CRLF, SAF saves, per-tab panes, session merge/dispose, storage permission flow, prompt validation, pane boundaries, snackbar/keyboard/settings/lazy-retry/MockBridge lows. Batch 6 partial (`56fc5bf`): `close_range` removed, SIGTERM grace, resize guard, precomputed fd bound, early `term.open` output, aligned replay. Gates: Android 194 tests + lint + 16 KB; web 183 tests, typecheck/lint/build. Device: both phones boot/PTY/service; D1 rotation; D2 font scale, 755→755 save, inline prompt error, storage permission grant + Downloads listing. Narrow items remain (W-06, L-06, L-08, L-15, L-24, S-15…S-20, B-14…B-16, W-25, W-30/31/33/38). |

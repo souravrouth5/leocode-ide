@@ -83,34 +83,76 @@ kernel-level block (the lock fix is structural and tested), L-03's service order
 `stopSelf(startId)`; not re-measured), L-08 (backpressure while backgrounded, batch 4) and B-14's
 `setsid` presence (batch 6).
 
+## Batches 4–6 (fixed after the first fix pass)
+
+| Batch | Commit | IDs fixed |
+|---|---|---|
+| 4 web | `640ac2d` | W-09 (redaction on every message sink), W-11 (benign-error filter, dedupe/storm cap, re-entrancy, boot-error queue), W-23 (fire-and-forget reporting) |
+| 4 Android | `4f6c7f8` | L-09 (deferred renderer recovery, persisted loss time), L-10 (`configChanges`), L-11 (side/cutout insets), L-14 (wider `Redactor`), L-20 (crash caps), B-17 (origin port) |
+| 5 Android | `4a72324` | S-03 (regular files only, bounded read), S-04 (canonical `rel`), S-05 (symlink delete/rename), S-07 (permission preservation), S-08 (strict UTF-8), S-09 (4 MB read), S-12 (case-only rename) |
+| 5/6 web | `2467948` | W-05 (per-report reload action; conflict *detection* still open), W-10, W-12 (sheet stack + ordered back; run hide vs stop), W-13, W-14, W-15, W-17, W-18, W-19, W-24 (per-tab pane state), W-26, W-27 (storage permission flow), W-28 (prompt validation), W-29 (pane boundaries), W-32, W-34, W-35, W-36 |
+| 6 partial | `56fc5bf` | L-16 (`close_range` removed), L-17 (exit grace), L-18 (resize guard), L-19 (precomputed fd bound), L-21 (`term.open` early output), L-22 (aligned replay) |
+
+Android suite: **194 tests** (forced rerun), `lintDebug` green, 16 KB check PASSED. Web: **183 tests**
+(33 files), typecheck/lint clean, build OK. `vitest.config.ts` pins `NODE_ENV=development` because the
+shell exports `production`, which makes React's `act()` unusable.
+
+## Device verification after batches 4–6 (both phones)
+
+Same APK installed on D1 and D2; screenshots under `docs/device-reports/`.
+
+| Check | D1 | D2 |
+|---|---|---|
+| Cold boot + terminal PTY + foreground service | PASS | PASS |
+| Rotation with live shell (L-10/L-11) | PASS — shell pid unchanged, full-width landscape after relayout (`...-203906-fix-d1-landscape2-...png`) | — |
+| Font scale with live shell (L-10) | — | PASS — shell pid unchanged, app resumed (`...-203745-fix-d2-fontscale-...png`) |
+| Executable bit survives an editor save (S-07) | — | PASS — `perm.sh` 755 before and after (`...-205501-fix-d2-saved-ctrl-s-...png`) |
+| Invalid name keeps the prompt open (W-28) | — | PASS — inline “A name cannot contain…” (`...-210532-final-prompt-invalid2-...png`) |
+| Error sheet offers Grant storage access (W-27) | — | PASS (`...-210708-final-storage-permission-...png`) |
+| Permission dialog + grant | — | PASS — READ/WRITE granted, row disappears (`...-210948-final-permission-dialog2-...png`, `...-211058-final-permission-granted-...png`) |
+| Downloads lists real files after grant | — | PASS (`...-211301-final-downloads-list-...png`) |
+
 ## Behaviour changes worth knowing
 
 - `runtime.install` no longer times out in the client. A host that never replies leaves the promise
   pending until the user cancels; Task 25 should move the reply to the start.
-- The message cap is 8 MB instead of 256 KB. The per-method limits (4 MB write, 2 MB read, 4 MB SAF)
-  still apply.
-- A renderer loss or Activity finish cancels `proc.run` jobs. Terminals still survive and reattach.
-- Exited terminals remain in the registry until attached or closed, capped at 8.
+- The message cap is 8 MB instead of 256 KB. Per-method limits are now 4 MB for reads, writes and SAF.
+- A renderer loss or Activity finish cancels `proc.run` jobs; terminals still survive and reattach.
+  A background renderer loss is deferred to `onResume`; no Activity starts from the background.
+- Exited terminals remain reachable (scrollback + exit code) until attached or closed, capped at 8.
+- `fs.read`/`fs.write` are both capped at 4 MB; malformed UTF-8 is `E_BINARY`, and a non-regular file
+  is rejected before reading.
+- Storage permission is requestable from the drawer, Settings and the path-jail error sheet.
+- The Run sheet now hides without cancelling on back/X; Stop and Stop all still cancel.
+- Web messages (sheets, banners, snackbars, Copy details, boot errors) are redacted; normal file and
+  terminal output is not.
 
-## What remains (batches 4–6)
+## Still open (narrow)
 
-Not fixed in this pass, in the report's own order:
-
-- **Batch 4 — crash handling and privacy:** L-09 (renderer restart while backgrounded), L-10
-  (`configChanges`), L-11 (left/right/cutout insets), L-14 (wider `Redactor`), L-20 (crash record
-  cap), W-09 (web redaction of Copy details/messages), W-11 (global handler filtering/re-entrancy),
-  W-23 (fire-and-forget calls still swallowed), B-17 (origin port, execute guard).
-- **Batch 5 — editor and files:** W-05/W-06 (conflict banner reload + detection), W-12 (back/sheet
-  stack), W-13..W-19, W-24, W-26..W-29, S-03..S-09, S-12.
-- **Batch 6 — polish/tests:** all Low items, `MockBridge` parity (W-36), broader tests.
+- **W-06 conflict detection** and the “Reload / Keep mine” choice: the action plumbing exists (W-05),
+  but `fs.write` has no expected-mtime precondition yet. This needs a host + client change.
+- **L-06** reaper does not scan `/proc` when the group leader already exited.
+- **L-08** terminals attached while the Activity is stopped can still stall at the credit limit; the
+  detach-on-`onStop` fix needs the page to reattach every open tab.
+- **L-15** no wake lock; CPU may suspend with the screen off. Documented, not implemented.
+- **L-24** back hook has no timeout fallback if the renderer hangs.
+- **S-15/S-16/S-17/S-18** directory fsync, `.tmp` sweep, SAF binary check, purge off the request path.
+- **S-19/S-20** debug origin surface and the meta-CSP `frame-ancestors`/extraction cap.
+- **B-14** group kill still relies on `/system/bin/setsid` (present on both phones).
+- **B-15/B-16** env override reporting and the unbounded bridge pool/per-path ordering.
+- **W-25** large-file/per-keystroke performance and file-list virtualisation (needs measurement).
+- **W-30** theme has three sources; **W-31** format-on-save only on Ctrl+S; **W-33** closed sheets
+  remain `aria-modal` without a focus trap; **W-38** run stdin and raw run errors.
+- Device checks not yet run: S-12 case-only rename on shared storage, L-09 renderer kill while
+  backgrounded, W-24 visual scroll/undo across tabs, W-18 a real CRLF file, W-12 run-hide.
+- Android 10–14 have no hardware; CI has still not been observed running on GitHub.
 
 Claim corrections after this pass:
 
-- "Nothing is deleted permanently by the bridge" (S-01) now holds; purge uses the trash time.
-- The contract no longer claims `fs.read` chunking (it is planned with Task 15) or a 256 KB message cap.
-- Task 11's disconnect is now reachable and fails streams; Task 12's "Copy details redacted" and
-  "every silent catch replaced" **remain untrue** (W-09/W-23, batch 4), and the SAF flow is still a
+- "Nothing is deleted permanently by the bridge" holds (S-01).
+- The contract no longer claims `fs.read` chunking (planned Task 15) or a 256 KB message cap; the read
+  and write limits now match at 4 MB.
+- Task 11's disconnect is reachable and fails streams; Task 12's Copy details **is** redacted now
+  (W-09) and fire-and-forget failures are reported once per burst (W-23). The SAF flow is still a
   FIFO queue with one in-flight request (failure handling fixed, pattern unchanged).
-- "Crash-safe writes" remains process-crash safe only (no directory fsync, S-15, batch 5).
-
-CI has still not been observed running on GitHub.
+- "Crash-safe writes" remains process-crash safe only (no directory fsync, S-15).
