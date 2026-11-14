@@ -38,6 +38,7 @@ leocode/
 │   │   ├── phase-b-c-analysis.md
 │   │   ├── phase-b-c-fixes.md
 │   │   ├── task14-16-verification.md
+│   │   ├── phase-d-analysis.md               Phase D bug/edge-case review (PD-01…PD-25)
 │   │   └── codebase-filemap.md             ← this file
 │   └── device-reports/                     [doc] raw device logs
 ├── android/                                Gradle project
