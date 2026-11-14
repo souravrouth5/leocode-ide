@@ -1,5 +1,21 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
+import { useStore } from "zustand"
 import { createBridge, type AppInfo, type Bridge, type FileEntry, type ProcessEvent, type RunHandle, type StorageInfo, type ThemeState } from "./bridge"
+import { StoresProvider, createAppStores, useStores, type AppStores } from "./app/stores"
+import { ErrorBoundary } from "./errors/ErrorBoundary"
+import { CrashScreen, PaneError } from "./errors/CrashScreen"
+import { ErrorSurfaces } from "./errors/ErrorSurfaces"
+import { installGlobalErrorHandlers } from "./errors/globalHandlers"
+import { lazyWithRetry } from "./errors/lazyWithRetry"
+import { simulatedError } from "./errors/simulate"
 import { EditMenu, FileMenu, OverflowMenu } from "./components/EditorMenus"
 import { FileTree } from "./components/FileTree"
 import {
@@ -20,21 +36,22 @@ import {
 } from "./components/Icons"
 import { PromptDialog } from "./components/PromptDialog"
 import { RunSheet, type RunSegment } from "./components/RunSheet"
-import { ActionSheet, Sheet } from "./components/Sheet"
+
 import { SettingsDialog } from "./components/SettingsDialog"
 import { Sidebar } from "./components/Sidebar"
 import { StatusBar } from "./components/StatusBar"
 import { useUserSettings } from "./settings/userSettings"
 import { ThemeProvider, useTheme } from "./theme/ThemeProvider"
 
-// CodeMirror, xterm, and runtime manager are code-split
-const EditorPane = lazy(() =>
+// CodeMirror, xterm, and runtime manager are code-split; a stale chunk after an
+// app update triggers one reload instead of a blank pane (Task 12).
+const EditorPane = lazyWithRetry(() =>
   import("./components/EditorPane").then((module) => ({ default: module.EditorPane }))
 )
-const TerminalPane = lazy(() =>
+const TerminalPane = lazyWithRetry(() =>
   import("./components/TerminalPane").then((module) => ({ default: module.TerminalPane }))
 )
-const RuntimeManager = lazy(() =>
+const RuntimeManager = lazyWithRetry(() =>
   import("./components/RuntimeManager").then((module) => ({ default: module.RuntimeManager }))
 )
 
@@ -90,6 +107,40 @@ export default function App() {
     document.getElementById("boot")?.remove()
   }, [])
 
+  const stores = useMemo(() => createAppStores(), [])
+
+  useEffect(
+    () =>
+      installGlobalErrorHandlers((error, context) => {
+        stores.errors.getState().report(error, { context })
+      }),
+    [stores]
+  )
+
+  return (
+    <StoresProvider stores={stores}>
+      <ErrorBoundary
+        fallback={(error) => (
+          <CrashScreen
+            error={error}
+            onReload={() => location.reload()}
+            onNotice={(message) =>
+              stores.notifications.getState().enqueue({
+                kind: "success",
+                message,
+                durationMs: 3_000
+              })
+            }
+          />
+        )}
+      >
+        <Boot stores={stores} />
+      </ErrorBoundary>
+    </StoresProvider>
+  )
+}
+
+function Boot({ stores }: { stores: AppStores }) {
   const [ready, setReady] = useState<
     { bridge: Bridge; info: AppInfo | null } | { error: string } | null
   >(null)
@@ -106,15 +157,24 @@ export default function App() {
       let info: AppInfo | null = null
       try {
         info = await result.bridge.info()
-      } catch {
-        // The bridge answered createBridge's ping; info is a nicety.
+      } catch (error) {
+        // createBridge's handshake succeeded, but the fuller info call failed.
+        stores.errors.getState().report(error, { context: "Read app info" })
       }
       if (!cancelled) setReady({ bridge: result.bridge, info })
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [stores])
+
+  // `?simulate=<code>` demonstrates each error surface without breaking a real
+  // operation. Mock mode only: the Android asset URL has no query string.
+  useLayoutEffect(() => {
+    if (!ready || "error" in ready || ready.bridge.mode !== "mock") return
+    const simulated = simulatedError()
+    if (simulated) stores.errors.getState().report(simulated, { context: "simulated" })
+  }, [ready, stores])
 
   if (!ready) return <Splash />
   if ("error" in ready) return <BootError message={ready.error} />
@@ -152,6 +212,19 @@ function BootError({ message }: { message: string }) {
 function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
   const { mode, effective, setMode } = useTheme()
   const dark = effective === "dark"
+  const { errors, notifications } = useStores()
+
+  const report = useCallback(
+    (error: unknown, context?: string, retry?: () => void) => {
+      errors.getState().report(error, { context, retry })
+    },
+    [errors]
+  )
+
+  const statusError = useStore(
+    errors,
+    (state) => state.banner?.error.message ?? state.sheet?.error.message ?? null
+  )
 
   const [settings, updateSettings] = useUserSettings()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -190,8 +263,6 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         target?: FileEntry
       }
   >(null)
-  const [error, setError] = useState<string | null>(null)
-
   const messageTimer = useRef<number | null>(null)
   const flash = useCallback((text: string) => {
     setMessage(text)
@@ -210,14 +281,13 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       try {
         const list = await bridge.list(target)
         setEntries(list)
-        setError(null)
       } catch (e) {
-        setError((e as Error).message)
+        report(e, "Refresh file list")
       } finally {
         setLoading(false)
       }
     },
-    [bridge, cwd]
+    [bridge, report]
   )
 
   useEffect(() => {
@@ -226,6 +296,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
 
   const untitledCounter = useRef(1)
   const sessionLoaded = useRef(false)
+  const sessionSaveWarned = useRef(false)
 
   const handleNewUntitled = useCallback(() => {
     const name = `Untitled-${untitledCounter.current++}`
@@ -259,17 +330,24 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         const recents = [path, ...(settings.recentFiles || []).filter((p) => p !== path)].slice(0, 20)
         updateSettings({ recentFiles: recents })
       } catch (e) {
-        setError((e as Error).message)
+        report(e, "Open file")
       }
     },
-    [bridge, docs, settings.recentFiles, updateSettings]
+    [bridge, docs, settings.recentFiles, updateSettings, report]
   )
 
   const handleOpenSaf = useCallback(async () => {
     if (!bridge.openSafDocument) return
     try {
       const doc = await bridge.openSafDocument()
-      if (!doc) return
+      if (!doc) {
+        notifications.getState().enqueue({
+          kind: "info",
+          message: "No document selected",
+          durationMs: 3_000
+        })
+        return
+      }
       const safPath = `saf://${doc.name}`
       setDocs((current) => {
         const exists = current.find((d) => d.path === safPath)
@@ -281,9 +359,9 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       setView("editor")
       flash(`Opened ${doc.name}`)
     } catch (e) {
-      setError((e as Error).message)
+      report(e, "Open document")
     }
-  }, [bridge, flash])
+  }, [bridge, flash, report, notifications])
 
   const handleSaveAs = useCallback(() => {
     if (!activeDoc) return
@@ -344,6 +422,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       }
       const session = JSON.parse(raw) as { paths: string[]; active: string | null }
       if (session.paths && session.paths.length > 0) {
+        let missing = 0
         void Promise.all(
           session.paths.map(async (p): Promise<OpenDoc | null> => {
             try {
@@ -351,11 +430,20 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
               const content = normalizeText(rawContent)
               return { path: p, content, saved: content, isUntitled: false }
             } catch {
+              // The file may have been deleted or moved since last session.
+              missing += 1
               return null
             }
           })
         ).then((loaded) => {
           const valid = loaded.filter((d): d is OpenDoc => d !== null)
+          if (missing > 0) {
+            notifications.getState().enqueue({
+              kind: "warning",
+              message: `${missing} restored tab${missing === 1 ? "" : "s"} could not be opened`,
+              durationMs: 5_000
+            })
+          }
           if (valid.length > 0) {
             setDocs(valid)
             setActivePath(
@@ -369,10 +457,11 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       } else {
         sessionLoaded.current = true
       }
-    } catch {
+    } catch (error) {
       sessionLoaded.current = true
+      report(error, "Restore the previous session")
     }
-  }, [bridge, settings.resumeSession])
+  }, [bridge, settings.resumeSession, notifications, report])
 
   useEffect(() => {
     if (!sessionLoaded.current || !settings.resumeSession) return
@@ -386,9 +475,17 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       }
       localStorage.setItem(SESSION_KEY, JSON.stringify(session))
     } catch {
-      // quota
+      // Storage can be full or blocked. Warn once, not on every keystroke.
+      if (!sessionSaveWarned.current) {
+        sessionSaveWarned.current = true
+        notifications.getState().enqueue({
+          kind: "warning",
+          message: "Session state could not be saved",
+          durationMs: 5_000
+        })
+      }
     }
-  }, [docs, activePath, activeDoc, settings.resumeSession])
+  }, [docs, activePath, activeDoc, settings.resumeSession, notifications])
 
   const save = useCallback(
     async (path = activePath): Promise<boolean> => {
@@ -410,11 +507,11 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         if (dirName(path) === cwd) void refresh()
         return true
       } catch (e) {
-        setError((e as Error).message)
+        report(e, "Save file")
         return false
       }
     },
-    [activeDoc, activePath, bridge, cwd, docs, flash, handleSaveAs, refresh]
+    [activeDoc, activePath, bridge, cwd, docs, flash, handleSaveAs, refresh, report]
   )
 
   const reloadFile = useCallback(
@@ -437,10 +534,10 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         )
         flash("Reloaded from disk")
       } catch (e) {
-        setError((e as Error).message)
+        report(e, "Reload file")
       }
     },
-    [activePath, bridge, docs, flash]
+    [activePath, bridge, docs, flash, report]
   )
 
 
@@ -538,9 +635,12 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
     const name = baseName(doc.path)
     const kind = runKind(name)
     if (!kind) {
-      setError(
-        `LeoCode can only run .py and .sh files right now. ${name} needs an interpreter that is not installed.`
-      )
+      notifications.getState().enqueue({
+        kind: "warning",
+        message: `LeoCode can only run .py and .sh files right now`,
+        detail: `${name} needs an interpreter that is not installed`,
+        durationMs: 6_000
+      })
       return
     }
     // Never run stale bytes: persist the buffer first when it differs from disk.
@@ -580,10 +680,11 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
       })
       finishRun(code, null)
     } catch (e) {
+      // The run sheet is the error surface here; it shows the message and hint.
       const message = (e as Error).message
       finishRun(null, kind === "python" ? `${message}\n\n${PYTHON_HINT}` : message)
     }
-  }, [activeDoc, bridge, finishRun, queueRunOutput, save])
+  }, [activeDoc, bridge, finishRun, queueRunOutput, save, notifications])
 
   const closeDoc = useCallback(
     (path: string) => {
@@ -643,10 +744,10 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         }
         await refresh()
       } catch (e) {
-        setError((e as Error).message)
+        report(e, prompt.kind === "rename" ? "Rename" : "Create file or folder")
       }
     },
-    [activeDoc, bridge, cwd, flash, openFile, prompt, refresh]
+    [activeDoc, bridge, cwd, flash, openFile, prompt, refresh, report]
   )
 
   const deleteEntry = useCallback(
@@ -667,10 +768,10 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         flash("Deleted")
         await refresh()
       } catch (e) {
-        setError((e as Error).message)
+        report(e, "Delete")
       }
     },
-    [bridge, flash, refresh]
+    [bridge, flash, refresh, report]
   )
 
   // ------------------------------------------------------------- hardware
@@ -715,6 +816,11 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
     mode === "system" ? `System (${effective})` : mode === "light" ? "Light" : "Dark"
 
   const statusPath = view === "editor" ? activePath ?? "." : cwd
+  const notify = useCallback(
+    (text: string) =>
+      notifications.getState().enqueue({ kind: "success", message: text, durationMs: 3_000 }),
+    [notifications]
+  )
 
   return (
     <div className={"app" + (view === "editor" ? " view-editor" : "")}>
@@ -915,6 +1021,12 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
 
           {activeDoc ? (
             <div className="editor-body">
+              <ErrorBoundary
+                resetKey={activeDoc.path}
+                fallback={(error, reset) => (
+                  <PaneError error={error} onRetry={reset} onNotice={notify} />
+                )}
+              >
               <Suspense fallback={<div className="empty">Loading editor…</div>}>
                 <EditorPane
                   key={activeDoc.path}
@@ -940,6 +1052,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
                   onNotification={(msg) => flash(msg)}
                 />
               </Suspense>
+              </ErrorBoundary>
             </div>
           ) : (
             <div className="empty editor-empty">
@@ -962,16 +1075,27 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
             className={"view terminal-view" + (view === "terminal" ? " current" : "")}
             aria-hidden={view !== "terminal"}
           >
-            <Suspense fallback={<div className="empty">Loading terminal…</div>}>
-              <TerminalPane
-                bridge={bridge}
-                cwd={cwd}
-                active={view === "terminal"}
-                dark={dark}
-                fontSize={settings.terminalFontSize}
-                fontFamily={settings.fontFamily}
-              />
-            </Suspense>
+            <ErrorBoundary
+              fallback={(error, reset) => (
+                <PaneError
+                  error={error}
+                  onRetry={reset}
+                  onNotice={notify}
+                  title="The terminal crashed"
+                />
+              )}
+            >
+              <Suspense fallback={<div className="empty">Loading terminal…</div>}>
+                <TerminalPane
+                  bridge={bridge}
+                  cwd={cwd}
+                  active={view === "terminal"}
+                  dark={dark}
+                  fontSize={settings.terminalFontSize}
+                  fontFamily={settings.fontFamily}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </section>
         )}
 
@@ -979,21 +1103,32 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
           className={"view runtimes-view" + (view === "runtimes" ? " current" : "")}
           aria-hidden={view !== "runtimes"}
         >
-          <Suspense fallback={<div className="empty">Loading runtimes…</div>}>
-            <RuntimeManager
-              bridge={bridge}
-              info={info}
-              onOpenTerminal={() => go("terminal")}
-            />
-          </Suspense>
+          <ErrorBoundary
+            fallback={(error, reset) => (
+              <PaneError
+                error={error}
+                onRetry={reset}
+                onNotice={notify}
+                title="The runtime list crashed"
+              />
+            )}
+          >
+            <Suspense fallback={<div className="empty">Loading runtimes…</div>}>
+              <RuntimeManager
+                bridge={bridge}
+                info={info}
+                onOpenTerminal={() => go("terminal")}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </section>
       </main>
 
       <StatusBar
         mode={bridge.mode}
-        path={error ? "error" : statusPath}
+        path={statusError ? "error" : statusPath}
         dirty={activeDirty}
-        message={error ?? message}
+        message={statusError ?? message}
       />
 
       <nav className="tabbar" aria-label="Main">
@@ -1108,16 +1243,7 @@ function Shell({ bridge, info }: { bridge: Bridge; info: AppInfo | null }) {
         onConfirm={(value) => void handlePrompt(value)}
       />
 
-      <Sheet open={error !== null} onClose={() => setError(null)} title="Something went wrong">
-        <div style={{ padding: "16px 20px", color: "var(--fg, #eee)", wordBreak: "break-word", fontSize: "14px", lineHeight: "1.5" }}>
-          {error}
-        </div>
-        <div className="action-list">
-          <button className="action-row" onClick={() => setError(null)}>
-            Dismiss
-          </button>
-        </div>
-      </Sheet>
+      <ErrorSurfaces errors={errors} notifications={notifications} />
     </div>
   )
 }

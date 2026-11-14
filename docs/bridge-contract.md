@@ -121,7 +121,7 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `fs.rename` | `{ from, to }` → `{}` | live | |
 | `fs.delete` | `{ path }` → `{}` | live | Moves to trash, never silent permanent delete |
 | `fs.search` | `{ query, glob?, maxResults? }` → event stream `search.match`, then `{ count, truncated }` | planned (Task 16) | Ignores `.git`, `node_modules`, `.venv`; cancellable |
-| `term.open` | `{ cwd, cols, rows, root? }` → `{ sessionId, pid }` | live (`root` Task 18) | Spawns PTY (or `su` in PTY) |
+| `term.open` | `{ cwd, cols, rows, root? }` → `{ sessionId, pid }` | live (`root` Task 18) | Spawns the PTY (or `su` in PTY) and attaches this request's stream; the reply is sent before the first `term.data` |
 | `term.attach` | `{ sessionId }` → `{ sessionId, scrollback, alive, exitCode }` then `term.data` events | live (Task 10) | Replays the ring-buffer scrollback, then streams live output; a session that exited while detached is removed, so attach returns `E_NOT_FOUND` and the page opens a new terminal |
 | `term.list` | `{}` → `[{ sessionId, root, alive, title, pid, cwd }]` | live (Task 10) | Sessions survive Activity/WebView recreation via `SessionService` |
 | `term.write` | `{ sessionId, b64 }` → `{ accepted }` | live | base64 bytes |
