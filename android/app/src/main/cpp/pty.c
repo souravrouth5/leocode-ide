@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include <android/api-level.h>
 
 #define TAG "LeoCodePty"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -88,14 +89,25 @@ static void reset_child_signals(void) {
 }
 
 /*
+ * close_range() is only in the seccomp allowlist from Android 11. On Android 9
+ * an unknown syscall is killed with SIGSYS (not ENOSYS), which killed the whole
+ * bridge thread when the terminal opened on D1. Gate it on the device API level
+ * and keep the bounded loop elsewhere.
+ */
+static int close_range_supported(void) {
+    int api = android_get_device_api_level();
+    return api >= 30;
+}
+
+/*
  * Close every fd above stderr that the JVM/Zygote handed to the child. The
- * kernel-level close_range is one syscall and is preferred where the kernel
- * supports it; the fallback loop is bounded so a huge RLIMIT cannot stall the
- * child. Called after the PTY is dup2()'d onto 0/1/2.
+ * kernel-level close_range is one syscall and is preferred where it is allowed;
+ * the fallback loop is bounded so a huge RLIMIT cannot stall the child. Called
+ * after the PTY is dup2()'d onto 0/1/2.
  */
 static void close_inherited_fds(void) {
 #if defined(SYS_close_range)
-    if (syscall(SYS_close_range, 3U, ~0U, 0U) == 0) return;
+    if (close_range_supported() && syscall(SYS_close_range, 3U, ~0U, 0U) == 0) return;
 #endif
     long max = sysconf(_SC_OPEN_MAX);
     if (max < 3 || max > 65536) max = 65536;
