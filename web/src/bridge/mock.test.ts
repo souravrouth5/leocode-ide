@@ -41,11 +41,18 @@ describe("MockBridge parity (W-36)", () => {
     })
   })
 
-  it("does not create a directory when its parent is missing", async () => {
+  it("creates missing ancestors like the host mkdirs()", async () => {
     const bridge = new MockBridge()
 
-    await expect(bridge.mkdir("missing/child")).rejects.toMatchObject({ code: "E_NOT_FOUND" })
-    await expect(bridge.stat("missing")).rejects.toMatchObject({ code: "E_NOT_FOUND" })
+    await expect(bridge.mkdir("missing/child")).resolves.toBeUndefined()
+    expect((await bridge.stat("missing")).kind).toBe("dir")
+    expect((await bridge.stat("missing/child")).kind).toBe("dir")
+  })
+
+  it("refuses to create a directory through a file", async () => {
+    const bridge = new MockBridge()
+
+    await expect(bridge.mkdir("README.md/child")).rejects.toMatchObject({ code: "E_NOT_DIR" })
   })
 
   it("enforces the 4 MB read limit like the host", async () => {

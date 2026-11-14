@@ -243,16 +243,19 @@ export class MockBridge implements Bridge {
       if (existing.kind === "dir") return
       throw new BridgeError("E_EXISTS", `${path} already exists`)
     }
-    // mkdir does not create missing ancestors; a file cannot be a parent.
-    const parentPath = parentOf(path)
-    if (parentPath !== ".") {
-      const parent = this.nodes.get(parentPath)
-      if (!parent) throw new BridgeError("E_NOT_FOUND", `${parentPath} does not exist`)
-      if (parent.kind !== "dir") {
-        throw new BridgeError("E_NOT_DIR", `${parentPath} is not a folder`)
+    // The host calls `mkdirs()`, so missing ancestors are created; a file in the
+    // path is still an error.
+    const parts = path.split("/").filter(Boolean)
+    let current = ""
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part
+      const node = this.nodes.get(current)
+      if (!node) {
+        this.nodes.set(current, { kind: "dir", content: "", mtime: now() })
+      } else if (node.kind !== "dir") {
+        throw new BridgeError("E_NOT_DIR", `${current} is not a folder`)
       }
     }
-    this.nodes.set(path, { kind: "dir", content: "", mtime: now() })
   }
 
   async remove(path: string): Promise<void> {
