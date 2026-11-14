@@ -44,8 +44,8 @@ The harness lives in the debug source set only; release builds do not contain it
 | T5 output flood, bounded | **PASS** — 138.8 s, `180KB/s` | **PASS** — 25 MB in 312 ms, 262 144 B captured | D2 312 ms, `rate=80128KB/s` (`docs/device-reports/20261111-harness-D2-e76846f.txt:38`); D1 138 861 ms, `180KB/s` (`docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:46`). Timings vary per run |
 | T6 native PTY (`fork`/`setsid`/`TIOCSCTTY`) | **PASS** | **PASS** — `pty-ok`, `cols=80`, exit 7 | page size 4096 on both |
 | T7 shell applet inventory | **INFO** | **INFO** | D2 has `unzip` and `curl`; **no** git/python/su (D1 also lacks unzip) |
-| T8 PTY child env contains only allowlisted keys | | | Task 9 |
-| T9 PTY child has no fds > 2 | | | Task 9 |
+| T8 PTY child env contains only allowlisted keys | pending | pending | Task 9: `probeEnvironment` execs `/system/bin/env` with the `ChildEnv` envp; run pending (no device attached 2026-11-14) |
+| T9 PTY child has no fds > 2 | pending | pending | Task 9: `probeFds` runs after `dup2` + `close_inherited_fds`; run pending |
 
 > Renumbering note: v8's "T8 control build" is now **T2c**. T8–T15 are the v9 harness tests.
 
