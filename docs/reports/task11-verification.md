@@ -45,3 +45,10 @@
 ## Open
 
 - GitHub Actions has still not been observed running.
+
+## Review correction (2026-11-14)
+
+The review showed that the disconnect event was never dispatched, so `E_BRIDGE_DISCONNECTED` was
+unreachable in practice. Batch 2 (`4b4e9a1`) adds the channel-identity check, the three-timeout
+trigger, failure callbacks for open streams and late-reply cancellation; the transport tests cover
+them. `E_BRIDGE_DISCONNECTED` is now raised and later calls fail fast.

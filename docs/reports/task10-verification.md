@@ -87,3 +87,12 @@ Screenshot index:
 
 - Phantom-process killer effect, low-memory kill and storage-pressure rows are not measured.
 - GitHub Actions has still not been observed running.
+
+## Review corrections (2026-11-14)
+
+The Phase B/C review found that the demo's `sleep 600; echo done` prints almost nothing, so it did
+not exercise flow control, wake behaviour or group cleanup, and that exited sessions were removed
+before their exit code could be read. The batch-3 fixes (`cad444a`) now ack terminal data only after
+xterm renders it (restoring the credit window), keep exited sessions for reattach, close the master
+fd on natural exit, and cancel jobs when the Activity finishes or the renderer is lost. Wake-lock
+behaviour (L-15) and the phantom-process rows remain unmeasured.

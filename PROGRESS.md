@@ -3,12 +3,31 @@
 **Last updated:** 2026-11-14
 **Current phase:** Plan v9. Phase A fix-ups A-01…A-10 are done and the local exit gate was green
 (2026-11-11). Phase B: **Tasks 4–7 are done**; **Tasks 8–10 are code-complete and verified on
-D1/D2** (2026-11-14). Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed,
+D1/D2** (2026-11-14). **Phase B/C review fixes, batches 1–3, are done** (2026-11-14;
+[`docs/reports/phase-b-c-fixes.md`](docs/reports/phase-b-c-fixes.md)); batches 4–6 remain open. Tasks 2 and 3 stay `[-]` until CI has run on GitHub: the branch is now pushed,
 but the repo token cannot read Actions results, so the owner must confirm the run. D2 is measured
 but **unrooted** (no `su`); the owner will root it before Phase E.
 **Plan:** [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md) (v8 is history)
 
 Status key: `[ ]` not started · `[-]` in progress · `[x]` done · `[!]` blocked · `[~]` deferred
+
+### Review fixes (Phase B/C analysis, 2026-11-14)
+
+The read-only review produced 105 findings. The hand-off asked for batches 1–3 before Phase D/Python;
+those are fixed with tests and device smoke:
+
+| Batch | Commit | IDs fixed |
+|---|---|---|
+| 1. Data loss/crashes | `8889bac` | S-01, S-02, S-13, L-01, L-02, L-07, B-01, S-10/S-11/B-10, W-02, W-03, W-04, W-16 |
+| 2. Contract/timeouts | `4b4e9a1` | B-03/W-01, B-04, B-06, B-18, B-19, W-07, W-08, W-37 |
+| 3. Terminal/process | `cad444a` | B-02/L-04, B-05, B-11, B-12/L-03, L-05, L-12, L-13, B-07, B-08, B-09, B-21, W-20, W-21, W-22 |
+
+**Open (batches 4–6):** L-09…L-11, L-14, L-20, W-09, W-11, W-23, B-17 (batch 4); W-05/W-06,
+W-12…W-19, W-24, W-26…W-29, S-03…S-09, S-12 (batch 5); all Low items, `MockBridge` parity (W-36)
+and the remaining test gaps (batch 6). SUSPECTED device checks in report §7 are not run.
+B-09 is resolved by cancelling jobs on Activity finish/renderer loss (the report's alternative);
+terminals still reattach. `runtime.install` has no client timeout until Task 25. Copies of the
+review are in `docs/reports/review-parts/`.
 
 ---
 
@@ -278,3 +297,4 @@ Completed under plan v8; kept for traceability.
 | 2026-11-14 | **Task 11 bridge client.** Per-method timeout table from the contract, `RequestOptions` (`signal`, `timeoutMs` override), single-settle pending cleanup with late replies dropped, `disconnect()` + `leocode:bridge-disconnected` → `E_BRIDGE_DISCONNECTED`, typed `AppError` from the generated codes, one retry for idempotent reads, Android detected by the injected channel (not the UA). 13 transport/policy tests. |
 | 2026-11-14 | **Task 12 error UX.** Catalog for every generated `ErrorCode` with one action, notifications (snackbar) + errors (banner/sheet) stores, `InlineBanner` / `ErrorSheet` / `Snackbar`, per-pane `ErrorBoundary` + `PaneError`, app `CrashScreen`, `lazyWithRetry`, global `error`/`unhandledrejection` handlers, `?simulate=<code>` demo switch, and no silent `catch {}`. Device demo on D1: cancelled SAF picker → “No document selected” snackbar. 42 web tests. |
 | 2026-11-14 | **Task 13 features and stores.** `App.tsx` is boot only; `Shell` is 84 lines and composes `features/*`. Zustand vanilla stores (`settings`, `shell`, `files`, `editor`, `run`) built once by `createAppStores(bridge)` and provided by context; views read with `useStore`, actions via `getState`. Terminal OSC titles are sanitised and OSC 52 is swallowed; session helpers moved out of the component. `styles.css` split into 22 feature files. 57 web tests; D1 parity verified (files, editor, run `EXIT 0`, terminal, runtimes, rename, delete → trash). |
+| 2026-11-14 | **Phase B/C review fixes, batches 1–3.** Batch 1 (`8889bac`): trash purge by embedded time, trash protected/hidden, killGroup/lazy-startup guards, safe envelope ids, SAF failure handling, safe New File/Save As, save records what it wrote. Batch 2 (`4b4e9a1`): no install timeout, 8 MB transport cap with an id on `E_LIMIT`, fixed/redacted runtime errors, strict envelope, `encodeDefaults`, reachable disconnect with stream failure and late-reply cancellation, guarded stream handlers. Batch 3 (`cad444a`): PTY write outside the lock, ordered replay, exited sessions kept for reattach, session/geometry caps, fd close, stdin EOF, coalesced proc output + truncation notice, count ordering, `stopSelf(startId)`, ack-after-render, resize-after-attach, fallback only on `E_NOT_FOUND`, jobs cancelled on finish/renderer loss. 130 Android tests, lint, 16 KB check, 71 web tests; D1 smoke (PTY, SAF cancel, foreground service). Report: `docs/reports/phase-b-c-fixes.md`; batches 4–6 stay open. |

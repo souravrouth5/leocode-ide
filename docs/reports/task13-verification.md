@@ -89,3 +89,10 @@ are unchanged (settings store + editor commands keep the same events).
 - The Run sheet and terminal are separate views from the editor; switching tabs closes the
   keyboard, which the device script accounts for.
 - GitHub Actions has still not been observed running.
+
+## Review corrections (2026-11-14)
+
+The split itself stands. The review found follow-ups that are deliberately left for batch 5:
+per-tab editor state (W-24, switching tabs still rebuilds the pane), draft persistence and merge
+on restore (W-26), stale tab paths after a folder rename and dirty-buffer loss on delete (W-17),
+conflict detection/reload (W-05/W-06) and the remaining editor/file items. Store tests are unaffected.

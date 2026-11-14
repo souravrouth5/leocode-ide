@@ -58,3 +58,15 @@ Suite total: **39 tests passing**.
 
 - The catalog's `E_PERMISSION` action is Dismiss with settings instructions; a deep link to Android settings needs a future bridge method.
 - Disk-full on-device is not simulated (mock covers the surface); GitHub Actions has still not been observed running.
+
+## Review corrections (2026-11-14)
+
+Two claims in this report were too strong and remain open for batch 4:
+
+- **Copy details is not redacted.** `errorDetails` prints `error.message` verbatim; the web redactor
+  (tokens, URL user-info, paths outside the roots) and the plan's method/version fields are W-09.
+- **"Every silent catch replaced" is not true.** Fire-and-forget `term.write`/`ack`/`resize`/
+  `proc.cancel` and theme calls still swallow failures (W-23); "report once per burst" is part of
+  batch 4.
+
+The SAF-cancel snackbar demo and the surface tests in this report are valid.
