@@ -178,6 +178,74 @@ describe("AndroidBridge transport (Task 11)", () => {
     expect(channel.sent.some((message) => message.method === "term.close")).toBe(true)
   })
 
+  it("accepts batched search.matches events and the single match event", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    const matches: Array<{ path: string; line: number }> = []
+
+    const pending = bridge.search("needle", { searchId: "s-1" }, (match) =>
+      matches.push(match)
+    )
+    expect(channel.sent[0].method).toBe("fs.search")
+
+    channel.emit(0, "search.matches", [
+      { path: "a.txt", line: 1, col: 1, preview: "a" },
+      { path: "b.txt", line: 2, col: 1, preview: "b" },
+      { path: "c.txt", line: 3, col: 1, preview: "c" }
+    ])
+    expect(matches).toHaveLength(3)
+
+    channel.emit(0, "search.match", { path: "d.txt", line: 4, col: 1, preview: "d" })
+    expect(matches).toHaveLength(4)
+    expect(matches[3].path).toBe("d.txt")
+
+    channel.reply(0, { count: 4, truncated: false })
+    await expect(pending).resolves.toEqual({ count: 4, truncated: false })
+  })
+
+  it("sends fs.search.cancel when a search times out", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const pending = bridge.search("needle", { searchId: "search-42" }, () => {})
+    const timedOut = expect(pending).rejects.toMatchObject({ code: "E_TIMEOUT" })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await timedOut
+
+    const cancel = channel.sent.find((message) => message.method === "fs.search.cancel")
+    expect(cancel?.payload).toEqual({ searchId: "search-42" })
+  })
+
+  it("sends fs.search.cancel when a search is aborted after it was sent", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    const controller = new AbortController()
+
+    const pending = bridge.search(
+      "needle",
+      { searchId: "search-abort" },
+      () => {},
+      { signal: controller.signal }
+    )
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ code: "E_CANCELLED" })
+    const cancel = channel.sent.find((message) => message.method === "fs.search.cancel")
+    expect(cancel?.payload).toEqual({ searchId: "search-abort" })
+  })
+
+  it("does not send fs.search.cancel for other timed-out methods", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const pending = bridge.write("a.txt", "hello")
+    const timedOut = expect(pending).rejects.toMatchObject({ code: "E_TIMEOUT" })
+    await vi.advanceTimersByTimeAsync(20_001)
+    await timedOut
+
+    expect(channel.sent.some((message) => message.method === "fs.search.cancel")).toBe(false)
+  })
+
   it("fails an open run and later calls after disconnect", async () => {
     const channel = new FakeChannel()
     const bridge = new AndroidBridge(channel)

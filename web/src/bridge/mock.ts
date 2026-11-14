@@ -39,8 +39,25 @@ interface Node {
 
 const now = () => Date.now()
 const THEME_KEY = "leocode.theme"
-/** Same per-operation ceiling as the host (`fs.write`, `saf.save`). */
+/** Same per-operation ceiling as the host (`fs.read`, `fs.write`, `saf.save`). */
 const MAX_WRITE_BYTES = 4 * 1024 * 1024
+
+/** Directories `SearchEngine.IGNORED_DIRECTORIES` never enters. */
+const IGNORED_SEGMENTS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".gradle",
+  "build",
+  "dist",
+  ".idea",
+  ".trash",
+  ".leocode-trash"
+])
 
 /** Bytes, like the host's `FileEntry.size`, not characters. */
 const byteLength = (text: string) => new TextEncoder().encode(text).length
@@ -197,6 +214,9 @@ export class MockBridge implements Bridge {
     // branches as the real host (W-36).
     if (!node) throw new BridgeError("E_NOT_FOUND", `${path} does not exist`)
     if (node.kind !== "file") throw new BridgeError("E_NOT_DIR", `${path} is a folder`)
+    if (byteLength(node.content) > MAX_WRITE_BYTES) {
+      throw new BridgeError("E_LIMIT", "file is larger than 4 MB")
+    }
     if (node.content.includes("\u0000")) {
       throw new BridgeError("E_BINARY", `${path} is not a text file`)
     }
@@ -218,10 +238,21 @@ export class MockBridge implements Bridge {
 
   async mkdir(path: string): Promise<void> {
     const existing = this.nodes.get(path)
-    // The host never replaces an entry, file or folder, with mkdir.
-    if (existing) throw new BridgeError("E_EXISTS", `${path} already exists`)
+    if (existing) {
+      // Idempotent for a directory, but never replace a file.
+      if (existing.kind === "dir") return
+      throw new BridgeError("E_EXISTS", `${path} already exists`)
+    }
+    // mkdir does not create missing ancestors; a file cannot be a parent.
+    const parentPath = parentOf(path)
+    if (parentPath !== ".") {
+      const parent = this.nodes.get(parentPath)
+      if (!parent) throw new BridgeError("E_NOT_FOUND", `${parentPath} does not exist`)
+      if (parent.kind !== "dir") {
+        throw new BridgeError("E_NOT_DIR", `${parentPath} is not a folder`)
+      }
+    }
     this.nodes.set(path, { kind: "dir", content: "", mtime: now() })
-    this.ensureParents(path)
   }
 
   async remove(path: string): Promise<void> {
@@ -376,7 +407,8 @@ export class MockBridge implements Bridge {
       .map((draft) => ({
         path: draft.path,
         mtime: draft.mtime,
-        size: byteLength(draft.content)
+        // The host reports characters here, unlike `FileEntry.size` (PD-23).
+        size: draft.content.length
       }))
       .sort((a, b) => b.mtime - a.mtime)
   }
@@ -417,29 +449,38 @@ export class MockBridge implements Bridge {
     if (!query) return { count: 0, truncated: false }
     const searchId = options.searchId ?? "mock-search"
     this.activeSearches.add(searchId)
-    const cap = Math.min(Math.max(options.maxResults ?? 500, 1), 2_000)
-    const ignored = new Set([".git", "node_modules", ".venv", "__pycache__"])
-    const pattern = options.glob ? globRegExp(options.glob) : null
+    const requested = options.maxResults
+    const cap =
+      requested === undefined || !Number.isFinite(requested) || requested <= 0
+        ? 500
+        : Math.min(requested, 2_000)
+    // The host trims the pattern; a slash selects the full relative path.
+    const trimmedGlob = options.glob?.trim()
+    const pattern = trimmedGlob ? globRegExp(trimmedGlob) : null
+    const matchPath = trimmedGlob ? trimmedGlob.includes("/") : false
     const needle = options.caseSensitive ? query : query.toLowerCase()
     let count = 0
     let truncated = false
     try {
-      for (const [path, node] of this.nodes) {
-        if (this.cancelledSearches.has(searchId)) {
-          truncated = true
-          break
-        }
+      scan: for (const [path, node] of this.nodes) {
+        if (this.cancelledSearches.has(searchId)) break
         if (node.kind !== "file") continue
-        if (path.split("/").some((part) => ignored.has(part))) continue
-        if (pattern && !pattern.test(path)) continue
+        if (path.split("/").some((part) => IGNORED_SEGMENTS.has(part))) continue
+        if (pattern) {
+          const target = matchPath ? path : path.slice(path.lastIndexOf("/") + 1)
+          if (!pattern.test(target)) continue
+        }
         const lines = node.content.split("\n")
         for (let index = 0; index < lines.length; index++) {
+          if (this.cancelledSearches.has(searchId)) break scan
           const haystack = options.caseSensitive ? lines[index] : lines[index].toLowerCase()
           let at = haystack.indexOf(needle)
           while (at >= 0) {
+            if (this.cancelledSearches.has(searchId)) break scan
+            // Only a match that would be delivered beyond the cap truncates.
             if (count >= cap) {
               truncated = true
-              break
+              break scan
             }
             count += 1
             onMatch({
@@ -450,9 +491,7 @@ export class MockBridge implements Bridge {
             })
             at = haystack.indexOf(needle, at + Math.max(needle.length, 1))
           }
-          if (truncated) break
         }
-        if (truncated) break
       }
       return { count, truncated }
     } finally {
