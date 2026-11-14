@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { BridgeError, type AppInfo, type Bridge, type RuntimeInstallProgress } from "../bridge"
+import { redact } from "../errors/redact"
 import { CheckIcon, CpuIcon, RefreshIcon, TerminalIcon, XIcon } from "./Icons"
 
 interface Props {
@@ -574,7 +575,7 @@ export function RuntimeManager({ bridge, info, onOpenTerminal }: Props) {
               {installError && (
                 <div className="install-notice warning" role="alert">
                   <strong>Install failed ({installError.code})</strong>
-                  <p>{installErrorHint(installError.code, installError.message)}</p>
+                  <p>{installErrorHint(installError.code, redact(installError.message))}</p>
                 </div>
               )}
 

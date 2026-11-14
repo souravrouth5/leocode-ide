@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import { Sheet } from "./Sheet"
 import { StopIcon } from "./Icons"
+import { redact } from "../errors/redact"
 
 export interface RunSegment {
   stream: "stdout" | "stderr"
@@ -40,6 +41,10 @@ export function RunSheet({
 
   const started = running || exitCode !== null
 
+  // A failing run puts the host message here, so redact it like every other
+  // user-visible message sink (W-09).
+  const safeHint = hint ? redact(hint) : null
+
   const status = running
     ? "running"
     : exitCode === null
@@ -75,7 +80,7 @@ export function RunSheet({
           </pre>
         )}
 
-        {hint && <p className="run-hint">{hint}</p>}
+        {safeHint && <p className="run-hint">{safeHint}</p>}
 
         <div className="run-actions">
           {running ? (

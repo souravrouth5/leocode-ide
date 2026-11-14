@@ -21,11 +21,46 @@ import {
 } from "./types"
 import { MAX_MESSAGE_BYTES } from "./limits"
 import { isIdempotentRead, timeoutMsFor } from "./timeouts"
+import {
+  createBackgroundErrorReporter,
+  type BackgroundErrorReporter
+} from "../errors/background"
 
 /** The object injected by WebViewCompat.addWebMessageListener. */
 export interface InjectedChannel {
   postMessage: (data: string) => void
   onmessage: ((event: { data: string }) => void) | null
+}
+
+/** User-facing wording for a failed fire-and-forget call (W-23). */
+export const BACKGROUND_CONTEXT = {
+  terminalInput: "Terminal input is not reaching the shell",
+  terminalAck: "Terminal output is not being acknowledged",
+  terminalResize: "The terminal size is not reaching the shell",
+  terminalClose: "The terminal could not be closed",
+  stopProcess: "The process could not be stopped",
+  cancelInstall: "The install could not be cancelled"
+} as const
+
+export interface AndroidBridgeOptions {
+  /**
+   * Fire-and-forget failures, coalesced to one report per burst (W-23). Without
+   * a reporter they are logged once per burst instead of disappearing.
+   */
+  onBackgroundError?: (error: AppError, context: string) => void
+}
+
+function backgroundContextFor(method: string): string {
+  switch (method) {
+    case "term.ack":
+      return BACKGROUND_CONTEXT.terminalAck
+    case "term.resize":
+      return BACKGROUND_CONTEXT.terminalResize
+    case "term.close":
+      return BACKGROUND_CONTEXT.terminalClose
+    default:
+      return BACKGROUND_CONTEXT.terminalInput
+  }
 }
 
 interface Reply {
@@ -86,8 +121,24 @@ export class AndroidBridge implements Bridge {
   private disconnected = false
   /** Two timeouts in a row suggest the host is gone; the third disconnects. */
   private consecutiveTimeouts = 0
+  private readonly background: BackgroundErrorReporter
 
-  constructor(private readonly channel: InjectedChannel) {
+  constructor(
+    private readonly channel: InjectedChannel,
+    private readonly options: AndroidBridgeOptions = {}
+  ) {
+    this.background = createBackgroundErrorReporter((error, context) => {
+      // Keep the typed code for routing, and say what the user lost.
+      const code = error instanceof AppError ? error.code : "E_INTERNAL"
+      const detail = error instanceof Error ? error.message : String(error)
+      const report = this.options.onBackgroundError
+      if (report) {
+        report(new AppError(code, `${context} (${detail})`), context)
+        return
+      }
+      // No surface was wired (tests, a bare bridge): do not vanish either.
+      console.warn(`[leocode] ${context}: ${detail}`)
+    })
     channel.onmessage = (event) => this.receive(event.data)
     ;(window as any).__leocodeThemeEvent = (state: ThemeState) => {
       this.themeListeners.forEach((listener) => listener(state))
@@ -308,6 +359,17 @@ export class AndroidBridge implements Bridge {
     }
   }
 
+  /**
+   * Sends a fire-and-forget request. Typed input, acks and resizes have no
+   * caller to reject to, but a failure means the user's keystrokes are going
+   * nowhere, so it is reported once per burst instead of swallowed (W-23).
+   */
+  private postInBackground(method: string, payload: unknown) {
+    void this.request(method, payload).catch((error: unknown) => {
+      this.background(error, backgroundContextFor(method))
+    })
+  }
+
   /** The client gave up; stop what the host started when the reply finally lands. */
   private cancelLateRequest(
     late: { method: string; payload: unknown },
@@ -407,8 +469,10 @@ export class AndroidBridge implements Bridge {
 
     onStart?.({
       cancel: () => {
-        void this.request("proc.cancel", { jobId: reply.jobId }).catch(() => {
-          /* cancellation is best effort; the exit event is authoritative */
+        void this.request("proc.cancel", { jobId: reply.jobId }).catch((error: unknown) => {
+          // Best effort: the exit event is authoritative, but a failure to stop
+          // a running process is worth saying once (W-23).
+          this.background(error, BACKGROUND_CONTEXT.stopProcess)
         })
       }
     })
@@ -441,11 +505,7 @@ export class AndroidBridge implements Bridge {
     request?: RequestOptions
   ): Promise<TerminalHandle | null> {
     const channel = new TerminalChannel(
-      (method, payload) => {
-        void this.request(method, payload).catch(() => {
-          /* stream cleanup is handled by term.exit / term.attach */
-        })
-      },
+      (method, payload) => this.postInBackground(method, payload),
       options.onData,
       options.onExit,
       false
@@ -490,11 +550,7 @@ export class AndroidBridge implements Bridge {
     request?: RequestOptions
   ): Promise<TerminalAttach | null> {
     const channel = new TerminalChannel(
-      (method, payload) => {
-        void this.request(method, payload).catch(() => {
-          /* the PTY is gone; term.exit drives the UI */
-        })
-      },
+      (method, payload) => this.postInBackground(method, payload),
       options.onData,
       options.onExit,
       true
@@ -579,8 +635,10 @@ export class AndroidBridge implements Bridge {
 
     onStart?.({
       cancel: () => {
-        void this.request("runtime.cancel", { id }).catch(() => {
-          /* the install's own progress/exit drives the UI */
+        void this.request("runtime.cancel", { id }).catch((error: unknown) => {
+          // The install's own progress/exit drives the UI; a failed cancel must
+          // still be visible once (W-23).
+          this.background(error, BACKGROUND_CONTEXT.cancelInstall)
         })
       }
     })

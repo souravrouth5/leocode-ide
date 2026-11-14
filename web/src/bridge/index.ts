@@ -1,6 +1,6 @@
 import { AndroidBridge, type InjectedChannel } from "./android"
 import { MockBridge } from "./mock"
-import type { Bridge } from "./types"
+import type { AppError, Bridge } from "./types"
 
 declare global {
   interface Window {
@@ -11,6 +11,14 @@ declare global {
 }
 
 export type BridgeResult = { bridge: Bridge } | { error: string }
+
+export interface CreateBridgeOptions {
+  /**
+   * Fire-and-forget failures (terminal input, acks, cancels) are reported here
+   * once per burst (W-23). Wired to the errors store by `App`.
+   */
+  onBackgroundError?: (error: AppError, context: string) => void
+}
 
 function injectedChannel(): InjectedChannel | null {
   const channel = window.LeoCodeAndroid
@@ -43,7 +51,9 @@ async function waitForChannel(): Promise<InjectedChannel | null> {
  * A browser falls back to the in-memory mock; a host page without a channel is a
  * real start-up failure and says so.
  */
-export async function createBridge(): Promise<BridgeResult> {
+export async function createBridge(
+  options: CreateBridgeOptions = {}
+): Promise<BridgeResult> {
   const channel = await waitForChannel()
   if (!channel) {
     if (isHostOrigin()) {
@@ -55,7 +65,9 @@ export async function createBridge(): Promise<BridgeResult> {
     return { bridge: new MockBridge() }
   }
 
-  const bridge = new AndroidBridge(channel)
+  const bridge = new AndroidBridge(channel, {
+    onBackgroundError: options.onBackgroundError
+  })
   try {
     // A handshake, not a user request: a dead host should not delay the boot for 10 s.
     const info = await bridge.info({ timeoutMs: 2_000 })

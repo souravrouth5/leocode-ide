@@ -1,4 +1,5 @@
 import { copyText } from "./clipboard"
+import { redact } from "./redact"
 
 interface PaneErrorProps {
   title?: string
@@ -7,13 +8,19 @@ interface PaneErrorProps {
   onNotice?: (message: string) => void
 }
 
-/** Fallback for a crashed pane: the rest of the IDE keeps working. */
+/**
+ * Fallback for a crashed pane: the rest of the IDE keeps working.
+ *
+ * A render error can embed anything a dependency printed, so the text and the
+ * copied details are redacted (W-09).
+ */
 export function PaneError({ title = "This panel crashed", error, onRetry, onNotice }: PaneErrorProps) {
+  const message = redact(error.message)
   return (
     <div className="pane-error" role="alert">
       <div className="pane-error-mark">!</div>
       <h3>{title}</h3>
-      <p>{error.message}</p>
+      <p>{message}</p>
       <div className="pane-error-actions">
         <button className="btn primary" onClick={onRetry}>
           Try again
@@ -21,7 +28,7 @@ export function PaneError({ title = "This panel crashed", error, onRetry, onNoti
         <button
           className="btn ghost"
           onClick={() => {
-            void copyText(`${error.name}: ${error.message}`).then((copied) =>
+            void copyText(redact(`${error.name}: ${error.message}`)).then((copied) =>
               onNotice?.(copied ? "Details copied" : "Could not copy details")
             )
           }}
@@ -49,7 +56,7 @@ export function CrashScreen({ error, onReload, onNotice }: CrashScreenProps) {
         The interface hit an unexpected problem. Your files and workspace on disk are
         unchanged.
       </p>
-      <pre className="crash-message">{error.message}</pre>
+      <pre className="crash-message">{redact(error.message)}</pre>
       <div className="crash-actions">
         <button className="btn primary" onClick={onReload}>
           Reload LeoCode
@@ -57,7 +64,7 @@ export function CrashScreen({ error, onReload, onNotice }: CrashScreenProps) {
         <button
           className="btn ghost"
           onClick={() => {
-            void copyText(`${error.name}: ${error.message}`).then((copied) =>
+            void copyText(redact(`${error.name}: ${error.message}`)).then((copied) =>
               onNotice?.(copied ? "Details copied" : "Could not copy details")
             )
           }}

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { AndroidBridge, type InjectedChannel } from "./android"
+import { AndroidBridge, BACKGROUND_CONTEXT, type InjectedChannel } from "./android"
+import type { AppError } from "./types"
 
 interface Sent {
   v: number
@@ -270,5 +271,88 @@ describe("AndroidBridge transport (Task 11)", () => {
     received[0]?.done?.()
     await Promise.resolve()
     expect(channel.sent.filter((message) => message.method === "term.ack")).toHaveLength(1)
+  })
+
+  // ---------------------------------------------------------------- W-23
+
+  /** Index of the most recent request of `method`, or -1. */
+  function lastSent(channel: FakeChannel, method: string): number {
+    for (let index = channel.sent.length - 1; index >= 0; index -= 1) {
+      if (channel.sent[index].method === method) return index
+    }
+    return -1
+  }
+
+  async function openTerminal(bridge: AndroidBridge, channel: FakeChannel) {
+    const opening = bridge.openTerminal({
+      cwd: ".",
+      cols: 80,
+      rows: 24,
+      onData: () => {},
+      onExit: () => {}
+    })
+    channel.reply(0, { sessionId: "s1", pid: 1 })
+    const handle = await opening
+    expect(handle).not.toBeNull()
+    return handle!
+  }
+
+  it("reports a burst of failing terminal writes once", async () => {
+    const channel = new FakeChannel()
+    const onBackgroundError = vi.fn()
+    const bridge = new AndroidBridge(channel, { onBackgroundError })
+    const handle = await openTerminal(bridge, channel)
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      handle.write(new Uint8Array([0x6c, 0x73]))
+      await vi.advanceTimersByTimeAsync(20)
+      const write = lastSent(channel, "term.write")
+      expect(write, `term.write ${attempt}`).toBeGreaterThan(-1)
+      channel.fail(write, "E_IO", "the PTY is gone")
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    expect(onBackgroundError).toHaveBeenCalledTimes(1)
+    const [error, context] = onBackgroundError.mock.calls[0] as [AppError, string]
+    expect(context).toBe(BACKGROUND_CONTEXT.terminalInput)
+    expect(error.code).toBe("E_IO")
+    expect(error.message).toContain("Terminal input is not reaching the shell")
+  })
+
+  it("stays quiet while terminal input reaches the shell", async () => {
+    const channel = new FakeChannel()
+    const onBackgroundError = vi.fn()
+    const bridge = new AndroidBridge(channel, { onBackgroundError })
+    const handle = await openTerminal(bridge, channel)
+
+    handle.write(new Uint8Array([0x61]))
+    await vi.advanceTimersByTimeAsync(20)
+    channel.reply(lastSent(channel, "term.write"), {})
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onBackgroundError).not.toHaveBeenCalled()
+  })
+
+  it("reports a burst of failed process stops once", async () => {
+    const channel = new FakeChannel()
+    const onBackgroundError = vi.fn()
+    const bridge = new AndroidBridge(channel, { onBackgroundError })
+
+    let cancel: (() => void) | null = null
+    void bridge.run(["sleep", "10"], ".", () => {}, (handle) => {
+      cancel = handle.cancel
+    })
+    channel.reply(0, { jobId: "job-1" })
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve()
+    expect(cancel).not.toBeNull()
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      cancel!()
+      channel.fail(lastSent(channel, "proc.cancel"), "E_TIMEOUT", "host busy")
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    expect(onBackgroundError).toHaveBeenCalledTimes(1)
+    expect(onBackgroundError.mock.calls[0][1]).toBe(BACKGROUND_CONTEXT.stopProcess)
   })
 })

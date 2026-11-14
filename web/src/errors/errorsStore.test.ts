@@ -41,4 +41,26 @@ describe("errors store routing (Task 12)", () => {
     expect(store.getState().sheet?.error.code).toBe("E_INTERNAL")
     expect(store.getState().sheet?.context).toBe("test")
   })
+
+  it("redacts the snackbar detail (W-09)", () => {
+    const notify = vi.fn()
+    const store = createErrorsStore(notify)
+    store.getState().report(
+      new AppError(
+        "E_NOT_FOUND",
+        "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz in /data/user/0/dev.leocode/files/x"
+      )
+    )
+
+    const notice = notify.mock.calls[0][0] as { detail: string }
+    expect(notice.detail).toBe("GITHUB_TOKEN=<redacted> in <path>")
+  })
+
+  it("tags every report with a correlation id", () => {
+    const store = createErrorsStore(vi.fn())
+    const active = store.getState().report(new AppError("E_IO", "write failed"))
+
+    expect(active.correlationId).toMatch(/^lc-/)
+    expect(store.getState().sheet?.correlationId).toBe(active.correlationId)
+  })
 })

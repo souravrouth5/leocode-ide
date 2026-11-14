@@ -48,7 +48,7 @@ export function AppDialogs({ version }: { version: string }) {
         onConfirm={(value) => void submitPrompt(stores, value)}
       />
 
-      <ErrorSurfaces errors={errors} notifications={notifications} />
+      <ErrorSurfaces errors={errors} notifications={notifications} version={version} />
     </>
   )
 }

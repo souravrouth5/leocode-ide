@@ -1,4 +1,5 @@
 import { AppError, type ErrorCode } from "../bridge/types"
+import { redact } from "./redact"
 
 /**
  * One entry per generated `ErrorCode`, `docs/bridge-contract.md` § Error codes
@@ -230,15 +231,42 @@ export function toAppError(error: unknown): AppError {
   return new AppError("E_INTERNAL", String(error))
 }
 
-/** Text for the sheet's "Copy details" action. No paths, tokens or stacks. */
-export function errorDetails(error: AppError, context?: string): string {
+/** A short id that ties a user's "Copy details" text to one reported error. */
+let correlationSeq = 0
+
+export function nextCorrelationId(now: number = Date.now()): string {
+  correlationSeq = (correlationSeq + 1) % 0x1_0000
+  return `lc-${now.toString(36)}-${correlationSeq.toString(36)}`
+}
+
+export interface ErrorDetailsOptions {
+  /** `app.info` version, when the shell already knows it. */
+  version?: string
+  /** Set by `errorsStore.report` so a report can be matched to a surface. */
+  correlationId?: string
+  /** Injectable clock, for tests. */
+  when?: Date
+}
+
+/**
+ * Text for the sheet's "Copy details" action. Secrets, URL credentials and
+ * absolute app paths are masked (W-09); the message never carries a stack.
+ */
+export function errorDetails(
+  error: AppError,
+  context?: string,
+  options: ErrorDetailsOptions = {}
+): string {
   const entry = catalogFor(error.code)
   return [
     `LeoCode error: ${error.code}`,
     `Title: ${entry.title}`,
-    context ? `During: ${context}` : null,
-    `Message: ${error.message}`,
-    `When: ${new Date().toISOString()}`
+    `Message: ${redact(error.message)}`,
+    context ? `During: ${redact(context)}` : null,
+    `When: ${(options.when ?? new Date()).toISOString()}`,
+    `Surface: ${entry.surface}`,
+    `Version: ${options.version ?? "unknown"}`,
+    `Correlation: ${options.correlationId ?? "unknown"}`
   ]
     .filter((line): line is string => line !== null)
     .join("\n")

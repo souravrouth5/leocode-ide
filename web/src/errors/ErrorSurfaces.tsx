@@ -3,16 +3,19 @@ import type { StoreApi } from "zustand/vanilla"
 import { InlineBanner } from "./InlineBanner"
 import { ErrorSheet } from "./ErrorSheet"
 import { Snackbar } from "./Snackbar"
+import { redact } from "./redact"
 import type { ErrorsState } from "./errorsStore"
 import type { NotificationsState } from "../notifications/notificationsStore"
 
 interface ErrorSurfacesProps {
   errors: StoreApi<ErrorsState>
   notifications: StoreApi<NotificationsState>
+  /** `app.info` version, included in the sheet's Copy details (W-09). */
+  version?: string
 }
 
 /** Renders the active banner, sheet and the head of the snackbar queue. */
-export function ErrorSurfaces({ errors, notifications }: ErrorSurfacesProps) {
+export function ErrorSurfaces({ errors, notifications, version }: ErrorSurfacesProps) {
   const banner = useStore(errors, (state) => state.banner)
   const sheet = useStore(errors, (state) => state.sheet)
   const queue = useStore(notifications, (state) => state.queue)
@@ -37,7 +40,7 @@ export function ErrorSurfaces({ errors, notifications }: ErrorSurfacesProps) {
         <div className="banner-slot">
           <InlineBanner
             title={banner.entry.title}
-            message={banner.error.message}
+            message={redact(banner.error.message)}
             tone={banner.entry.severity === "error" ? "error" : "warning"}
             actionLabel={bannerAction?.label}
             onAction={bannerAction?.run}
@@ -45,7 +48,12 @@ export function ErrorSurfaces({ errors, notifications }: ErrorSurfacesProps) {
           />
         </div>
       )}
-      <ErrorSheet active={sheet} onClose={dismissSheet} onNotice={notify} />
+      <ErrorSheet
+        active={sheet}
+        onClose={dismissSheet}
+        onNotice={notify}
+        version={version}
+      />
       <Snackbar notice={notice} onDismiss={dismissNotice} />
     </>
   )

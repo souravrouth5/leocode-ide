@@ -1,10 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
 import { StoresProvider, createAppStores, type AppStores } from "./app/stores"
 import { createBridge, type AppInfo, type Bridge, type ThemeState } from "./bridge"
 import { LeoCodeLogo } from "./components/Icons"
 import { CrashScreen } from "./errors/CrashScreen"
 import { ErrorBoundary } from "./errors/ErrorBoundary"
-import { installGlobalErrorHandlers } from "./errors/globalHandlers"
+import { createBootErrorQueue, installGlobalErrorHandlers } from "./errors/globalHandlers"
+import { errorMessage, redact } from "./errors/redact"
 import { simulatedError } from "./errors/simulate"
 import { Shell } from "./features/shell/Shell"
 import { ThemeProvider } from "./theme/ThemeProvider"
@@ -21,20 +29,57 @@ export default function App() {
 
   const [bridge, setBridge] = useState<Bridge | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
+  const [bootDetail, setBootDetail] = useState<string | null>(null)
   const stores = useMemo(() => (bridge ? createAppStores(bridge) : null), [bridge])
+  const storesRef = useRef<AppStores | null>(null)
+  const bootErrors = useMemo(() => createBootErrorQueue(3), [])
 
-  useEffect(
-    () =>
-      installGlobalErrorHandlers((error, context) => {
-        if (stores) stores.errors.getState().report(error, { context })
-      }),
-    [stores]
+  useEffect(() => {
+    storesRef.current = stores
+  }, [stores])
+
+  /**
+   * A boot-time failure has no error store to land in yet. Keep it, and report it
+   * once the stores mount; if boot never completes, `BootError` renders it (W-11).
+   */
+  const reportError = useCallback(
+    (error: unknown, context?: string) => {
+      const target = storesRef.current
+      if (target) {
+        target.errors.getState().report(error, { context })
+        return
+      }
+      bootErrors.capture(error, context ?? "startup")
+      setBootDetail(redact(errorMessage(error)))
+    },
+    [bootErrors]
+  )
+
+  useEffect(() => {
+    if (!stores) return
+    bootErrors.flush((error, context) => {
+      stores.errors.getState().report(error, { context })
+    })
+  }, [stores, bootErrors])
+
+  useEffect(() => installGlobalErrorHandlers(reportError), [reportError])
+
+  /** Fire-and-forget bridge failures (W-23) land on the same surfaces. */
+  const reportBackground = useCallback(
+    (error: unknown, context: string) => {
+      const target = storesRef.current
+      if (target) target.errors.getState().report(error, { context })
+      else bootErrors.capture(error, context)
+    },
+    [bootErrors]
   )
 
   useEffect(() => {
     if (bridge) return
     let cancelled = false
-    void createBridge().then((result) => {
+    void createBridge({
+      onBackgroundError: (error, context) => reportBackground(error, context)
+    }).then((result) => {
       if (cancelled) return
       if ("error" in result) setBootError(result.error)
       else setBridge(result.bridge)
@@ -42,7 +87,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [bridge])
+  }, [bridge, reportBackground])
 
   return (
     <ErrorBoundary
@@ -61,7 +106,7 @@ export default function App() {
       )}
     >
       {bootError ? (
-        <BootError message={bootError} />
+        <BootError message={redact(bootError)} detail={bootDetail} />
       ) : !stores ? (
         <Splash />
       ) : (
@@ -101,7 +146,13 @@ function Boot({ stores }: { stores: AppStores }) {
 
   const theme: ThemeState | null = info?.theme ?? null
   return (
-    <ThemeProvider bridge={stores.bridge} initial={theme}>
+    <ThemeProvider
+      bridge={stores.bridge}
+      initial={theme}
+      onError={(error, context) => {
+        stores.errors.getState().report(error, { context })
+      }}
+    >
       <Shell info={info} />
     </ThemeProvider>
   )
@@ -117,12 +168,13 @@ function Splash() {
   )
 }
 
-function BootError({ message }: { message: string }) {
+function BootError({ message, detail }: { message: string; detail?: string | null }) {
   return (
     <div className="splash">
       <div className="splash-mark warn">!</div>
       <div className="splash-name">Bridge unavailable</div>
       <p className="splash-note">{message}</p>
+      {detail && <p className="splash-note">{detail}</p>}
     </div>
   )
 }

@@ -4,9 +4,11 @@ import { Snackbar } from "./Snackbar"
 import { InlineBanner } from "./InlineBanner"
 import { ErrorSheet } from "./ErrorSheet"
 import { ErrorBoundary } from "./ErrorBoundary"
+import { ErrorSurfaces } from "./ErrorSurfaces"
 import { PaneError } from "./CrashScreen"
+import { createErrorsStore, type ActiveError } from "./errorsStore"
+import { createNotificationsStore } from "../notifications/notificationsStore"
 import { AppError } from "../bridge/types"
-import type { ActiveError } from "./errorsStore"
 
 afterEach(cleanup)
 
@@ -140,5 +142,86 @@ describe("error surfaces (Task 12)", () => {
 
     expect(writeText).toHaveBeenCalledTimes(1)
     expect(writeText.mock.calls[0][0]).toContain("E_IO")
+  })
+
+  it("redacts the message it renders and copies (W-09)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    })
+    const active: ActiveError = {
+      error: new AppError(
+        "E_AUTH",
+        "Bearer abcdefghijklmnop for https://user:hunter2@git.example.com/x from /data/user/0/dev.leocode"
+      ),
+      entry: {
+        title: "Authentication failed",
+        explanation: "The remote service rejected the saved credential.",
+        surface: "sheet",
+        severity: "error",
+        action: { label: "Dismiss", kind: "dismiss" }
+      },
+      context: "Push /storage/emulated/0/Download/repo",
+      correlationId: "lc-test-9"
+    }
+
+    render(<ErrorSheet active={active} onClose={vi.fn()} version="0.1.0" />)
+    const text = screen.getByRole("dialog").textContent ?? ""
+    expect(text).not.toContain("hunter2")
+    expect(text).not.toContain("abcdefghijklmnop")
+    expect(text).not.toContain("/data/user/0")
+    expect(text).not.toContain("/storage/emulated/0")
+    expect(text).toContain("<redacted>")
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy details" }))
+    await Promise.resolve()
+    await Promise.resolve()
+    const copied = writeText.mock.calls[0][0] as string
+    expect(copied).toContain("Version: 0.1.0")
+    expect(copied).toContain("Correlation: lc-test-9")
+    expect(copied).not.toContain("hunter2")
+  })
+
+  it("redacts the banner message (W-09)", () => {
+    const notifications = createNotificationsStore()
+    const errors = createErrorsStore((notice) => notifications.getState().enqueue(notice))
+    errors.getState().report(
+      new AppError(
+        "E_TIMEOUT",
+        "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz at /data/user/0/dev.leocode/files"
+      )
+    )
+
+    render(
+      <ErrorSurfaces errors={errors} notifications={notifications} version="0.1.0" />
+    )
+    const banner = screen.getByRole("alert").textContent ?? ""
+    expect(banner).toContain("<redacted>")
+    expect(banner).not.toContain("ghp_")
+    expect(banner).not.toContain("/data/user/0")
+  })
+
+  it("redacts a copied pane crash (W-09)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    })
+
+    render(
+      <PaneError
+        error={new Error("sk-proj-abcdefghijklmnop1234 leaked from /storage/emulated/0/x")}
+        onRetry={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("alert").textContent).not.toContain("sk-proj-")
+    fireEvent.click(screen.getByRole("button", { name: "Copy details" }))
+    await Promise.resolve()
+    await Promise.resolve()
+    const copied = writeText.mock.calls[0][0] as string
+    expect(copied).not.toContain("sk-proj-")
+    expect(copied).not.toContain("/storage/emulated/0")
   })
 })
