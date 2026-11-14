@@ -76,6 +76,9 @@ class PtySession private constructor(
     override val pid: Int
 ) : PtyProcess {
     companion object {
+        private const val DESTROY_GRACE_MS = 1_500L
+        private const val DESTROY_POLL_MS = 25L
+
         /** Opens an interactive `/system/bin/sh -i` in a new session/process group. */
         fun openShell(cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? =
             open("exec /system/bin/sh -i", cwd, env, rows, cols)
@@ -145,7 +148,8 @@ class PtySession private constructor(
 
     override fun resize(rows: Int, cols: Int) {
         if (closed) return
-        NativePty.setWindowSize(descriptor.fd, rows, cols)
+        // The fd can be closed between the flag check and the ioctl (L-18).
+        runCatching { NativePty.setWindowSize(descriptor.fd, rows, cols) }
     }
 
     override fun waitFor(): Int = NativePty.waitFor(pid)
@@ -153,9 +157,23 @@ class PtySession private constructor(
     override fun destroy() {
         if (closed) return
         closed = true
-        // Kill the group first: that closes the slave side and unblocks any reader.
+        // SIGTERM first, then a short grace period; SIGKILL only for a child that
+        // ignores it (L-17). Called on the pump thread after waitFor() the pid is
+        // already gone, so this normally returns immediately.
         NativePty.killGroup(pid, OsConstants.SIGTERM)
-        NativePty.killGroup(pid, OsConstants.SIGKILL)
+        var waited = 0L
+        while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
+            try {
+                Thread.sleep(DESTROY_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+            waited += DESTROY_POLL_MS
+        }
+        if (ProcessStartTime.read(pid) != null) {
+            NativePty.killGroup(pid, OsConstants.SIGKILL)
+        }
         runCatching { descriptor.close() }
     }
 }

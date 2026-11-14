@@ -244,7 +244,7 @@ class TerminalRegistry(
                 queued.clear()
                 queuedBytes = 0
                 pendingExit = null
-                val snapshot = Snapshot(id, ring.snapshot(), alive, exitCode)
+                val snapshot = Snapshot(id, ring.snapshotAligned(), alive, exitCode)
                 if (!alive) {
                     listener = null
                     return Attachment(snapshot) {}

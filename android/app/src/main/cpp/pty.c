@@ -14,7 +14,6 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
-#include <android/api-level.h>
 
 #define TAG "LeoCodePty"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -89,29 +88,19 @@ static void reset_child_signals(void) {
 }
 
 /*
- * close_range() is only in the seccomp allowlist from Android 11. On Android 9
- * an unknown syscall is killed with SIGSYS (not ENOSYS), which killed the whole
- * bridge thread when the terminal opened on D1. Gate it on the device API level
- * and keep the bounded loop elsewhere.
+ * Close every fd above stderr that the JVM/Zygote handed to the child.
+ *
+ * close_range() is not used at all: it is absent from the Android 9 seccomp
+ * allowlist (SIGSYS kills the bridge thread) and its presence on Android 11–14
+ * was never verified (L-16). The bounded loop below only uses close(), which is
+ * async-signal-safe, and caps the walk so a huge RLIMIT cannot stall the child
+ * (L-19). Called after the PTY is dup2()'d onto 0/1/2.
  */
-static int close_range_supported(void) {
-    int api = android_get_device_api_level();
-    return api >= 30;
-}
+/* Computed in the parent before fork(); sysconf is not async-signal-safe. */
+static long g_close_max = 65536;
 
-/*
- * Close every fd above stderr that the JVM/Zygote handed to the child. The
- * kernel-level close_range is one syscall and is preferred where it is allowed;
- * the fallback loop is bounded so a huge RLIMIT cannot stall the child. Called
- * after the PTY is dup2()'d onto 0/1/2.
- */
 static void close_inherited_fds(void) {
-#if defined(SYS_close_range)
-    if (close_range_supported() && syscall(SYS_close_range, 3U, ~0U, 0U) == 0) return;
-#endif
-    long max = sysconf(_SC_OPEN_MAX);
-    if (max < 3 || max > 65536) max = 65536;
-    for (int fd = 3; fd < (int) max; fd++) close(fd);
+    for (int fd = 3; fd < (int) g_close_max; fd++) close(fd);
 }
 
 /*
@@ -181,6 +170,10 @@ Java_dev_leocode_core_NativePty_createSubprocess(
     }
 
     set_winsize(master, rows, cols);
+
+    /* Precompute the fd bound outside the child (L-19). */
+    long open_max = sysconf(_SC_OPEN_MAX);
+    g_close_max = (open_max < 3 || open_max > 65536) ? 65536 : open_max;
 
     pid = fork();
     if (pid < 0) {

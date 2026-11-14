@@ -2,6 +2,8 @@ package dev.leocode.core
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RingBufferTest {
@@ -52,5 +54,26 @@ class RingBufferTest {
         ring.clear()
         assertEquals(0, ring.size())
         assertArrayEquals(ByteArray(0), ring.snapshot())
+    }
+
+    @Test
+    fun `an aligned snapshot starts on a line boundary after truncation`() {
+        val ring = RingBuffer(20)
+        ring.write("first-line\nsecond-line\nthird-line\n".toByteArray())
+
+        val aligned = ring.snapshotAligned()
+        val text = String(aligned, Charsets.UTF_8)
+
+        assertTrue("missing SGR reset: $text", text.startsWith("\u001b[0m"))
+        assertTrue(text.endsWith("third-line\n"))
+        assertFalse("replay began mid-line: $text", text.removePrefix("\u001b[0m").startsWith("ine"))
+    }
+
+    @Test
+    fun `an untrimmed snapshot is unchanged`() {
+        val ring = RingBuffer(100)
+        ring.write("hello".toByteArray())
+
+        assertArrayEquals("hello".toByteArray(), ring.snapshotAligned())
     }
 }

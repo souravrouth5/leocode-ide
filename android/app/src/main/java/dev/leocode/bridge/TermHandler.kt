@@ -73,6 +73,7 @@ class TermHandler(
     private fun handle(method: String, payload: JsonObject, sink: StreamSink): JsonElement = when (method) {
         // Synchronous dispatch (tests) gets the reply once streaming has begun.
         "term.open" -> openSession(payload, sink).let { opened ->
+            if (opened.scrollback.isNotEmpty()) sink.bytes("term.data", opened.scrollback)
             opened.attachment.start()
             opened.reply
         }
@@ -100,13 +101,17 @@ class TermHandler(
 
     private class OpenedSession(
         val reply: JsonElement,
-        val attachment: TerminalRegistry.Attachment
+        val attachment: TerminalRegistry.Attachment,
+        /** Output produced between spawn and attach; sent before live data (L-21). */
+        val scrollback: ByteArray
     )
 
     private fun open(payload: JsonObject, respond: (AsyncReply) -> Unit, sink: StreamSink) {
         val opened = openSession(payload, sink)
         respond(AsyncReply.Ok(opened.reply))
-        // The reply is queued on the main thread; live data posted after it.
+        // The reply is queued on the main thread; the early output and then live
+        // data are posted after it, in that order.
+        if (opened.scrollback.isNotEmpty()) sink.bytes("term.data", opened.scrollback)
         opened.attachment.start()
     }
 
@@ -140,7 +145,7 @@ class TermHandler(
             TermOpenReply.serializer(),
             TermOpenReply(opened.sessionId, opened.pid)
         )
-        return OpenedSession(reply, attachment)
+        return OpenedSession(reply, attachment, attachment.snapshot.scrollback)
     }
 
     private fun listener(sink: StreamSink) = object : TerminalRegistry.Listener {

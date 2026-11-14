@@ -19,6 +19,8 @@ class RingBuffer(private val capacity: Int) {
 
     private val chunks = ArrayDeque<Chunk>()
     private var total = 0
+    /** True once any byte at the head was dropped; snapshots then start mid-stream. */
+    private var truncated = false
 
     /** Number of bytes currently buffered. */
     @Synchronized
@@ -43,6 +45,7 @@ class RingBuffer(private val capacity: Int) {
         if (incoming.size >= capacity) {
             chunks.clear()
             total = 0
+            truncated = true
         }
 
         chunks.addLast(Chunk(incoming, 0, incoming.size))
@@ -59,6 +62,7 @@ class RingBuffer(private val capacity: Int) {
                 head.length -= drop
                 total -= drop
             }
+            truncated = true
         }
     }
 
@@ -72,5 +76,28 @@ class RingBuffer(private val capacity: Int) {
             position += chunk.length
         }
         return out
+    }
+
+    /**
+     * Replay view for `term.attach`: if the head was trimmed, start at the next
+     * complete line and reset SGR state, so a replay cannot begin in the middle
+     * of an escape sequence (L-22). An untrimmed buffer is returned unchanged.
+     */
+    @Synchronized
+    fun snapshotAligned(): ByteArray {
+        val raw = snapshot()
+        if (!truncated || raw.isEmpty()) return raw
+        val newline = raw.indexOf(NEWLINE)
+        if (newline < 0 || newline + 1 >= raw.size) return raw
+        val body = raw.copyOfRange(newline + 1, raw.size)
+        val reset = "\u001b[0m".toByteArray(Charsets.US_ASCII)
+        val out = ByteArray(reset.size + body.size)
+        System.arraycopy(reset, 0, out, 0, reset.size)
+        System.arraycopy(body, 0, out, reset.size, body.size)
+        return out
+    }
+
+    private companion object {
+        const val NEWLINE = 10.toByte()
     }
 }
