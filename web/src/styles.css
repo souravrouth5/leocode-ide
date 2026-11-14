@@ -1,8 +1,54 @@
 /* ==========================================================================
+   LeoCode — bundled fonts (Task 8)
+   App assets, not a network request. The variable subsets cover 100–900, so
+   the 400/500/600 weights used by the editor and terminal need one file each.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/fira-code.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/jetbrains-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Roboto Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/roboto-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Code Pro";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/source-code-pro.woff2") format("woff2");
+}
+
+/* ==========================================================================
    LeoCode — theme tokens
    The boot script in index.html sets data-theme before first paint, so there is
    no flash. Everything below only swaps custom properties; no layout changes.
    ========================================================================== */
+
+/* Android forwards real insets as CSS pixels; these fallbacks keep the browser
+   preview and older WebViews usable. */
+:root {
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+  --ime-bottom: 0px;
+}
 
 :root,
 :root[data-theme="dark"] {
@@ -168,7 +214,8 @@ ul {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--inset-top);
+  padding-bottom: var(--ime-bottom);
 }
 
 .app-bar {
@@ -874,7 +921,7 @@ ul {
 }
 
 .terminal-keys {
-  padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(6px + var(--inset-bottom));
 }
 
 /* ================================================================== tabs */
@@ -885,7 +932,7 @@ ul {
   align-items: stretch;
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--inset-bottom);
   transition: background-color 160ms ease, border-color 160ms ease;
 }
 
@@ -1000,7 +1047,7 @@ ul {
   background: var(--surface);
   border-radius: 20px 20px 0 0;
   box-shadow: var(--shadow);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--inset-bottom);
   transform: translate3d(0, 102%, 0);
   transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
@@ -1313,7 +1360,7 @@ ul {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 2px 0 calc(6px + env(safe-area-inset-bottom, 0px));
+  padding: 2px 0 calc(6px + var(--inset-bottom));
 }
 
 /* ============================================================== responsive */
@@ -1347,7 +1394,7 @@ ul {
   overflow-y: auto;
   height: 100%;
   box-sizing: border-box;
-  padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(32px + var(--inset-bottom));
 }
 
 .runtime-header {

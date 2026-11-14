@@ -9,14 +9,9 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0f1115" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Roboto+Mono:wght@400;500&family=Source+Code+Pro:wght@400;600&display=swap"
-      media="print"
-      onload="this.media='all'"
-    />
+    <!-- Task 8: strict policy for the asset origin. Vite replaces the
+         placeholder with a dev-only policy that allows the HMR websocket. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'self'; connect-src 'self'" />
     <link rel="icon" type="image/png" href="./logo.png" />
     <title>LeoCode</title>
     <style>
@@ -64,41 +59,11 @@
         color: #8b93a3;
       }
     </style>
-    <script>
-      // Runs before the stylesheet so the first paint already has the right
-      // colours. The Android host passes ?theme=<mode>; otherwise we fall back to
-      // the persisted choice, then to the system preference.
-      ;(function () {
-        var DARK = "#0f1115"
-        var LIGHT = "#f7f8fa"
-        try {
-          var params = new URLSearchParams(location.search)
-          var fromUrl = params.get("mode")
-          if (fromUrl === "system" || fromUrl === "light" || fromUrl === "dark") {
-            localStorage.setItem("leocode.theme", fromUrl)
-          }
-          var stored = localStorage.getItem("leocode.theme") || "system"
-          var forced = params.get("theme")
-          var systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
-          var dark = forced === "dark" || forced === "light"
-            ? forced === "dark"
-            : stored === "dark" || (stored === "system" && systemDark)
-          var theme = dark ? "dark" : "light"
-          var root = document.documentElement
-          root.dataset.theme = theme
-          root.style.colorScheme = theme
-          root.style.backgroundColor = dark ? DARK : LIGHT
-          var meta = document.querySelector('meta[name="theme-color"]')
-          if (meta) meta.setAttribute("content", dark ? DARK : LIGHT)
-        } catch (e) {
-          document.documentElement.dataset.theme = "dark"
-        }
-      })()
-    </script>
-    <script type="module" crossorigin src="./assets/index-oC_Njvgz.js"></script>
+    <script src="./boot-theme.js"></script>
+    <script type="module" crossorigin src="./assets/index-DIfUePYP.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/react-cxkclgJA.js">
     <link rel="modulepreload" crossorigin href="./assets/codemirror-CXzKCYgy.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-C4_IStEf.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-CEjNzl4M.css">
   </head>
   <body>
     <div id="boot" aria-hidden="true">

@@ -1,9 +1,25 @@
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
+import { CSP_PLACEHOLDER, DEV_CSP, PROD_CSP } from "./src/csp"
+
+/**
+ * Replace the CSP placeholder in index.html. `npm run build` bakes the strict
+ * policy; `npm run dev` swaps in the HMR-friendly variant so React Fast Refresh
+ * keeps working without weakening the shipped APK.
+ */
+function cspPlugin(command: "build" | "serve") {
+  const policy = command === "serve" ? DEV_CSP : PROD_CSP
+  return {
+    name: "leocode-csp",
+    transformIndexHtml(html: string) {
+      return html.replace(CSP_PLACEHOLDER, policy)
+    }
+  }
+}
 
 // Build output is copied into android/app/src/main/assets/web by the CI job.
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ command }) => ({
+  plugins: [cspPlugin(command), react()],
   base: "./",
   build: {
     outDir: "dist",
@@ -31,4 +47,4 @@ export default defineConfig({
     port: 5173,
     strictPort: true
   }
-})
+}))
