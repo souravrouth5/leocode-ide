@@ -45,6 +45,8 @@ import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.ThemeState
 import dev.leocode.core.AtomicWriter
 import dev.leocode.core.CrashStore
+import dev.leocode.core.ImportBudget
+import dev.leocode.core.ImportStaging
 import dev.leocode.core.Workspace
 import java.io.File
 import java.io.IOException
@@ -84,8 +86,6 @@ class MainActivity : ComponentActivity(), SafPort {
 
         /** Hard cap for a restore archive copied through SAF. */
         private const val MAX_BACKUP_BYTES = 512L * 1024 * 1024
-        private const val MAX_IMPORT_FILES = 20_000
-        private const val MAX_IMPORT_BYTES = 512L * 1024 * 1024
     }
 
     private lateinit var themeManager: ThemeManager
@@ -305,8 +305,11 @@ class MainActivity : ComponentActivity(), SafPort {
                 return@registerForActivityResult
             }
             thread(name = "leocode-saf-restore") {
-                val result = runCatching {
-                    val target = File(cacheDir, "restore-${System.currentTimeMillis()}.zip")
+                // The local copy only lives until SafHandler restored it. Every
+                // failure path deletes it: a partial archive can be up to
+                // MAX_BACKUP_BYTES in cacheDir (PD-07).
+                val target = File(cacheDir, "restore-${System.currentTimeMillis()}.zip")
+                val result = try {
                     val input = contentResolver.openInputStream(uri)
                         ?: throw IOException("the provider returned no input stream")
                     var total = 0L
@@ -325,7 +328,10 @@ class MainActivity : ComponentActivity(), SafPort {
                             output.flush()
                         }
                     }
-                    target
+                    Result.success(target)
+                } catch (error: Throwable) {
+                    target.delete()
+                    Result.failure(error)
                 }
                 request.callback(result)
                 runOnUiThread { pumpArchive() }
@@ -1011,84 +1017,101 @@ class MainActivity : ComponentActivity(), SafPort {
      * Copies a SAF document tree into the active workspace. Runs on a worker
      * thread; every file is written under a fresh name, so an import never
      * silently overwrites a document that already exists.
+     *
+     * The provider is copied into a staging directory under `workspace.tmp`
+     * first (PD-06). Only a complete copy is moved into the workspace, so a
+     * provider error or a cap hit leaves the workspace exactly as it was, and
+     * the real reason (limit, nesting) reaches `SafHandler`.
      */
     private fun importTree(treeUri: Uri, request: TreeRequest): SafTreeResult {
-        val active = (application as LeoApp).graphOrThrow().workspaceStore.activeDirectory()
+        val graph = (application as LeoApp).graphOrThrow()
+        val active = graph.workspaceStore.activeDirectory()
         val activeCanonical = active.canonicalFile
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
         val rootName = sanitizeName(queryDisplayName(rootUri) ?: "Imported folder")
-        val target = if (request.dest.isNullOrBlank()) {
-            uniqueDirectory(active, rootName)
-        } else {
-            val resolved = (application as LeoApp).graphOrThrow().jail
-                .resolve(request.dest, active)
-            if (!resolved.isDirectory && !resolved.mkdirs() && !resolved.isDirectory) {
-                throw IOException("cannot create the destination folder")
-            }
-            resolved
-        }
 
-        var files = 0
-        var bytes = 0L
-        fun applyCaps() {
-            if (files > MAX_IMPORT_FILES) throw IOException("too many files to import")
-            if (bytes > MAX_IMPORT_BYTES) throw IOException("the folder is too large to import")
-        }
-
-        fun copy(uri: Uri, dir: File, depth: Int) {
-            if (depth > 64) return
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-                treeUri,
-                DocumentsContract.getDocumentId(uri)
-            )
-            contentResolver.query(
-                childrenUri,
-                arrayOf(
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_MIME_TYPE
-                ),
-                null,
-                null,
-                null
-            )?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val documentId = cursor.getString(0) ?: continue
-                    val displayName = sanitizeName(cursor.getString(1) ?: "file")
-                    val mime = cursor.getString(2) ?: ""
-                    val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                        val childDir = uniqueDirectory(dir, displayName)
-                        copy(childUri, childDir, depth + 1)
-                    } else {
-                        val destination = uniqueFile(dir, displayName)
-                        val input = contentResolver.openInputStream(childUri)
-                            ?: throw IOException("the provider returned no input stream")
-                        input.use { stream ->
-                            destination.outputStream().buffered().use { output ->
-                                val buffer = ByteArray(64 * 1024)
-                                while (true) {
-                                    val read = stream.read(buffer)
-                                    if (read < 0) break
-                                    output.write(buffer, 0, read)
-                                    bytes += read
-                                    if (bytes % (256 * 1024) < buffer.size) {
-                                        request.progress(files, bytes)
-                                    }
-                                    applyCaps()
-                                }
-                                output.flush()
+        val budget = ImportBudget()
+        val staging = ImportStaging.createStaging(graph.workspace.tmp)
+        var committed: File? = null
+        try {
+            fun copy(uri: Uri, dir: File, depth: Int) {
+                budget.checkDepth(depth)
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                    treeUri,
+                    DocumentsContract.getDocumentId(uri)
+                )
+                contentResolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE
+                    ),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val documentId = cursor.getString(0) ?: continue
+                        val displayName = sanitizeName(cursor.getString(1) ?: "file")
+                        val mime = cursor.getString(2) ?: ""
+                        val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            val name = ImportStaging.availableName(dir, displayName, directory = true)
+                            val childDir = File(dir, name)
+                            if (!childDir.mkdirs() && !childDir.isDirectory) {
+                                throw IOException("cannot create ${childDir.name}")
                             }
+                            copy(childUri, childDir, depth + 1)
+                        } else {
+                            val name = ImportStaging.availableName(dir, displayName, directory = false)
+                            val destination = File(dir, name)
+                            val input = contentResolver.openInputStream(childUri)
+                                ?: throw IOException("the provider returned no input stream")
+                            input.use { stream ->
+                                destination.outputStream().buffered().use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    while (true) {
+                                        val read = stream.read(buffer)
+                                        if (read < 0) break
+                                        output.write(buffer, 0, read)
+                                        budget.addBytes(read.toLong())
+                                        if (budget.bytes % (256 * 1024) < buffer.size) {
+                                            request.progress(budget.files, budget.bytes)
+                                        }
+                                    }
+                                    output.flush()
+                                }
+                            }
+                            budget.addFile()
+                            request.progress(budget.files, budget.bytes)
                         }
-                        files += 1
-                        request.progress(files, bytes)
                     }
                 }
             }
+
+            copy(rootUri, staging, 0)
+
+            val dest = request.dest
+            if (dest.isNullOrBlank()) {
+                committed = ImportStaging.moveIntoWorkspace(staging, active, rootName)
+            } else {
+                val resolved = graph.jail.resolve(dest, active)
+                if (!resolved.isDirectory && !resolved.mkdirs() && !resolved.isDirectory) {
+                    throw IOException("cannot create the destination folder")
+                }
+                ImportStaging.moveChildren(staging, resolved)
+                committed = resolved
+            }
+        } finally {
+            // After a successful move the staging directory is empty or gone;
+            // on any failure this removes the partial tree, so the workspace is
+            // never left with a half import.
+            ImportStaging.deleteRecursively(staging)
         }
 
-        copy(rootUri, target, 0)
+        val target = committed ?: throw IOException("the import did not finish")
         val canonicalTarget = target.canonicalFile
         val path = if (canonicalTarget == activeCanonical) {
             "."
@@ -1100,7 +1123,7 @@ class MainActivity : ComponentActivity(), SafPort {
                 canonicalTarget.absolutePath
             }
         }
-        return SafTreeResult(path, files, bytes)
+        return SafTreeResult(path, budget.files, budget.bytes)
     }
 
     private fun queryDisplayName(uri: Uri): String? {
@@ -1118,33 +1141,6 @@ class MainActivity : ComponentActivity(), SafPort {
         val cleaned = raw.replace('/', '_').replace('\\', '_').replace("\u0000", "").trim()
         val name = cleaned.ifEmpty { "file" }
         return if (name.length <= 100) name else name.take(100)
-    }
-
-    private fun uniqueDirectory(parent: File, desired: String): File {
-        var candidate = File(parent, desired)
-        var counter = 2
-        while (candidate.exists()) {
-            candidate = File(parent, "$desired-$counter")
-            counter += 1
-        }
-        if (!candidate.mkdirs() && !candidate.isDirectory) {
-            throw IOException("cannot create ${candidate.name}")
-        }
-        return candidate
-    }
-
-    private fun uniqueFile(parent: File, desired: String): File {
-        var candidate = File(parent, desired)
-        if (!candidate.exists()) return candidate
-        val dot = desired.lastIndexOf('.')
-        val stem = if (dot > 0) desired.substring(0, dot) else desired
-        val ext = if (dot > 0) desired.substring(dot) else ""
-        var counter = 2
-        while (candidate.exists()) {
-            candidate = File(parent, "$stem-$counter$ext")
-            counter += 1
-        }
-        return candidate
     }
 
     override fun storageInfo(): StorageInfo {

@@ -1,5 +1,6 @@
 package dev.leocode.bridge
 
+import dev.leocode.core.FileHash
 import dev.leocode.core.PathJail
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
@@ -556,5 +557,137 @@ class FsHandlerTest {
         }
         assertEquals("b", read("b.txt")["content"]!!.jsonPrimitive.content)
         assertEquals("a", read("a.txt")["content"]!!.jsonPrimitive.content)
+    }
+
+    // --------------------------------------------------- PD-12: stat hash cache
+
+    private class CountingHash {
+        var calls = 0
+
+        fun hash(file: File): String? {
+            calls += 1
+            return FileHash.safeHash(file)
+        }
+    }
+
+    private fun countingHandler(counting: CountingHash, maxEntries: Int = 64): FsHandler =
+        FsHandler(
+            workspace,
+            jail,
+            trash,
+            json,
+            hashFile = counting::hash,
+            maxStatHashes = maxEntries
+        )
+
+    private fun statOf(path: String, on: FsHandler = handler): JsonObject =
+        on.handle("fs.stat", buildJsonObject { put("path", path) }).jsonObject
+
+    @Test
+    fun `stat reuses the hash while size and mtime are unchanged`() {
+        File(workspace.defaultWorkspace, "stable.txt").writeText("hello")
+        val counting = CountingHash()
+        val countingHandler = countingHandler(counting)
+
+        val first = statOf("stable.txt", countingHandler)
+        val second = statOf("stable.txt", countingHandler)
+
+        assertEquals(1, counting.calls)
+        assertEquals(first["hash"], second["hash"])
+        assertEquals(FileHash.sha256("hello"), first["hash"]!!.jsonPrimitive.content)
+        assertEquals(FileHash.sha256("hello"), second["hash"]!!.jsonPrimitive.content)
+        assertEquals(5, second["size"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `a size change hashes the file again`() {
+        val file = File(workspace.defaultWorkspace, "growing.txt").apply { writeText("one") }
+        val counting = CountingHash()
+        val countingHandler = countingHandler(counting)
+
+        statOf("growing.txt", countingHandler)
+        file.writeText("one and two")
+        val reply = statOf("growing.txt", countingHandler)
+
+        assertEquals(2, counting.calls)
+        assertEquals(FileHash.sha256("one and two"), reply["hash"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `an mtime change hashes the file again`() {
+        val file = File(workspace.defaultWorkspace, "touched.txt").apply { writeText("same") }
+        val counting = CountingHash()
+        val countingHandler = countingHandler(counting)
+
+        val before = statOf("touched.txt", countingHandler)
+        assertTrue("cannot change the mtime", file.setLastModified(file.lastModified() + 5_000))
+        val after = statOf("touched.txt", countingHandler)
+
+        assertEquals(2, counting.calls)
+        assertEquals(before["hash"], after["hash"])
+        assertEquals(FileHash.sha256("same"), after["hash"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a write clears the cached hash`() {
+        val counting = CountingHash()
+        val countingHandler = countingHandler(counting)
+        countingHandler.handle(
+            "fs.write",
+            buildJsonObject {
+                put("path", "saved.txt")
+                put("content", "first")
+            }
+        )
+        statOf("saved.txt", countingHandler)
+
+        countingHandler.handle(
+            "fs.write",
+            buildJsonObject {
+                put("path", "saved.txt")
+                put("content", "second")
+            }
+        )
+        counting.calls = 0
+        val reply = statOf("saved.txt", countingHandler)
+
+        assertEquals(1, counting.calls)
+        assertEquals(FileHash.sha256("second"), reply["hash"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `directory stats do not hash`() {
+        val counting = CountingHash()
+        val countingHandler = countingHandler(counting)
+        countingHandler.handle("fs.mkdir", buildJsonObject { put("path", "src") })
+
+        val reply = statOf("src", countingHandler)
+
+        assertEquals(0, counting.calls)
+        assertEquals("dir", reply["kind"]!!.jsonPrimitive.content)
+        assertEquals("", reply["hash"]!!.jsonPrimitive.content)
+        assertEquals(0, reply["size"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `the stat hash cache is bounded`() {
+        listOf("a.txt", "b.txt", "c.txt").forEach {
+            File(workspace.defaultWorkspace, it).writeText(it)
+        }
+        val counting = CountingHash()
+        val countingHandler = countingHandler(counting, maxEntries = 2)
+
+        statOf("a.txt", countingHandler)
+        statOf("b.txt", countingHandler)
+        statOf("c.txt", countingHandler)
+        assertEquals(3, counting.calls)
+
+        // a was evicted by c, so it is hashed again and b becomes the oldest.
+        statOf("a.txt", countingHandler)
+        assertEquals(4, counting.calls)
+        statOf("c.txt", countingHandler)
+        assertEquals("a hit does not hash", 4, counting.calls)
+        statOf("b.txt", countingHandler)
+        assertEquals(5, counting.calls)
     }
 }
