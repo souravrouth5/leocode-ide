@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -66,6 +67,44 @@ class TerminalRegistryTest {
         }
 
         fun text(): String = chunks.joinToString("") { String(it, Charsets.UTF_8) }
+    }
+
+    /** A PTY whose write blocks until the test releases it. */
+    private class SlowWritePty : PtyProcess {
+        override val pid: Int = 7
+        private val output = LinkedBlockingQueue<ByteArray>()
+        private val exited = CountDownLatch(1)
+        private val gate = CountDownLatch(1)
+        @Volatile
+        private var closed = false
+
+        override val isClosed: Boolean get() = closed
+
+        override fun write(bytes: ByteArray): Int {
+            gate.await()
+            return bytes.size
+        }
+
+        override fun readBlocking(maxBytes: Int): ByteArray? {
+            val chunk = output.take()
+            if (closed && chunk.isEmpty()) return null
+            return chunk
+        }
+
+        override fun resize(rows: Int, cols: Int) = Unit
+
+        override fun waitFor(): Int {
+            exited.await()
+            return 0
+        }
+
+        override fun destroy() {
+            if (closed) return
+            closed = true
+            gate.countDown()
+            output.offer(ByteArray(0))
+            exited.countDown()
+        }
     }
 
     private fun workDir() = Files.createTempDirectory("leocode-term").toFile()
@@ -164,12 +203,53 @@ class TerminalRegistryTest {
             fake.destroy()
             awaitUntil { registry.activeCount() == 0 }
 
-            // The registry removes an exited session, so attach is a miss.
-            assertEquals(null, registry.attach(sessionId, Collector()))
+            // The exited session is kept so its scrollback and exit code survive
+            // a detached page (L-05); a second attach happens only after close.
+            val attachment = registry.attach(sessionId, Collector())
+            assertNotNull(attachment)
+            assertEquals("bye", String(attachment!!.snapshot.scrollback))
+            assertFalse(attachment.snapshot.alive)
+            assertEquals(0, attachment.snapshot.exitCode)
         } finally {
             registry.closeAll()
         }
         assertTrue(counts.contains(0))
+    }
+
+    @Test
+    fun `clamps rows and cols to a sane range`() {
+        val sizes = CopyOnWriteArrayList<Pair<Int, Int>>()
+        val fake = FakePty()
+        val registry = TerminalRegistry(spawn = { _, _, rows, cols ->
+            sizes += rows to cols
+            fake
+        })
+        try {
+            registry.open(workDir(), emptyMap(), 0, 99_999)
+            assertEquals(listOf(1 to 1000), sizes.toList())
+        } finally {
+            registry.closeAll()
+        }
+    }
+
+    @Test
+    fun `a blocked PTY write does not block close`() {
+        val pty = SlowWritePty()
+        val registry = TerminalRegistry(spawn = { _, _, _, _ -> pty })
+        val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
+        val writer = Thread { registry.write(sessionId, byteArrayOf(1)) }
+        writer.isDaemon = true
+        writer.start()
+        Thread.sleep(50)
+
+        val closer = Thread { registry.close(sessionId) }
+        closer.isDaemon = true
+        closer.start()
+        closer.join(1_000)
+
+        assertFalse("close waited for the blocked write", closer.isAlive)
+        pty.destroy()
+        writer.join(1_000)
     }
 
     @Test

@@ -52,14 +52,15 @@ export interface TerminalOptions {
   cwd: string
   cols: number
   rows: number
-  onData: (bytes: Uint8Array) => void
+  /** Call `done` after the data is rendered so the host's credit window works. */
+  onData: (bytes: Uint8Array, done?: () => void) => void
   onExit: (code: number) => void
   signal?: AbortSignal
 }
 
 /** Attach has no cwd/size: the PTY already exists and keeps its geometry. */
 export interface TerminalAttachOptions {
-  onData: (bytes: Uint8Array) => void
+  onData: (bytes: Uint8Array, done?: () => void) => void
   onExit: (code: number) => void
 }
 

@@ -245,4 +245,30 @@ describe("AndroidBridge transport (Task 11)", () => {
 
     expect(() => channel.emit(0, "term.data", { b64: "not-base64!!" })).not.toThrow()
   })
+
+  it("acks terminal data only after it is rendered", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    const received: Array<{ done?: () => void }> = []
+
+    const opening = bridge.openTerminal({
+      cwd: ".",
+      cols: 80,
+      rows: 24,
+      onData: (_bytes, done) => {
+        received.push({ done })
+      },
+      onExit: () => {}
+    })
+    channel.reply(0, { sessionId: "s1", pid: 1 })
+    await opening
+
+    channel.emit(0, "term.data", { b64: btoa("hi") })
+    await Promise.resolve()
+    expect(channel.sent.filter((message) => message.method === "term.ack")).toHaveLength(0)
+
+    received[0]?.done?.()
+    await Promise.resolve()
+    expect(channel.sent.filter((message) => message.method === "term.ack")).toHaveLength(1)
+  })
 })

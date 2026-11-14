@@ -64,7 +64,7 @@ class SessionService : Service() {
                 Thread(
                     {
                         runCatching { (application as? LeoApp)?.graph?.closeBridge() }
-                        stopSelf()
+                        stopSelf(startId)
                     },
                     "leocode-stop-all"
                 ).apply { isDaemon = true }.start()
@@ -77,7 +77,9 @@ class SessionService : Service() {
                     satisfyForegroundStart()
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     foregrounded = false
-                    stopSelf()
+                    // A later update (a new job) has a higher startId and keeps
+                    // the service alive; only this request and older ones stop.
+                    stopSelf(startId)
                 } else {
                     ensureChannel()
                     startForeground(NOTIFICATION_ID, buildNotification(count))
@@ -86,7 +88,7 @@ class SessionService : Service() {
             }
             else -> {
                 satisfyForegroundStart()
-                stopSelf()
+                stopSelf(startId)
             }
         }
         return START_NOT_STICKY
@@ -139,9 +141,16 @@ class SessionService : Service() {
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_session)
             .setContentTitle(
-                "$count ${if (count == 1) "process" else "processes"} running"
+                if (count <= 0) {
+                    "Stopping sessions"
+                } else {
+                    "$count ${if (count == 1) "process" else "processes"} running"
+                }
             )
-            .setContentText("Terminals and jobs keep running in the background")
+            .setContentText(
+                if (count <= 0) "No processes are running"
+                else "Terminals and jobs keep running in the background"
+            )
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

@@ -37,6 +37,8 @@ class EventSink(
     }
 
     private val lock = Any()
+    /** Serialises batches so two flushes cannot post out of order (B-05). */
+    private val postLock = Any()
     private val pending = LinkedHashMap<String, Pending>()
     private var pendingBytes = 0
     private var dropped = 0L
@@ -64,23 +66,27 @@ class EventSink(
     }
 
     fun flush() {
-        val messages = ArrayList<Pair<String, JsonElement>>()
-        synchronized(lock) {
-            timer?.cancel(false)
-            timer = null
-            for ((event, pending) in this.pending) {
-                if (pending.text.isNotEmpty()) {
-                    messages += event to buildJsonObject { put("data", pending.text.toString()) }
-                } else if (pending.hasBytes && pending.bytes.size() > 0) {
-                    val b64 = Base64.getEncoder().encodeToString(pending.bytes.toByteArray())
-                    messages += event to buildJsonObject { put("b64", b64) }
+        synchronized(postLock) {
+            val messages = ArrayList<Pair<String, JsonElement>>()
+            synchronized(lock) {
+                timer?.cancel(false)
+                timer = null
+                for ((event, pending) in this.pending) {
+                    if (pending.text.isNotEmpty()) {
+                        messages += event to buildJsonObject {
+                            put("data", pending.text.toString())
+                        }
+                    } else if (pending.hasBytes && pending.bytes.size() > 0) {
+                        val b64 = Base64.getEncoder().encodeToString(pending.bytes.toByteArray())
+                        messages += event to buildJsonObject { put("b64", b64) }
+                    }
                 }
+                this.pending.clear()
+                pendingBytes = 0
             }
-            this.pending.clear()
-            pendingBytes = 0
-        }
-        for ((event, payload) in messages) {
-            runCatching { post(event, payload) }
+            for ((event, payload) in messages) {
+                runCatching { post(event, payload) }
+            }
         }
     }
 

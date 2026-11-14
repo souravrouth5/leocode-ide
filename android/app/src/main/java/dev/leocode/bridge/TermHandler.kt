@@ -43,6 +43,8 @@ class TermHandler(
         private const val DEFAULT_COLS = TerminalRegistry.DEFAULT_COLS
         private const val DEFAULT_ROWS = TerminalRegistry.DEFAULT_ROWS
         private const val INITIAL_CREDIT = TerminalRegistry.INITIAL_CREDIT
+        /** A web loop must not exhaust fds/threads with invisible shells (L-12). */
+        private const val MAX_SESSIONS = 8
     }
 
     override fun methods(): Set<String> = METHODS
@@ -117,6 +119,9 @@ class TermHandler(
         val request = json.decodePayload(TermOpenRequest.serializer(), payload, "term.open")
         val cwd = resolve(request.cwd ?: ".")
         if (!cwd.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "cwd is not a directory")
+        if (registry.activeCount() >= MAX_SESSIONS) {
+            throw BridgeException(ErrorCode.E_LIMIT, "too many terminal sessions")
+        }
 
         val opened = registry.open(
             cwd,
@@ -126,7 +131,10 @@ class TermHandler(
         ) ?: throw BridgeException(ErrorCode.E_NO_RUNTIME, "native PTY is not available")
 
         val attachment = registry.attach(opened.sessionId, listener(sink), INITIAL_CREDIT)
-            ?: throw BridgeException(ErrorCode.E_INTERNAL, "session disappeared during open")
+            ?: run {
+                registry.close(opened.sessionId)
+                throw BridgeException(ErrorCode.E_INTERNAL, "session disappeared during open")
+            }
 
         val reply = json.encodeToJsonElement(
             TermOpenReply.serializer(),
@@ -176,6 +184,10 @@ class TermHandler(
         )
         // Reply is queued on the main thread; live events posted from here land after it.
         attachment.start()
+        if (!snapshot.alive) {
+            // The exited session has now been delivered once; do not keep it.
+            registry.close(sessionId)
+        }
     }
 
     private fun list(): JsonElement {

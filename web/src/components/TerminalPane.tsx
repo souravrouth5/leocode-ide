@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import type { Bridge, TerminalHandle } from "../bridge"
+import { AppError, type Bridge, type TerminalHandle } from "../bridge"
 import {
   clearSessionId,
   readSessionId,
@@ -17,6 +17,8 @@ interface Props {
   dark: boolean
   fontSize?: number
   fontFamily?: string
+  /** A non-recoverable attach/lifecycle failure, for the shared error surfaces. */
+  onError?: (error: unknown) => void
 }
 
 function palette(dark: boolean) {
@@ -67,7 +69,8 @@ export function TerminalPane({
   active,
   dark,
   fontSize = 13,
-  fontFamily = "'JetBrains Mono', monospace"
+  fontFamily = "'JetBrains Mono', monospace",
+  onError
 }: Props) {
   const host = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -164,7 +167,7 @@ export function TerminalPane({
         if (!saved || !bridge.attachTerminal) return false
         try {
           const attached = await bridge.attachTerminal(saved, {
-            onData: (bytes) => term.write(bytes),
+            onData: (bytes, done) => term.write(bytes, done),
             onExit
           })
           if (disposed) {
@@ -186,11 +189,19 @@ export function TerminalPane({
           }
           handleRef.current = attached.handle
           setStatus("pty")
+          // The PTY kept its old geometry while detached (W-21).
+          attached.handle.resize(size.cols, size.rows)
           term.onData((data) => attached.handle.write(encoder.encode(data)))
           term.focus()
           return true
-        } catch {
-          return false
+        } catch (error) {
+          // Only a missing session falls back to a new shell. A timeout or a
+          // disconnect must not spawn a second PTY behind the user's back (W-22).
+          if (error instanceof AppError && error.code === "E_NOT_FOUND") return false
+          onError?.(error)
+          setExited(null)
+          setStatus("closed")
+          return true
         }
       }
 
@@ -199,7 +210,7 @@ export function TerminalPane({
           cwd,
           cols: size.cols,
           rows: size.rows,
-          onData: (bytes) => term.write(bytes),
+          onData: (bytes, done) => term.write(bytes, done),
           onExit
         })
         if (disposed) {
@@ -246,6 +257,7 @@ export function TerminalPane({
         if (!(await tryAttach())) await startPty()
       } catch (error) {
         if (disposed) return
+        onError?.(error)
         setStatus("fallback")
         term.write(`\r\n\x1b[31m${(error as Error).message}\x1b[0m\r\n`)
         fallbackPrompt()

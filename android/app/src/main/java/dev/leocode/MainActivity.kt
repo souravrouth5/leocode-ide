@@ -263,7 +263,9 @@ class MainActivity : ComponentActivity(), SafPort {
         }
         // The foreground service owns the PTYs now. Detach this WebView's listeners
         // instead of killing sessions, so a new Activity can term.attach them.
-        graph.detachBridge()
+        // Terminals survive a configuration recreation; jobs cannot reattach,
+        // so they are cancelled only when the Activity is really finishing (B-09).
+        graph.detachBridge(isFinishing)
         val old = webView
         webView = null
         bridge?.detach()
@@ -508,11 +510,11 @@ class MainActivity : ComponentActivity(), SafPort {
         rendererLossAt = now
         Log.e(TAG, "WebView renderer gone (crash=$didCrash, rapid=$recent)")
 
-        // Drop the dead view and transport first. BridgeHost.detach() leaves the
-        // graph (and its terminal/job state) alive for the replacement view.
+        // Drop the dead view and transport first. Terminals survive for the
+        // replacement view; jobs have no reattach path, so cancel them (B-09).
         val old = webView
         webView = null
-        (application as LeoApp).graphOrThrow().detachBridge()
+        (application as LeoApp).graphOrThrow().detachBridge(cancelJobs = true)
         bridge?.detach()
         bridge = null
         if (old != null) {

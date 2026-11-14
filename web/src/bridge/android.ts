@@ -216,7 +216,7 @@ export class AndroidBridge implements Bridge {
       let text: string
       try {
         text = JSON.stringify({ v: 1, id, method, payload })
-      } catch (error) {
+      } catch {
         fail(new AppError("E_BAD_ENVELOPE", `${method} payload is not serialisable`), false)
         return
       }
@@ -226,7 +226,7 @@ export class AndroidBridge implements Bridge {
       }
       try {
         this.channel.postMessage(text)
-      } catch (error) {
+      } catch {
         fail(new AppError("E_IO", `${method} could not be sent`), false)
       }
     })
@@ -643,7 +643,7 @@ class TerminalChannel {
 
   constructor(
     private readonly post: (method: string, payload: unknown) => void,
-    private readonly onData: (bytes: Uint8Array) => void,
+    private readonly onData: (bytes: Uint8Array, done?: () => void) => void,
     private readonly onExit: (code: number) => void,
     private readonly holdUntilReady: boolean
   ) {}
@@ -740,8 +740,20 @@ class TerminalChannel {
 
   private deliver(bytes: Uint8Array) {
     if (this.closed) return
-    this.onData(bytes)
-    this.ack(bytes.length)
+    // Ack after xterm has rendered (W-20): acking on receipt means the 256 KB
+    // credit window never throttles a flood.
+    let acknowledged = false
+    const ack = () => {
+      if (acknowledged) return
+      acknowledged = true
+      this.ack(bytes.length)
+    }
+    if (this.onData.length >= 2) {
+      this.onData(bytes, ack)
+    } else {
+      this.onData(bytes)
+      ack()
+    }
   }
 
   private ack(bytes: number) {

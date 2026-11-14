@@ -84,15 +84,15 @@ class AppGraph(private val app: Application) {
     @Volatile
     var onFirstSession: (() -> Unit)? = null
 
-    private val supervisor = ProcessSupervisor(childEnv, pidFiles) { count ->
-        sessionCountChanged(jobs = count)
+    private val supervisor = ProcessSupervisor(childEnv, pidFiles) {
+        sessionCountChanged()
     }
 
     private val terminals = TerminalRegistry(
         spawn = { cwd, env, rows, cols -> PtySession.openShell(cwd, env, rows, cols) },
         pidFiles = pidFiles
-    ) { count ->
-        sessionCountChanged(terminals = count)
+    ) {
+        sessionCountChanged()
     }
 
     private val procHandler = ProcHandler(workspace, jail, supervisor)
@@ -128,7 +128,11 @@ class AppGraph(private val app: Application) {
      * Drop WebView listeners and keep the sessions running. Used when the Activity
      * is destroyed or its renderer dies: the foreground service owns the PTYs now.
      */
-    fun detachBridge() {
+    fun detachBridge(cancelJobs: Boolean = false) {
+        // Terminals reattach through term.attach after a new page loads. Jobs
+        // have no attach path, so a renderer/finish teardown must cancel them
+        // instead of leaving them running into a dead reply proxy (B-09).
+        if (cancelJobs) runCatching { supervisor.close() }
         runCatching { terminalHandler.detachAll() }
     }
 
@@ -140,10 +144,14 @@ class AppGraph(private val app: Application) {
         SessionService.stop(app)
     }
 
-    private fun sessionCountChanged(terminals: Int? = null, jobs: Int? = null) {
+    /**
+     * Reads both counts under the same lock that applies them, so two threads
+     * cannot deliver 2 then 1 and leave a phantom notification (B-12/L-03).
+     */
+    private fun sessionCountChanged() {
         val total = synchronized(countLock) {
-            if (terminals != null) terminalCount = terminals
-            if (jobs != null) processCount = jobs
+            terminalCount = terminals.activeCount()
+            processCount = supervisor.activeCount()
             terminalCount + processCount
         }
 

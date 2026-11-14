@@ -155,8 +155,11 @@ class ProcessSupervisorTest {
             )
 
             assertTrue("process did not exit", done.await(5, TimeUnit.SECONDS))
-            assertTrue("captured ${out.length} bytes", out.length <= 1_000)
-            assertTrue(out.isNotEmpty())
+            val text = out.toString()
+            assertTrue(text.contains("[output truncated at 1000 bytes]"))
+            val body = text.substringBefore("\n[output truncated")
+            assertTrue("captured ${body.length} chars", body.length <= 1_000)
+            assertTrue(body.isNotEmpty())
         } finally {
             supervisor.close()
         }
@@ -184,6 +187,55 @@ class ProcessSupervisorTest {
             assertTrue("process did not exit", done.await(5, TimeUnit.SECONDS))
             assertFalse(chunks.any { it.contains('\uFFFD') })
             assertEquals(text, chunks.joinToString(""))
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `closes stdin so a program that reads it exits`() {
+        val out = StringBuffer()
+        val done = CountDownLatch(1)
+        val supervisor = ProcessSupervisor()
+        try {
+            supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "cat; printf eof"),
+                    cwd = workDir(),
+                    timeoutMs = 5_000
+                ),
+                onStdout = { out.append(it) },
+                onStderr = {},
+                onExit = { done.countDown() }
+            )
+
+            assertTrue("stdin stayed open", done.await(5, TimeUnit.SECONDS))
+            assertTrue(out.toString().contains("eof"))
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `reports output truncation instead of dropping it silently`() {
+        val out = StringBuffer()
+        val done = CountDownLatch(1)
+        val supervisor = ProcessSupervisor()
+        try {
+            supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "yes x | head -c 5000"),
+                    cwd = workDir(),
+                    timeoutMs = 5_000,
+                    maxOutputBytes = 100
+                ),
+                onStdout = { out.append(it) },
+                onStderr = {},
+                onExit = { done.countDown() }
+            )
+
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+            assertTrue(out.toString().contains("[output truncated at 100 bytes]"))
         } finally {
             supervisor.close()
         }

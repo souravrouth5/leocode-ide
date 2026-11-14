@@ -11,7 +11,7 @@ const TerminalPane = lazyWithRetry(() =>
 )
 
 export function TerminalView() {
-  const { bridge, files, shell, settings } = useStores()
+  const { bridge, files, shell, settings, errors } = useStores()
   const { effective } = useTheme()
   const view = useStore(shell, (state) => state.view)
   const cwd = useStore(files, (state) => state.cwd)
@@ -41,6 +41,9 @@ export function TerminalView() {
             dark={effective === "dark"}
             fontSize={userSettings.terminalFontSize}
             fontFamily={userSettings.fontFamily}
+            onError={(error) =>
+              errors.getState().report(error, { context: "Reconnect the terminal" })
+            }
           />
         </Suspense>
       </ErrorBoundary>

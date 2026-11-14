@@ -64,18 +64,10 @@ class ProcHandler(
         val handle = try {
             supervisor.start(
                 spec,
-                onStdout = { text ->
-                    sink.event(
-                        "proc.stdout",
-                        json.encodeToJsonElement(ProcOutput.serializer(), ProcOutput(text))
-                    )
-                },
-                onStderr = { text ->
-                    sink.event(
-                        "proc.stderr",
-                        json.encodeToJsonElement(ProcOutput.serializer(), ProcOutput(text))
-                    )
-                },
+                // Coalesce at 16 ms like terminal output (B-08); the event
+                // payload shape is the same `{ data }`.
+                onStdout = { text -> sink.text("proc.stdout", text) },
+                onStderr = { text -> sink.text("proc.stderr", text) },
                 onExit = { code ->
                     sink.event(
                         "proc.exit",

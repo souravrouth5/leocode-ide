@@ -35,6 +35,11 @@ class TerminalRegistry(
         const val MAX_CREDIT = 4L * 1024 * 1024
         const val SCROLLBACK_BYTES = 256 * 1024
 
+        /** Rows/cols are clamped to something a terminal can represent. */
+        const val MAX_DIMENSION = 1000
+        /** Exited sessions are kept for reattach, but not without bound. */
+        private const val MAX_EXITED = 8
+
         private const val MAX_READ = 32 * 1024
         private const val MAX_PAUSED_BYTES = 512 * 1024
     }
@@ -77,11 +82,12 @@ class TerminalRegistry(
     private val sessions = ConcurrentHashMap<String, Session>()
 
     fun open(cwd: File, env: Map<String, String>, rows: Int, cols: Int): Opened? {
+        pruneExited()
         val pty = spawn(
             cwd.absolutePath,
             env,
-            rows.takeIf { it > 0 } ?: DEFAULT_ROWS,
-            cols.takeIf { it > 0 } ?: DEFAULT_COLS
+            rows.coerceIn(1, MAX_DIMENSION),
+            cols.coerceIn(1, MAX_DIMENSION)
         ) ?: return null
 
         val id = UUID.randomUUID().toString()
@@ -149,7 +155,8 @@ class TerminalRegistry(
         sessions[sessionId]?.detach(listener)
     }
 
-    fun activeCount(): Int = sessions.size
+    /** Sessions whose PTY is still running; exited ones wait for a reattach. */
+    fun activeCount(): Int = sessions.values.count { it.alive }
 
     private fun notifyCount() {
         runCatching { onCountChanged(sessions.size) }
@@ -180,9 +187,20 @@ class TerminalRegistry(
         } finally {
             val code = runCatching { session.pty.waitFor() }.getOrDefault(-1)
             session.finish(code)
-            val removed = sessions.remove(session.id, session)
+            // Close the master fd and signal any background members of the dead
+            // shell's group, but keep the ring buffer for a reattach (L-05/L-13).
+            runCatching { session.pty.destroy() }
             pidFiles?.remove(session.id)
-            if (removed) notifyCount()
+            notifyCount()
+        }
+    }
+
+    private fun pruneExited() {
+        val exited = sessions.values.filter { !it.alive }.sortedBy { it.finishedAt }
+        var excess = exited.size - MAX_EXITED
+        for (session in exited) {
+            if (excess <= 0) break
+            if (sessions.remove(session.id, session)) excess--
         }
     }
 
@@ -206,10 +224,15 @@ class TerminalRegistry(
         private var pendingExit: Int? = null
 
         @Volatile
-        private var alive = true
+        var alive = true
+            private set
 
         @Volatile
         private var exitCode = -1
+
+        @Volatile
+        var finishedAt: Long = 0L
+            private set
 
         fun info(): Info = Info(id, pty.pid, alive, title, cwd, exitCode)
 
@@ -233,27 +256,28 @@ class TerminalRegistry(
 
         private fun beginStreaming() {
             val target: Listener?
-            val chunks: List<ByteArray>
-            val exit: Int?
+            var exit: Int? = null
             synchronized(lock) {
                 if (!paused) return
-                paused = false
                 target = listener
-                chunks = queued.toList()
+                val chunks = queued.toList()
+                // Replay before live data can be delivered: received() takes the
+                // same lock and must not overtake the queued chunks (B-11).
+                if (target != null) {
+                    for (chunk in chunks) runCatching { target.data(chunk) }
+                }
                 queued.clear()
                 queuedBytes = 0
                 credit -= chunks.sumOf { it.size.toLong() }
+                paused = false
                 exit = pendingExit
                 pendingExit = null
                 lock.notifyAll()
             }
-            if (target != null) {
-                for (chunk in chunks) runCatching { target.data(chunk) }
-                if (exit != null) {
-                    runCatching { target.exit(exit) }
-                    synchronized(lock) {
-                        if (listener === target) listener = null
-                    }
+            if (target != null && exit != null) {
+                runCatching { target.exit(exit) }
+                synchronized(lock) {
+                    if (listener === target) listener = null
                 }
             }
         }
@@ -317,8 +341,14 @@ class TerminalRegistry(
 
         fun read(max: Int): ByteArray? = pty.readBlocking(max)
 
-        fun write(bytes: ByteArray): Int = synchronized(lock) {
-            if (alive) pty.write(bytes) else -1
+        /**
+         * The blocking PTY write must not hold [lock]: a child that stops
+         * reading input would otherwise freeze output, ack, resize and close
+         * (B-02/L-04).
+         */
+        fun write(bytes: ByteArray): Int {
+            val target = synchronized(lock) { if (alive) pty else null } ?: return -1
+            return target.write(bytes)
         }
 
         fun resize(rows: Int, cols: Int): Boolean = synchronized(lock) {
@@ -347,6 +377,7 @@ class TerminalRegistry(
             synchronized(lock) {
                 alive = false
                 exitCode = code
+                finishedAt = System.currentTimeMillis()
                 target = listener
                 deliver = target != null && !paused
                 if (paused) pendingExit = code

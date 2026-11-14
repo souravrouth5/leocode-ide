@@ -68,11 +68,15 @@ class ProcessSupervisor(
         environment["PWD"] = spec.cwd.absolutePath
 
         val process = builder.start()
+        // Close the child's stdin at once: `cat`, `python -` and `input()` used
+        // to block forever on an open pipe (B-07).
+        runCatching { process.outputStream.close() }
         val pid = pidOf(process)
         val jobId = UUID.randomUUID().toString()
         val job = Job(jobId, process, pid)
         jobs[jobId] = job
-        pidFiles?.write(jobId, pid, "proc")
+        // A pidfile failure must not leave a running process without pumps (B-21).
+        runCatching { pidFiles?.write(jobId, pid, "proc") }
         notifyCount()
 
         val outPump = StreamPump(process.inputStream, spec.maxOutputBytes, onStdout)
@@ -216,6 +220,11 @@ class ProcessSupervisor(
                     runCatching { emit(chunk) }
                 }
             } finally {
+                if (truncated) {
+                    // Tell the UI why the stream went quiet instead of dropping
+                    // the rest silently (B-08).
+                    runCatching { emit("\n[output truncated at $cap bytes]\n") }
+                }
                 runCatching { reader.close() }
             }
         }
