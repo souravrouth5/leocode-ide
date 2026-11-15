@@ -8,6 +8,11 @@ TypeScript types are generated into `web/src/bridge/types.gen.ts`, never hand-wr
 Status markers in the method table: **live** = implemented and unit-tested on the host (device
 verification is tracked in `docs/test-matrix.md`), **planned** = added by the v9 task named.
 
+**Phase F (Tasks 19–23).** The `git.*`, `ssh.keys.*`, `ssh.hostkey.*` and `secrets.token.*` DTOs
+and generated types are committed (`c69ff45`), so those methods are marked **live (Task 19–23)** and
+are part of v1. The handlers are being implemented in the `phase-f-core` and `phase-f-web`
+worktrees; device evidence for T10–T14 is **pending** and is not claimed here.
+
 ## Envelope
 
 ```jsonc
@@ -50,7 +55,12 @@ verification is tracked in `docs/test-matrix.md`), **planned** = added by the v9
 - Unknown `method` → `E_UNKNOWN_METHOD`. Malformed envelope → `E_BAD_ENVELOPE`; the connection
   is kept.
 - No secrets (tokens, private keys, passphrases after submission) ever cross the bridge toward
-  the WebView.
+  the WebView. The WebView may *send* a token or passphrase once (remote setup, clone/pull/push,
+  or a protected-key unlock); it is never echoed in a reply, event, error or log. `git.remote.list`
+  reports `hasToken` only, and `ssh.keys.list` returns public data only.
+- `git.clone/fetch/pull/push` reply when the operation **finishes**, not when it starts; they are
+  cancellable through `git.cancel` with a client-generated `opId` and have no default client
+  timeout (see Timeouts).
 
 ## Timeouts (client defaults)
 
@@ -59,13 +69,27 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 
 | Class | Methods | Default |
 |---|---|---|
-| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `root.status`, `draft.list/read`, `workspace.list` | 10 s |
-| Write | `fs.write`, `workspace.*`, `draft.save/delete` | 20 s |
+| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `root.status`, `draft.list/read`, `workspace.list`, `git.status/diff/log/branch.list/remote.list`, `ssh.keys.list`, `ssh.hostkey.list`, `secrets.token.list` | 10 s |
+| Write | `fs.write`, `workspace.*`, `draft.save/delete`, `git.init/add/reset/commit/branch.create/branch.delete/checkout/remote.set/remote.remove/conflict/resolve`, `ssh.keys.generate/import/delete`, `ssh.hostkey.delete`, `secrets.token.set/delete` | 20 s |
 | User-wait | `saf.*`, `storage.requestPermission`, `root.request`, `ssh.hostkey.answer` | none (user-driven; cancellable) |
-| Long, streamed | `proc.run`, `git.clone/fetch/pull/push` | reply on start within 10 s; then events, no overall timeout |
+| Long, streamed | `proc.run` | reply on start within 10 s; then events, no overall timeout |
+| Long Git | `git.clone/fetch/pull/push` | **none**: the reply is the finished operation; `git.progress` in the meantime; cancel with `git.cancel` |
 | Search | `fs.search` | 60 s (the reply is the summary after the stream) |
-| Control | `fs.search.cancel` | 2 s |
+| Control | `fs.search.cancel`, `git.cancel` | 2 s |
 | Install | `runtime.install` | no client timeout: the host replies when the install finishes (Task 25 will move the reply to the start); cancel with `runtime.cancel` |
+
+Git notes:
+
+- `git.clone/fetch/pull/push` must not be moved back to "reply on start": the request spans the
+  whole network operation and the reply is `GitStatusReply` / `GitSyncReply` after completion.
+  The client sets no default timeout for them and shows progress until the reply, an error or a
+  `git.cancel`.
+- `git.cancel` is a small control message (2 s). It is safe after completion (`cancelled: false`)
+  and in-flight cancellation rejects the long request with `E_CANCELLED`.
+- `git.status`, `git.diff`, `git.log`, `git.branch.list` and `git.remote.list` are idempotent reads
+  (10 s, one retry after a timeout). All other `git.*` and `ssh.*` calls are writes (20 s).
+- `ssh.hostkey.answer` answers a prompt the host is already waiting on; it has no client timeout,
+  while the *blocked Git operation* gives the user 120 s (see Host keys).
 
 If the host stops answering entirely (WebView detached, renderer restarted), every pending
 request rejects with `E_BRIDGE_DISCONNECTED` (web side only). The client raises this after three
@@ -149,21 +173,37 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `proc.cancel` | `{ jobId }` → `{}` | live (grace period Task 6) | SIGTERM → 2 s → SIGKILL on the group |
 | `root.status` | `{}` → `{ available, granted, enabled }` | planned (Task 17) | Never prompts |
 | `root.request` | `{}` → `{ granted }` | planned (Task 17) | User-wait; `E_ROOT_UNAVAILABLE` / `E_ROOT_DENIED` |
-| `git.init` / `git.clone` | `{ path }` / `{ url, path, auth? }` → `{}` | planned (Tasks 21–22) | Clone emits `git.progress`; cancellable |
-| `git.status` | `{ repo }` → `{ branch, staged[], changed[], untracked[], conflicts[] }` | planned (Task 21) | |
-| `git.add` / `git.reset` | `{ repo, paths[] }` → `{}` | planned (Task 21) | |
-| `git.commit` | `{ repo, message, author? }` → `{ sha }` | planned (Task 21) | |
-| `git.diff` | `{ repo, path?, staged? }` → `{ hunks[] }` | planned (Task 21) | |
-| `git.log` | `{ repo, max? }` → `[{ sha, author, time, message }]` | planned (Task 21) | |
-| `git.branch.list/create/delete`, `git.checkout` | `{ repo, … }` → `{}` | planned (Task 21) | |
-| `git.fetch` / `git.pull` / `git.push` | `{ repo, remote?, auth? }` → `{}` | planned (Task 22) | `git.progress`; `E_AUTH`, `E_OFFLINE`, `E_CONFLICT` |
-| `git.resolve` | `{ repo, path, choices[] }` → `{}` | planned (Task 22) | Accept ours/theirs per block |
-| `ssh.keys.list` | `{}` → `[{ id, type, fingerprint, comment, hasPassphrase }]` | planned (Task 23) | Public data only |
-| `ssh.keys.generate` | `{ type: "ed25519"\|"rsa", comment, passphrase? }` → `{ id, publicKey }` | planned (Task 23) | |
-| `ssh.keys.import` | `{ content, passphrase? }` → `{ id, fingerprint }` | planned (Task 23) | OpenSSH, PEM, PKCS#8; content discarded after import |
-| `ssh.keys.delete` | `{ id }` → `{}` | planned (Task 23) | |
-| `ssh.hostkey.answer` | `{ promptId, trust: boolean }` → `{}` | planned (Task 23) | Answers an `ssh.hostkey.prompt` event |
-| `secrets.token.set/delete/list` | `{ host, token? }` → `{}` / `[{ host }]` | planned (Task 20) | Token never returned to the WebView |
+| `git.init` | `{ path?, branch? }` → `GitStatusReply` | live (Task 19–23) | Creates `.git`; default branch from config or `main` |
+| `git.status` | `{ path? }` → `GitStatusReply` | live (Task 19–23) | Groups staged / changed / untracked / conflicts; ahead/behind from upstream |
+| `git.add` | `{ path?, paths[] }` → `GitStatusReply` | live (Task 19–23) | Paths are repo-relative; `.`/`*` staged by the UI as individual paths |
+| `git.reset` | `{ path?, paths[] }` → `GitStatusReply` | live (Task 19–23) | Unstage (`git reset HEAD -- paths`); never discards work |
+| `git.commit` | `{ path?, message, authorName?, authorEmail? }` → `GitCommitReply` | live (Task 19–23) | Empty index → `E_CONFLICT` with a plain message |
+| `git.diff` | `{ path?, file?, staged?, maxBytes? }` → `GitDiffReply` | live (Task 19–23) | Unified diff, 256 KB default cap; binary → `binary: true` and empty diff |
+| `git.log` | `{ path?, max? }` → `GitLogReply` | live (Task 19–23) | Newest first, max 200 |
+| `git.branch.list` | `{ path? }` → `GitBranchListReply` | live (Task 19–23) | Local + remote-tracking branches |
+| `git.branch.create` | `{ path?, name, startPoint? }` → `GitStatusReply` | live (Task 19–23) | Does not check out |
+| `git.branch.delete` | `{ path?, name }` → `GitStatusReply` | live (Task 19–23) | Refuses the current branch (`E_BUSY`) |
+| `git.checkout` | `{ path?, name, create? }` → `GitStatusReply` | live (Task 19–23) | Dirty-tree conflicts → `E_CONFLICT` |
+| `git.remote.list` | `{ path? }` → `GitRemoteListReply` | live (Task 19–23) | Never returns a token |
+| `git.remote.set` | `{ path?, name, url, authKind?, username?, token?, keyId? }` → `GitRemoteListReply` | live (Task 19–23) | Token is stored in SecretStore; `""` deletes it |
+| `git.remote.remove` | `{ path?, name }` → `GitRemoteListReply` | live (Task 19–23) | |
+| `git.clone` | `{ url, path?, name?, auth?, opId? }` → `GitStatusReply` | live (Task 19–23) | Long request; reply on finish; `git.progress`; `opId` enables cancel |
+| `git.fetch` | `{ path?, remote?, auth?, opId? }` → `GitSyncReply` | live (Task 19–23) | Long request; reply on finish; `git.progress` |
+| `git.pull` | `{ path?, remote?, branch?, auth?, opId? }` → `GitSyncReply` | live (Task 19–23) | Long request; merge conflicts → `E_CONFLICT` |
+| `git.push` | `{ path?, remote?, branch?, auth?, opId?, force? }` → `GitSyncReply` | live (Task 19–23) | Long request; rejected non-fast-forward → `E_CONFLICT` |
+| `git.cancel` | `{ opId }` → `GitCancelReply` | live (Task 19–23) | Cancels a clone/fetch/pull/push; safe after completion |
+| `git.conflict` | `{ path?, file }` → `GitConflictReply` | live (Task 19–23) | `merged` contains standard conflict markers; `ours`/`theirs` parsed; binary → `binary: true` |
+| `git.resolve` | `{ path?, file, strategy: "ours"\|"theirs" }` → `GitStatusReply` | live (Task 19–23) | Whole-file resolution, then `git add` |
+| `ssh.keys.list` | `{}` → `SshKeyListReply` | live (Task 19–23) | Public data only |
+| `ssh.keys.generate` | `{ type?, comment?, passphrase?, label?, bits? }` → `SshKeyInfo` | live (Task 19–23) | `ed25519` (default) or `rsa` (2048/3072/4096, default 3072) |
+| `ssh.keys.import` | `{ content, passphrase?, label? }` → `SshKeyInfo` | live (Task 19–23) | OpenSSH, PEM, PKCS#8; content discarded after import |
+| `ssh.keys.delete` | `{ id }` → `GitOk` | live (Task 19–23) | |
+| `ssh.hostkey.answer` | `{ promptId, trust, remember? }` → `GitOk` | live (Task 19–23) | Answers an `ssh.hostkey.prompt`; no client timeout |
+| `ssh.hostkey.list` | `{}` → `SshKnownHostListReply` | live (Task 19–23) | SHA-256 fingerprints |
+| `ssh.hostkey.delete` | `{ host, port? }` → `GitOk` | live (Task 19–23) | Forget a host; required before trusting a changed key |
+| `secrets.token.set` | `{ host, token }` → `GitOk` | live (Task 19–23) | Generic token slot, keyed by `host` |
+| `secrets.token.delete` | `{ host }` → `GitOk` | live (Task 19–23) | |
+| `secrets.token.list` | `{}` → `SecretHostsReply` | live (Task 19–23) | Keys only, never values |
 | `runtime.catalog` | `{}` → `[{ id, version, size, installed, healthy }]` | planned (Task 25) | Manifest-verified |
 | `runtime.install` | `{ id }` → event stream `runtime.progress`, then `{ id, installed }` | live (bundled installer; Task 25 replaces it) | `E_BUSY` while an id is installing |
 | `runtime.cancel` | `{ id }` → `{ cancelling }` | live | Flags the running install; polled between chunks |
@@ -174,6 +214,101 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 > **Runtime prototype codes.** The Python installer prototype (commit `1a279a2`) emits `E_BAD_MANIFEST`, `E_INTEGRITY` and `E_HEALTH_CHECK`. They are not in the table above yet. Task 25 decides whether to add `E_INTEGRITY` and `E_HEALTH_CHECK` to the `ErrorCode` enum (and the catalog) or map them onto existing codes. `runtime.install` currently replies when the install finishes and streams `runtime.progress` until
 then; the client has no default timeout for it (see Timeouts). Task 25 moves the reply to the start.
 
+## Git and SSH (Phase F, Tasks 19–23)
+
+Contract commit `c69ff45`. DTOs are in `android/.../bridge/Contract.kt`; the generated TS union is
+`web/src/bridge/types.gen.ts`. All `path` values are relative to the active workspace and go
+through `PathJail`; `null` means the workspace root. A directory that is not a repository is not an
+error: `git.status` returns `initialized: false`.
+
+### Reply payloads
+
+| Type | JSON |
+|---|---|
+| `GitStatusReply` | `{ initialized, root, branch, head?, upstream?, remote?, ahead, behind, staged[], changed[], untracked[], conflicts[], clean }` |
+| `GitFileChange` | `{ path, status, oldPath? }` — `status` is `added`, `modified`, `deleted`, `renamed`, `copied`, `untracked` or `conflicted` |
+| `GitCommitReply` | `{ sha, shortSha }` |
+| `GitDiffReply` | `{ file?, diff, truncated, binary }` — unified diff, 256 KB default cap (`maxBytes`), binary files return `binary: true` with an empty diff |
+| `GitLogReply` | `{ commits: [{ sha, shortSha, author, email, time, message }] }` |
+| `GitBranchListReply` | `{ branches: [{ name, current, remote, sha }], current }` |
+| `GitRemoteListReply` | `{ remotes: [{ name, url, authKind, username?, hasToken, keyId? }], current? }` — never includes a token |
+| `GitSyncReply` | `{ branch, ahead, behind, message }` |
+| `GitCancelReply` | `{ cancelled }` |
+| `GitConflictReply` | `{ file, merged, ours?, theirs?, base?, binary }` — `merged` keeps standard `<<<<<<<` / `=======` / `>>>>>>>` markers |
+| `SshKeyInfo` | `{ id, label, type, fingerprint, comment, hasPassphrase, createdAt, publicKey }` — one OpenSSH **public**-key line |
+| `SshKeyListReply` | `{ keys: [SshKeyInfo] }` |
+| `SshKnownHostListReply` | `{ hosts: [{ host, port, keyType, fingerprint, addedAt }] }` |
+| `SecretHostsReply` | `{ hosts: ["github.com", …] }` — keys only, never values |
+| `GitOk` | `{ ok }` |
+
+`auth` is `{ kind: "https" \| "ssh" \| "none", username?, token?, keyId?, passphrase? }`. `token`
+and `passphrase` are accepted on the request only. When `auth` is omitted, the stored remote
+configuration and `SecretStore` decide; a one-off `auth` is used for that operation and not cached.
+
+### Long operations (clone / fetch / pull / push)
+
+- The reply is sent when the operation **finishes** (success or typed error), not when it starts.
+  `git.clone` replies `GitStatusReply`; `git.fetch/pull/push` reply `GitSyncReply`. The client sets
+  **no default timeout** for these four methods.
+- `git.progress` events are emitted while they run, throttled by the event sink (one per 100 ms per
+  event name). `done: 0` / `total: 0` means the phase has not reported a count yet.
+- `opId` is generated by the client and must be unique per in-flight operation. A second operation
+  with the same `opId` fails with `E_BUSY`.
+- `git.cancel { opId }` cancels a running clone/fetch/pull/push. The cancelled request rejects with
+  `E_CANCELLED`; cancelling after completion is safe and returns `{ cancelled: false }`.
+- Progress is advisory: a throttled or dropped event never changes the outcome. The reply is the
+  source of truth.
+- `git.pull` and `git.push` map a merge conflict or a rejected non-fast-forward to `E_CONFLICT`.
+  Nothing is force-pushed unless `force: true`.
+
+### Host keys and `known_hosts`
+
+- On an unknown host the host emits `ssh.hostkey.prompt` and **blocks that Git operation** until
+  `ssh.hostkey.answer`, or for **120 s**, after which the operation fails with `E_AUTH` ("host key
+  was not confirmed").
+- `trust: true` accepts the key for this connection; `remember: true` (the default) also writes it
+  to `known_hosts`. `trust: false` fails the operation with `E_AUTH` ("host key rejected").
+- `promptId` is single-use and request-scoped. Answering an expired or unknown prompt returns
+  `E_NOT_FOUND`; it never trusts a key.
+- A known host that presents a **different** key produces **no prompt**: the operation fails with
+  `E_HOSTKEY_CHANGED`, naming the host and port. The user must forget the host (`ssh.hostkey.delete
+  { host, port }`, available in SSH keys) and connect again. This is deliberate: a silent
+  re-prompt is exactly the behaviour a MITM benefits from.
+- `known_hosts` is OpenSSH-compatible: one `host keytype base64` line per key, `[host]:port` for
+  non-22 ports, no duplicate lines, atomic writes. It lives in `filesDir/ssh/`, the raw file is
+  never returned to the WebView, and unrelated OpenSSH entries are preserved. `ssh.hostkey.list`
+  returns host/port/key type/SHA-256 fingerprint only. Fingerprints match `ssh-keygen -l`.
+- The 120 s wait is host-side; `ssh.hostkey.answer` itself has no client timeout. Closing the sheet
+  does not cancel the Git operation, so the prompt can be answered late (until the timeout or
+  `git.cancel`).
+
+### Security
+
+- No token, private key or passphrase returns to the WebView, appears in a reply/event/error, or is
+  written to logcat. `git.remote.list` exposes `hasToken` only; `ssh.keys.list` exposes public data
+  only; no method exports private key material.
+- Tokens and private keys are stored as Keystore-wrapped ciphertext under `filesDir/secrets/` and
+  `filesDir/ssh/` (D-009/D-016). A secret is decrypted for the operation that needs it and is never
+  cached in a static field.
+- URLs are sanitised (userinfo removed) before any diagnostic or progress message.
+- The WebView may send a token/passphrase once (remote setup, a protected-key unlock, or a one-off
+  `auth`); the host stores or uses it for that operation only.
+
+### Error mapping (Git/SSH network operations)
+
+| Cause | Code |
+|---|---|
+| Bad token, wrong key/passphrase, rejected host key | `E_AUTH` |
+| DNS, connect, TLS or socket timeout | `E_OFFLINE` |
+| Merge conflict, non-fast-forward, dirty checkout | `E_CONFLICT` |
+| Changed host key (`known_hosts` mismatch) | `E_HOSTKEY_CHANGED` |
+| Cancelled by `git.cancel` | `E_CANCELLED` |
+| Two operations with one `opId` | `E_BUSY` |
+| Anything else | `E_IO` (plain message, no exception text) |
+
+Messages are plain language: no exception class names, stack traces, URLs with userinfo, or key
+material. `E_INTERNAL` keeps its correlation id.
+
 ## Events
 
 | Event | Payload | Source |
@@ -183,8 +318,8 @@ then; the client has no default timeout for it (see Timeouts). Task 25 moves the
 | `term.data` | `{ b64 }` (base64) | `term.open` / `term.attach` |
 | `term.exit` | `{ code }` | terminal session |
 | `search.match` | `{ path, line, col, preview }` | `fs.search` |
-| `git.progress` | `{ task, done, total }` | Git network ops |
-| `ssh.hostkey.prompt` | `{ promptId, host, keyType, fingerprintSha256 }` | SSH connect; waits for `ssh.hostkey.answer` |
+| `git.progress` | `{ op, opId?, task, done, total }` — `op` is `clone`, `fetch`, `pull` or `push` | `git.clone/fetch/pull/push` |
+| `ssh.hostkey.prompt` | `{ promptId, host, port, keyType, fingerprintSha256, changed, previousFingerprint? }` | SSH connect; blocks until `ssh.hostkey.answer` or 120 s |
 | `runtime.progress` | `{ phase, bytes, total }` | `runtime.install` |
 | `saf.progress` | `{ phase: "import" \| "export" \| "restore", files, bytes }` | `saf.importTree` / `saf.exportWorkspace` / `saf.restoreArchive` |
 | `app.lowMemory` | `{}` | `onTrimMemory` |
