@@ -151,6 +151,10 @@ export function createWorkspaceStore(deps: WorkspaceDeps): StoreApi<WorkspaceSta
           // the fallback root too (PD-14).
           const fallback = get().activeId
           if (fallback) dispatchWorkspaceSwitched(fallback)
+          // The fallback workspace may still have its own stored session, and
+          // deleting the active one is effectively a switch to it. Without this
+          // its tabs stay hidden until a restart or another switch (PD-11).
+          await editor.getState().restoreSession()
         }
         notifications.getState().enqueue({
           kind: "info",

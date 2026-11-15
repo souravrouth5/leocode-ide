@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createAppStores } from "../../app/stores"
 import { MockBridge } from "../../bridge/mock"
+import { SESSION_KEY } from "../editor/model"
 import { answerConfirm } from "../../test/dialogs"
 import { WORKSPACE_SWITCHED_EVENT } from "./workspaceEvents"
 
@@ -129,6 +130,28 @@ describe("workspace store (Task 14)", () => {
     }
 
     expect(seen).toEqual([id])
+  })
+
+  it("restores the fallback workspace's session after deleting the active one", async () => {
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ workspaceId: "default", paths: ["README.md"], active: "README.md" })
+    )
+    const stores = createAppStores(new MockBridge())
+    await stores.workspace.getState().load()
+    await stores.workspace.getState().create("Project")
+    const id = projectId(stores, "Project")
+    await stores.workspace.getState().open(id)
+    expect(stores.editor.getState().docs).toEqual([])
+
+    const removing = stores.workspace.getState().remove(id)
+    await answerConfirm(stores, true)
+    await expect(removing).resolves.toBe(true)
+
+    // The fallback root's stored session must come back without a restart.
+    expect(stores.workspace.getState().activeId).toBe("default")
+    expect(stores.editor.getState().docs.map((doc) => doc.path)).toEqual(["README.md"])
+    expect(stores.editor.getState().activePath).toBe("README.md")
   })
 
   it("announces the fallback root when the active workspace is deleted", async () => {
