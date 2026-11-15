@@ -6,6 +6,28 @@ import type {
   DraftInfo,
   FileEntry,
   FileStat,
+  GitBranch,
+  GitBranchList,
+  GitBranchRequest,
+  GitCheckoutRequest,
+  GitCloneRequest,
+  GitCommitEntry,
+  GitCommitRequest,
+  GitCommitResult,
+  GitConflict,
+  GitDiff,
+  GitDiffRequest,
+  GitFileChange,
+  GitInitRequest,
+  GitProgress,
+  GitRemote,
+  GitRemoteList,
+  GitRemoteSetRequest,
+  GitResolveStrategy,
+  GitStatus,
+  GitStream,
+  GitSyncRequest,
+  GitSyncResult,
   ProcessEvent,
   ReadChunk,
   RunHandle,
@@ -17,6 +39,11 @@ import type {
   SearchMatch,
   SearchOptions,
   SearchSummary,
+  SshHostPrompt,
+  SshKey,
+  SshKeyGenerateRequest,
+  SshKeyImportRequest,
+  SshKnownHost,
   StorageInfo,
   TerminalAttach,
   TerminalHandle,
@@ -35,6 +62,44 @@ interface Node {
   kind: "file" | "dir"
   content: string
   mtime: number
+}
+
+interface MockCommit {
+  sha: string
+  shortSha: string
+  author: string
+  email: string
+  time: number
+  message: string
+  files: Map<string, string>
+}
+
+interface MockRemote {
+  name: string
+  url: string
+  authKind: string
+  username: string | null
+  keyId: string | null
+  /** Lives only in the mock's memory and is never returned to the UI. */
+  token: string | null
+}
+
+interface MockRepo {
+  root: string
+  branch: string
+  commits: MockCommit[]
+  /** Branch name → tip sha, or null before the first commit. */
+  branches: Map<string, string | null>
+  /** Staged working-tree content; absent means "same as HEAD". */
+  index: Map<string, string>
+  /** Paths staged as deleted. */
+  stagedDeletes: Set<string>
+  conflicts: Map<string, { merged: string; ours: string; theirs: string }>
+  remotes: Map<string, MockRemote>
+  upstream: string | null
+  ahead: number
+  behind: number
+  remoteBranches: Set<string>
 }
 
 const now = () => Date.now()
@@ -121,6 +186,40 @@ const join = (base: string, name: string) => (base === "." ? name : `${base}/${n
 const parentOf = (path: string) =>
   path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "."
 
+/** Repository-relative path input: `""`, `"."` and `"/"` all mean the root. */
+const normalizeRepoPath = (path?: string | null): string => {
+  const trimmed = (path ?? "").replace(/^\/+|\/+$/g, "").trim()
+  return trimmed === "" || trimmed === "." ? "." : trimmed
+}
+
+const repoPrefix = (root: string) => (root === "." ? "" : `${root}/`)
+
+const repoFileKey = (root: string, file: string) =>
+  root === "." ? file : `${root}/${file}`
+
+const DEMO_IGNORED = new Set([".git", ".hg", ".svn", ".trash", ".leocode-trash"])
+
+const randomBase64 = (bytes: number): string => {
+  const data = new Uint8Array(bytes)
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(data)
+  } else {
+    for (let index = 0; index < bytes; index++) data[index] = Math.floor(Math.random() * 256)
+  }
+  let binary = ""
+  for (const byte of data) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+const mockSha = (seed: string): string => {
+  let hash = 2166136261
+  for (const char of seed) {
+    hash ^= char.charCodeAt(0)
+    hash = Math.imul(hash, 16777619) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0").repeat(5).slice(0, 40)
+}
+
 const previewLine = (line: string): string => {
   const trimmed = line.trim()
   return trimmed.length <= 240 ? trimmed : trimmed.slice(0, 237) + "…"
@@ -170,6 +269,24 @@ export class MockBridge implements Bridge {
   private drafts = new Map<string, Map<string, Draft>>()
   private activeSearches = new Set<string>()
   private cancelledSearches = new Set<string>()
+
+  // ------------------------------------------------------------ Git & SSH demo
+  /** Active workspace id → repository root → demo repository. */
+  private repos = new Map<string, Map<string, MockRepo>>()
+  private sshKeys: SshKey[] = []
+  private knownHosts = new Map<string, SshKnownHost>()
+  private tokens = new Map<string, string>()
+  private pendingHostPrompts = new Map<
+    string,
+    {
+      prompt: SshHostPrompt
+      resolve: (answer: { trust: boolean; remember: boolean }) => void
+    }
+  >()
+  private activeOps = new Set<string>()
+  private cancelledOps = new Set<string>()
+  private gitSequence = 0
+  private keySequence = 0
 
   constructor() {
     const stored = localStorage.getItem(THEME_KEY)
@@ -377,8 +494,10 @@ export class MockBridge implements Bridge {
     if (this.activeWorkspace !== id) {
       this.activeWorkspace = id
       // A real workspace switch starts from its own directory; the mock resets
-      // the demo tree so each workspace is visibly separate.
+      // the demo tree so each workspace is visibly separate. Its demo Git
+      // repository is reset with it, since it was built on the old node map.
       this.nodes = new Map(SEED)
+      this.repos.delete(id)
     }
     return { id: record.id, name: record.name, path: record.path }
   }
@@ -561,6 +680,820 @@ export class MockBridge implements Bridge {
     const bytes = byteLength(content)
     onProgress({ phase: "restore", files: 1, bytes })
     return { files: 1, bytes }
+  }
+
+  // -------------------------------------------------------- git (Tasks 21–23)
+
+  private repoMap(): Map<string, MockRepo> {
+    let repos = this.repos.get(this.activeWorkspace)
+    if (!repos) {
+      repos = new Map()
+      this.repos.set(this.activeWorkspace, repos)
+    }
+    return repos
+  }
+
+  private repoAt(path?: string | null): MockRepo | null {
+    return this.repoMap().get(normalizeRepoPath(path)) ?? null
+  }
+
+  private requireRepo(path?: string | null): MockRepo {
+    const repo = this.repoAt(path)
+    if (!repo) {
+      throw new BridgeError("E_NOT_FOUND", "That folder is not a Git repository")
+    }
+    return repo
+  }
+
+  private headFiles(repo: MockRepo): Map<string, string> {
+    const tip = repo.branches.get(repo.branch)
+    if (!tip) return new Map()
+    const commit = repo.commits.find((item) => item.sha === tip)
+    return commit ? new Map(commit.files) : new Map()
+  }
+
+  /** Every text file under the repository root, keyed repo-relative. */
+  private workingFiles(root: string): Map<string, string> {
+    const prefix = repoPrefix(root)
+    const files = new Map<string, string>()
+    for (const [key, node] of this.nodes) {
+      if (node.kind !== "file") continue
+      if (prefix && !key.startsWith(prefix)) continue
+      const relative = prefix ? key.slice(prefix.length) : key
+      if (!relative) continue
+      if (relative.split("/").some((part) => DEMO_IGNORED.has(part))) continue
+      files.set(relative, node.content)
+    }
+    return files
+  }
+
+  private statusFor(root: string): GitStatus {
+    const repo = this.repoAt(root)
+    if (!repo) {
+      return { initialized: false, clean: true }
+    }
+    const head = this.headFiles(repo)
+    const work = this.workingFiles(root)
+    const staged: GitFileChange[] = []
+    const changed: GitFileChange[] = []
+    const untracked: GitFileChange[] = []
+    const conflicts: GitFileChange[] = [...repo.conflicts.keys()].map((path) => ({
+      path,
+      status: "conflicted"
+    }))
+
+    for (const [path, content] of repo.index) {
+      if (head.get(path) === content) continue
+      staged.push({ path, status: head.has(path) ? "modified" : "added" })
+    }
+    for (const path of repo.stagedDeletes) {
+      if (head.has(path)) staged.push({ path, status: "deleted" })
+    }
+    for (const [path, content] of work) {
+      if (repo.conflicts.has(path)) continue
+      const baseline = repo.index.has(path) ? repo.index.get(path) : head.get(path)
+      if (baseline === undefined) {
+        untracked.push({ path, status: "untracked" })
+      } else if (baseline !== content) {
+        changed.push({ path, status: "modified" })
+      }
+    }
+    for (const path of head.keys()) {
+      if (work.has(path) || repo.stagedDeletes.has(path)) continue
+      if (!repo.index.has(path) || repo.index.get(path) === head.get(path)) {
+        changed.push({ path, status: "deleted" })
+      }
+    }
+
+    const tip = repo.branches.get(repo.branch) ?? null
+    return {
+      initialized: true,
+      root: root === "." ? "." : root,
+      branch: repo.branch,
+      head: tip ? tip.slice(0, 7) : null,
+      upstream: repo.upstream,
+      remote: repo.upstream ? repo.upstream.split("/")[0] : null,
+      ahead: repo.ahead,
+      behind: repo.behind,
+      staged,
+      changed,
+      untracked,
+      conflicts,
+      clean: staged.length + changed.length + untracked.length + conflicts.length === 0
+    }
+  }
+
+  private remoteList(repo: MockRepo): GitRemoteList {
+    const remotes: GitRemote[] = [...repo.remotes.values()].map((remote) => ({
+      name: remote.name,
+      url: remote.url,
+      authKind: remote.authKind,
+      username: remote.username,
+      hasToken: Boolean(remote.token),
+      keyId: remote.keyId
+    }))
+    return { remotes, current: remotes[0]?.name ?? null }
+  }
+
+  private applySnapshot(
+    root: string,
+    previous: Map<string, string>,
+    next: Map<string, string>
+  ) {
+    for (const path of previous.keys()) {
+      if (!next.has(path)) this.nodes.delete(repoFileKey(root, path))
+    }
+    for (const [path, content] of next) {
+      this.nodes.set(repoFileKey(root, path), { kind: "file", content, mtime: now() })
+    }
+    this.ensureParents(repoFileKey(root, [...next.keys()][0] ?? "README.md"))
+  }
+
+  private diffText(file: string, before: string, after: string): string {
+    if (before === after) return ""
+    const beforeLines = before === "" ? [] : before.replace(/\n$/, "").split("\n")
+    const afterLines = after === "" ? [] : after.replace(/\n$/, "").split("\n")
+    const fromRange = beforeLines.length === 0 ? "0,0" : `1,${beforeLines.length}`
+    const toRange = afterLines.length === 0 ? "0,0" : `1,${afterLines.length}`
+    const lines = [
+      `--- ${before === "" ? "/dev/null" : `a/${file}`}`,
+      `+++ ${after === "" ? "/dev/null" : `b/${file}`}`,
+      `@@ -${fromRange} +${toRange} @@`,
+      ...beforeLines.map((line) => `-${line}`),
+      ...afterLines.map((line) => `+${line}`)
+    ]
+    return lines.join("\n") + "\n"
+  }
+
+  private parseRemoteUrl(url: string): {
+    kind: "ssh" | "https" | "none"
+    host: string
+    port: number
+    username?: string
+  } {
+    if (/^https?:\/\//i.test(url)) {
+      try {
+        const parsed = new URL(url)
+        return {
+          kind: "https",
+          host: parsed.hostname,
+          port: parsed.port ? Number(parsed.port) : 443,
+          username: parsed.username || undefined
+        }
+      } catch {
+        return { kind: "https", host: "", port: 443 }
+      }
+    }
+    if (/^ssh:\/\//i.test(url)) {
+      try {
+        const parsed = new URL(url)
+        return {
+          kind: "ssh",
+          host: parsed.hostname,
+          port: parsed.port ? Number(parsed.port) : 22,
+          username: parsed.username || undefined
+        }
+      } catch {
+        return { kind: "ssh", host: "", port: 22 }
+      }
+    }
+    const scp = /^(?:([^@/]+)@)?([^:/]+):(.+)$/.exec(url)
+    if (scp) {
+      return { kind: "ssh", host: scp[2], port: 22, username: scp[1] }
+    }
+    return { kind: "none", host: "", port: 0 }
+  }
+
+  private repoNameFromUrl(url: string): string {
+    const cleaned = url.replace(/[?#].*$/, "").replace(/\/+$/, "")
+    const last = cleaned.split("/").pop() ?? "repository"
+    const name = last.replace(/\.git$/i, "")
+    return name || "repository"
+  }
+
+  /**
+   * SSH host verification in the mock. The prompt blocks the clone until
+   * `ssh.hostkey.answer` arrives, and a remembered trust suppresses the next
+   * prompt for the same host and port.
+   */
+  private async ensureHostKey(
+    stream: GitStream | undefined,
+    host: string,
+    port: number
+  ): Promise<void> {
+    if (!host) throw new BridgeError("E_OFFLINE", "That remote has no host name")
+    const id = `${host}:${port}`
+    if (this.knownHosts.has(id)) return
+
+    const prompt: SshHostPrompt = {
+      promptId: `host-${++this.gitSequence}`,
+      host,
+      port,
+      keyType: "ssh-ed25519",
+      fingerprintSha256: `SHA256:${randomBase64(32)}`,
+      changed: false
+    }
+    const answer = new Promise<{ trust: boolean; remember: boolean }>((resolve) => {
+      this.pendingHostPrompts.set(prompt.promptId, { prompt, resolve })
+    })
+    stream?.onHostKeyPrompt?.(prompt)
+    const result = await answer
+    if (!result.trust) {
+      throw new BridgeError("E_AUTH", "host key rejected")
+    }
+    if (result.remember) {
+      this.knownHosts.set(id, {
+        host,
+        port,
+        keyType: prompt.keyType,
+        fingerprint: prompt.fingerprintSha256,
+        addedAt: now()
+      })
+    }
+  }
+
+  private async runGitProgress(
+    stream: GitStream | undefined,
+    op: string,
+    opId: string | null | undefined,
+    task: string
+  ): Promise<void> {
+    if (opId) this.activeOps.add(opId)
+    try {
+      for (let step = 0; step <= 4; step++) {
+        if (opId && this.cancelledOps.has(opId)) {
+          throw new BridgeError("E_CANCELLED", `${op} cancelled`)
+        }
+        const progress: GitProgress = {
+          op,
+          opId: opId ?? null,
+          task,
+          done: step * 25,
+          total: 100
+        }
+        stream?.onProgress?.(progress)
+        if (step < 4) await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    } finally {
+      if (opId) {
+        this.activeOps.delete(opId)
+        this.cancelledOps.delete(opId)
+      }
+    }
+  }
+
+  async gitInit(request: GitInitRequest): Promise<GitStatus> {
+    const root = normalizeRepoPath(request.path)
+    let repo = this.repoAt(root)
+    if (!repo) {
+      const branch = request.branch?.trim() || "main"
+      repo = {
+        root,
+        branch,
+        commits: [],
+        branches: new Map([[branch, null]]),
+        index: new Map(),
+        stagedDeletes: new Set(),
+        conflicts: new Map(),
+        remotes: new Map(),
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        remoteBranches: new Set()
+      }
+      this.repoMap().set(root, repo)
+    }
+    return this.statusFor(root)
+  }
+
+  async gitStatus(path?: string | null): Promise<GitStatus> {
+    return this.statusFor(normalizeRepoPath(path))
+  }
+
+  async gitAdd(path: string | null, paths: string[]): Promise<GitStatus> {
+    const root = normalizeRepoPath(path)
+    const repo = this.requireRepo(root)
+    const work = this.workingFiles(root)
+    const head = this.headFiles(repo)
+    const wanted =
+      paths.length === 0 || paths.some((item) => item === "." || item === "*")
+        ? [...work.keys()]
+        : paths.map((item) => item.replace(/^\.\/+/, ""))
+    for (const file of wanted) {
+      if (work.has(file)) {
+        repo.index.set(file, work.get(file)!)
+        repo.stagedDeletes.delete(file)
+        repo.conflicts.delete(file)
+      } else {
+        repo.index.delete(file)
+        if (head.has(file)) repo.stagedDeletes.add(file)
+        else repo.stagedDeletes.delete(file)
+      }
+    }
+    return this.statusFor(root)
+  }
+
+  async gitReset(path: string | null, paths: string[]): Promise<GitStatus> {
+    const root = normalizeRepoPath(path)
+    const repo = this.requireRepo(root)
+    const head = this.headFiles(repo)
+    const wanted =
+      paths.length === 0 || paths.some((item) => item === "." || item === "*")
+        ? null
+        : paths.map((item) => item.replace(/^\.\/+/, ""))
+    if (wanted === null) {
+      repo.index.clear()
+      repo.stagedDeletes.clear()
+    } else {
+      for (const file of wanted) {
+        if (head.has(file)) repo.index.set(file, head.get(file)!)
+        else repo.index.delete(file)
+        repo.stagedDeletes.delete(file)
+      }
+    }
+    return this.statusFor(root)
+  }
+
+  async gitCommit(request: GitCommitRequest): Promise<GitCommitResult> {
+    const root = normalizeRepoPath(request.path)
+    const repo = this.requireRepo(root)
+    const message = request.message?.trim()
+    if (!message) throw new BridgeError("E_BAD_ENVELOPE", "A commit needs a message")
+
+    const status = this.statusFor(root)
+    if ((status.staged ?? []).length === 0) {
+      throw new BridgeError("E_CONFLICT", "There is nothing staged to commit")
+    }
+
+    const files = this.headFiles(repo)
+    for (const [path, content] of repo.index) {
+      if (content === files.get(path)) continue
+      files.set(path, content)
+    }
+    for (const path of repo.stagedDeletes) files.delete(path)
+
+    const sha = mockSha(`${now()}-${this.gitSequence++}-${repo.commits.length}`)
+    const commit: MockCommit = {
+      sha,
+      shortSha: sha.slice(0, 7),
+      author: request.authorName?.trim() || "LeoCode Demo",
+      email: request.authorEmail?.trim() || "demo@leocode.local",
+      time: now(),
+      message,
+      files
+    }
+    repo.commits.unshift(commit)
+    repo.branches.set(repo.branch, sha)
+    repo.index.clear()
+    repo.stagedDeletes.clear()
+    repo.conflicts.clear()
+    return { sha, shortSha: commit.shortSha }
+  }
+
+  async gitDiff(request: GitDiffRequest): Promise<GitDiff> {
+    const root = normalizeRepoPath(request.path)
+    const repo = this.requireRepo(root)
+    const head = this.headFiles(repo)
+    const work = this.workingFiles(root)
+    const maxBytes = request.maxBytes && request.maxBytes > 0 ? request.maxBytes : 262_144
+
+    const beforeFor = (file: string) =>
+      request.staged
+        ? head.get(file) ?? ""
+        : repo.index.has(file)
+          ? repo.index.get(file)!
+          : head.get(file) ?? ""
+    const afterFor = (file: string) =>
+      request.staged ? repo.index.get(file) ?? "" : work.get(file) ?? ""
+
+    const files =
+      request.file !== null && request.file !== undefined && request.file !== ""
+        ? [request.file]
+        : [...new Set([...head.keys(), ...repo.index.keys(), ...work.keys()])].sort()
+
+    let diff = ""
+    for (const file of files) {
+      const before = beforeFor(file)
+      const after = afterFor(file)
+      if (before.includes("\u0000") || after.includes("\u0000")) {
+        if (request.file) {
+          return { file, diff: "", truncated: false, binary: true }
+        }
+        continue
+      }
+      diff += this.diffText(file, before, after)
+    }
+    const truncated = diff.length > maxBytes
+    return {
+      file: request.file ?? null,
+      diff: truncated ? diff.slice(0, maxBytes) : diff,
+      truncated,
+      binary: false
+    }
+  }
+
+  async gitLog(path?: string | null, max = 50): Promise<GitCommitEntry[]> {
+    const repo = this.requireRepo(path)
+    const cap = Math.min(Math.max(1, max), 200)
+    return repo.commits.slice(0, cap).map((commit) => ({
+      sha: commit.sha,
+      shortSha: commit.shortSha,
+      author: commit.author,
+      email: commit.email,
+      time: commit.time,
+      message: commit.message
+    }))
+  }
+
+  async gitBranchList(path?: string | null): Promise<GitBranchList> {
+    const repo = this.requireRepo(path)
+    const branches: GitBranch[] = [...repo.branches.entries()].map(([name, sha]) => ({
+      name,
+      current: name === repo.branch,
+      remote: false,
+      sha: sha ?? ""
+    }))
+    for (const name of repo.remoteBranches) {
+      branches.push({ name, current: false, remote: true, sha: "" })
+    }
+    return { branches, current: repo.branch }
+  }
+
+  async gitBranchCreate(request: GitBranchRequest): Promise<GitStatus> {
+    const root = normalizeRepoPath(request.path)
+    const repo = this.requireRepo(root)
+    const name = request.name?.trim()
+    if (!name) throw new BridgeError("E_BAD_ENVELOPE", "A branch needs a name")
+    if (repo.branches.has(name)) throw new BridgeError("E_EXISTS", "That branch already exists")
+    const start = request.startPoint?.trim()
+    let sha = repo.branches.get(repo.branch) ?? null
+    if (start) {
+      sha = repo.branches.get(start) ?? repo.commits.find((item) => item.sha.startsWith(start))?.sha ?? null
+      if (sha === null && !repo.branches.has(start)) {
+        throw new BridgeError("E_NOT_FOUND", "That start point does not exist")
+      }
+    }
+    repo.branches.set(name, sha)
+    return this.statusFor(root)
+  }
+
+  async gitBranchDelete(path: string | null, name: string): Promise<GitStatus> {
+    const root = normalizeRepoPath(path)
+    const repo = this.requireRepo(root)
+    if (name === repo.branch) {
+      throw new BridgeError("E_BUSY", "The current branch cannot be deleted")
+    }
+    if (!repo.branches.has(name)) throw new BridgeError("E_NOT_FOUND", "No such branch")
+    repo.branches.delete(name)
+    return this.statusFor(root)
+  }
+
+  async gitCheckout(request: GitCheckoutRequest): Promise<GitStatus> {
+    const root = normalizeRepoPath(request.path)
+    const repo = this.requireRepo(root)
+    const name = request.name?.trim()
+    if (!name) throw new BridgeError("E_BAD_ENVELOPE", "A branch name is required")
+    if (request.create) {
+      if (repo.branches.has(name)) throw new BridgeError("E_EXISTS", "That branch already exists")
+      repo.branches.set(name, repo.branches.get(repo.branch) ?? null)
+    } else if (!repo.branches.has(name)) {
+      throw new BridgeError("E_NOT_FOUND", "No such branch")
+    }
+    if (name === repo.branch && !request.create) return this.statusFor(root)
+
+    const status = this.statusFor(root)
+    if ((status.staged ?? []).length + (status.changed ?? []).length + (status.conflicts ?? []).length > 0) {
+      throw new BridgeError("E_CONFLICT", "Commit or stash your changes before switching branches")
+    }
+
+    const previous = this.headFiles(repo)
+    repo.branch = name
+    const next = this.headFiles(repo)
+    this.applySnapshot(root, previous, next)
+    repo.index = new Map(next)
+    repo.stagedDeletes.clear()
+    repo.conflicts.clear()
+    return this.statusFor(root)
+  }
+
+  async gitRemoteList(path?: string | null): Promise<GitRemoteList> {
+    return this.remoteList(this.requireRepo(path))
+  }
+
+  async gitRemoteSet(request: GitRemoteSetRequest): Promise<GitRemoteList> {
+    const repo = this.requireRepo(request.path)
+    const name = request.name?.trim()
+    const url = request.url?.trim()
+    if (!name) throw new BridgeError("E_BAD_ENVELOPE", "A remote needs a name")
+    if (!url) throw new BridgeError("E_BAD_ENVELOPE", "A remote needs a URL")
+    const existing = repo.remotes.get(name)
+    const parsed = this.parseRemoteUrl(url)
+    const authKind = request.authKind?.trim() || existing?.authKind || parsed.kind
+    let token = existing?.token ?? null
+    if (typeof request.token === "string") {
+      token = request.token === "" ? null : request.token
+    }
+    repo.remotes.set(name, {
+      name,
+      url,
+      authKind,
+      username: request.username?.trim() || existing?.username || parsed.username || null,
+      keyId: request.keyId === undefined ? existing?.keyId ?? null : request.keyId || null,
+      token
+    })
+    return this.remoteList(repo)
+  }
+
+  async gitRemoteRemove(path: string | null, name: string): Promise<GitRemoteList> {
+    const repo = this.requireRepo(path)
+    if (!repo.remotes.has(name)) throw new BridgeError("E_NOT_FOUND", "No such remote")
+    repo.remotes.delete(name)
+    if (repo.upstream?.startsWith(`${name}/`)) repo.upstream = null
+    return this.remoteList(repo)
+  }
+
+  async gitClone(
+    request: GitCloneRequest,
+    stream?: GitStream
+  ): Promise<GitStatus> {
+    const url = request.url?.trim()
+    if (!url) throw new BridgeError("E_BAD_ENVELOPE", "Clone needs a repository URL")
+    const name = request.name?.trim() || this.repoNameFromUrl(url)
+    const base = request.path?.trim()
+    const root = normalizeRepoPath(
+      base && base !== "." ? (request.name?.trim() ? `${base}/${name}` : base) : name
+    )
+    if (root === ".") {
+      throw new BridgeError("E_EXISTS", "Choose a folder for the clone")
+    }
+    if (this.nodes.has(root) || [...this.nodes.keys()].some((key) => key.startsWith(root + "/"))) {
+      throw new BridgeError("E_EXISTS", `${root} already exists`)
+    }
+
+    const parsed = this.parseRemoteUrl(url)
+    if (parsed.kind === "ssh") {
+      await this.ensureHostKey(stream, parsed.host, parsed.port)
+    }
+
+    await this.runGitProgress(stream, "clone", request.opId, "Receiving objects")
+
+    const safeUrl = url.replace(/\/\/[^@/]+@/, "//")
+    const readme = `# ${name}\n\nCloned from ${safeUrl} by the LeoCode mock bridge.\n`
+    const sample = `"""Mock repository ${name}."""\n\n\ndef hello() -> str:\n    return "hello from ${name}"\n`
+    this.nodes.set(root, { kind: "dir", content: "", mtime: now() })
+    this.nodes.set(`${root}/README.md`, { kind: "file", content: readme, mtime: now() })
+    this.nodes.set(`${root}/main.py`, { kind: "file", content: sample, mtime: now() })
+
+    const files = new Map([
+      ["README.md", readme],
+      ["main.py", sample]
+    ])
+    const sha = mockSha(`${root}-${now()}-${this.gitSequence++}`)
+    const repo: MockRepo = {
+      root,
+      branch: "main",
+      commits: [
+        {
+          sha,
+          shortSha: sha.slice(0, 7),
+          author: "LeoCode Demo",
+          email: "demo@leocode.local",
+          time: now(),
+          message: "Initial commit",
+          files
+        }
+      ],
+      branches: new Map([["main", sha]]),
+      index: new Map(files),
+      stagedDeletes: new Set(),
+      conflicts: new Map(),
+      remotes: new Map(),
+      upstream: "origin/main",
+      ahead: 0,
+      behind: 0,
+      remoteBranches: new Set(["origin/main"])
+    }
+    repo.remotes.set("origin", {
+      name: "origin",
+      url,
+      authKind: request.auth?.kind || parsed.kind,
+      username: request.auth?.username?.trim() || parsed.username || null,
+      keyId: request.auth?.keyId || null,
+      token: request.auth?.token || null
+    })
+    this.repoMap().set(root, repo)
+    return this.statusFor(root)
+  }
+
+  private syncRemote(repo: MockRepo, request: GitSyncRequest): string {
+    const remoteName = request.remote?.trim() || repo.upstream?.split("/")[0] || this.firstRemote(repo)
+    if (!remoteName) throw new BridgeError("E_NOT_FOUND", "No remote is configured")
+    if (!repo.remotes.has(remoteName)) throw new BridgeError("E_NOT_FOUND", "No such remote")
+    return remoteName
+  }
+
+  private firstRemote(repo: MockRepo): string | null {
+    return repo.remotes.keys().next().value ?? null
+  }
+
+  private async ensureRemoteHost(repo: MockRepo, name: string, stream?: GitStream) {
+    const remote = repo.remotes.get(name)
+    if (!remote) return
+    const parsed = this.parseRemoteUrl(remote.url)
+    if (parsed.kind === "ssh") await this.ensureHostKey(stream, parsed.host, parsed.port)
+  }
+
+  async gitFetch(request: GitSyncRequest, stream?: GitStream): Promise<GitSyncResult> {
+    const repo = this.requireRepo(request.path)
+    const remoteName = this.syncRemote(repo, request)
+    await this.ensureRemoteHost(repo, remoteName, stream)
+    await this.runGitProgress(stream, "fetch", request.opId, "Resolving deltas")
+    const branch = request.branch?.trim() || repo.branch
+    repo.remoteBranches.add(`${remoteName}/${branch}`)
+    repo.upstream = `${remoteName}/${branch}`
+    return {
+      branch,
+      ahead: repo.ahead,
+      behind: repo.behind,
+      message: `Fetched ${remoteName}/${branch}`
+    }
+  }
+
+  async gitPull(request: GitSyncRequest, stream?: GitStream): Promise<GitSyncResult> {
+    const repo = this.requireRepo(request.path)
+    const remoteName = this.syncRemote(repo, request)
+    await this.ensureRemoteHost(repo, remoteName, stream)
+    await this.runGitProgress(stream, "pull", request.opId, "Merging")
+    const branch = request.branch?.trim() || repo.branch
+    repo.upstream = `${remoteName}/${branch}`
+    repo.ahead = 0
+    repo.behind = 0
+    return { branch, ahead: 0, behind: 0, message: "Already up to date" }
+  }
+
+  async gitPush(request: GitSyncRequest, stream?: GitStream): Promise<GitSyncResult> {
+    const repo = this.requireRepo(request.path)
+    const remoteName = this.syncRemote(repo, request)
+    await this.ensureRemoteHost(repo, remoteName, stream)
+    await this.runGitProgress(stream, "push", request.opId, "Writing objects")
+    const branch = request.branch?.trim() || repo.branch
+    repo.upstream = `${remoteName}/${branch}`
+    repo.ahead = 0
+    repo.behind = 0
+    return { branch, ahead: 0, behind: 0, message: "Everything up-to-date" }
+  }
+
+  async gitCancel(opId: string): Promise<boolean> {
+    if (!opId || !this.activeOps.has(opId)) return false
+    this.cancelledOps.add(opId)
+    return true
+  }
+
+  async gitConflict(path: string | null, file: string): Promise<GitConflict> {
+    const repo = this.requireRepo(path)
+    const conflict = repo.conflicts.get(file)
+    if (!conflict) throw new BridgeError("E_NOT_FOUND", "That file has no conflict")
+    if (conflict.merged.includes("\u0000")) {
+      return {
+        file,
+        merged: "",
+        ours: null,
+        theirs: null,
+        base: null,
+        binary: true
+      }
+    }
+    return {
+      file,
+      merged: conflict.merged,
+      ours: conflict.ours,
+      theirs: conflict.theirs,
+      base: null,
+      binary: false
+    }
+  }
+
+  async gitResolve(
+    path: string | null,
+    file: string,
+    strategy: GitResolveStrategy
+  ): Promise<GitStatus> {
+    const root = normalizeRepoPath(path)
+    const repo = this.requireRepo(root)
+    const conflict = repo.conflicts.get(file)
+    if (!conflict) throw new BridgeError("E_NOT_FOUND", "That file has no conflict")
+    const content = strategy === "theirs" ? conflict.theirs : conflict.ours
+    this.nodes.set(repoFileKey(root, file), { kind: "file", content, mtime: now() })
+    repo.index.set(file, content)
+    repo.stagedDeletes.delete(file)
+    repo.conflicts.delete(file)
+    return this.statusFor(root)
+  }
+
+  // -------------------------------------------------------------------- ssh
+
+  async sshKeysList(): Promise<SshKey[]> {
+    return this.sshKeys.map((key) => ({ ...key }))
+  }
+
+  async sshKeyGenerate(request: SshKeyGenerateRequest): Promise<SshKey> {
+    const type = request.type?.trim() || "ed25519"
+    if (type !== "ed25519" && type !== "rsa" && type !== "ecdsa") {
+      throw new BridgeError("E_UNSUPPORTED", "That key type is not supported")
+    }
+    if (type === "rsa" && request.bits && ![2048, 3072, 4096].includes(request.bits)) {
+      throw new BridgeError("E_BAD_ENVELOPE", "RSA keys use 2048, 3072 or 4096 bits")
+    }
+    const comment = request.comment?.trim() || "leocode@device"
+    const publicKey = `${type === "ed25519" ? "ssh-ed25519" : "ssh-rsa"} ${randomBase64(
+      type === "ed25519" ? 32 : 128
+    )} ${comment}`
+    const key: SshKey = {
+      id: `key-${++this.keySequence}`,
+      label: request.label?.trim() || (type === "ed25519" ? "Ed25519 key" : "RSA key"),
+      type,
+      fingerprint: `SHA256:${randomBase64(32)}`,
+      comment,
+      hasPassphrase: Boolean(request.passphrase),
+      createdAt: now(),
+      publicKey
+    }
+    this.sshKeys.push(key)
+    return { ...key }
+  }
+
+  async sshKeyImport(request: SshKeyImportRequest): Promise<SshKey> {
+    const content = request.content?.trim()
+    if (!content) throw new BridgeError("E_BAD_ENVELOPE", "Paste a private or public key first")
+    const openSsh = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+(\S+)(?:\s+(.*))?$/.exec(
+      content.split("\n")[0].trim()
+    )
+    const privateKey = content.includes("PRIVATE KEY")
+    if (!openSsh && !privateKey) {
+      throw new BridgeError("E_BAD_ENVELOPE", "That does not look like an SSH key")
+    }
+    const type = content.includes("ssh-ed25519")
+      ? "ed25519"
+      : content.includes("ecdsa-")
+        ? "ecdsa"
+        : "rsa"
+    const comment = openSsh?.[3]?.trim() || "imported@device"
+    const publicKey = openSsh
+      ? `${openSsh[1]} ${openSsh[2]}${openSsh[3] ? ` ${openSsh[3]}` : ""}`
+      : `${type === "ed25519" ? "ssh-ed25519" : "ssh-rsa"} ${randomBase64(
+          type === "ed25519" ? 32 : 128
+        )} ${comment}`
+    const key: SshKey = {
+      id: `key-${++this.keySequence}`,
+      label: request.label?.trim() || "Imported key",
+      type,
+      fingerprint: `SHA256:${randomBase64(32)}`,
+      comment,
+      hasPassphrase: Boolean(request.passphrase),
+      createdAt: now(),
+      publicKey
+    }
+    this.sshKeys.push(key)
+    return { ...key }
+  }
+
+  async sshKeyDelete(id: string): Promise<void> {
+    const before = this.sshKeys.length
+    this.sshKeys = this.sshKeys.filter((key) => key.id !== id)
+    if (this.sshKeys.length === before) {
+      throw new BridgeError("E_NOT_FOUND", "No such SSH key")
+    }
+  }
+
+  async sshHostKeyAnswer(promptId: string, trust: boolean, remember = true): Promise<void> {
+    const pending = this.pendingHostPrompts.get(promptId)
+    if (!pending) throw new BridgeError("E_NOT_FOUND", "That host-key prompt has expired")
+    this.pendingHostPrompts.delete(promptId)
+    pending.resolve({ trust, remember })
+  }
+
+  async sshHostKeyList(): Promise<SshKnownHost[]> {
+    return [...this.knownHosts.values()].map((host) => ({ ...host }))
+  }
+
+  async sshHostKeyDelete(host: string, port = 22): Promise<void> {
+    this.knownHosts.delete(`${host}:${port}`)
+  }
+
+  // ---------------------------------------------------------------- secrets
+
+  async secretsTokenSet(host: string, token: string): Promise<void> {
+    const key = host?.trim()
+    if (!key) throw new BridgeError("E_BAD_ENVELOPE", "A token needs a host")
+    this.tokens.set(key, token)
+  }
+
+  async secretsTokenDelete(host: string): Promise<void> {
+    this.tokens.delete(host)
+  }
+
+  async secretsTokenList(): Promise<string[]> {
+    return [...this.tokens.keys()]
   }
 
   private async hash(content: string): Promise<string> {

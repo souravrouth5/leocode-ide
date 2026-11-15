@@ -32,7 +32,29 @@ const IDEMPOTENT_READS = new Set([
   "draft.read",
   "workspace.list",
   "storage.info",
-  "term.list"
+  "term.list",
+  // Phase F: Git reads may be retried; writes, network ops and SSH mutations
+  // never are (a retried commit/push would duplicate work).
+  "git.status",
+  "git.diff",
+  "git.log",
+  "git.branch.list",
+  "git.remote.list"
+])
+
+/** Long Git network operations are progress-driven and cancelled by op id. */
+const GIT_NETWORK_METHODS = new Set([
+  "git.clone",
+  "git.fetch",
+  "git.pull",
+  "git.push"
+])
+
+/** Non-idempotent Git/SSH/secrets reads: quick, but never retried. */
+const READ_METHODS = new Set([
+  "ssh.keys.list",
+  "ssh.hostkey.list",
+  "secrets.token.list"
 ])
 
 export function defaultTimeoutMs(method: string): number | null {
@@ -40,8 +62,11 @@ export function defaultTimeoutMs(method: string): number | null {
   // The host replies when an install finishes, not on start, so a fixed timeout
   // would abort every real install (B-03/W-01). Cancellation is runtime.cancel.
   if (method === "runtime.install") return null
+  // A Git clone/fetch/pull/push runs until it finishes; the reply is the result,
+  // not a start ack. Progress arrives meanwhile and `git.cancel` stops it.
+  if (GIT_NETWORK_METHODS.has(method)) return null
   // Cancelling is a small control message even while its search is running.
-  if (method === "fs.search.cancel") return 2_000
+  if (method === "fs.search.cancel" || method === "git.cancel") return 2_000
   // A broad workspace search is capped but still walks many files (Task 16).
   if (method === "fs.search") return 60_000
   if (
@@ -50,6 +75,10 @@ export function defaultTimeoutMs(method: string): number | null {
     method === "draft.delete" ||
     method.startsWith("workspace.")
   ) {
+    return WRITE_TIMEOUT_MS
+  }
+  if (READ_METHODS.has(method) || IDEMPOTENT_READS.has(method)) return FAST_TIMEOUT_MS
+  if (method.startsWith("git.") || method.startsWith("ssh.") || method.startsWith("secrets.")) {
     return WRITE_TIMEOUT_MS
   }
   return FAST_TIMEOUT_MS

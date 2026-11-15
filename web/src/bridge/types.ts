@@ -3,9 +3,42 @@ import type {
   DraftInfo as GeneratedDraftInfo,
   ErrorCode,
   FileEntry as GeneratedFileEntry,
+  GitAuth as GeneratedGitAuth,
+  GitBranchInfo as GeneratedGitBranchInfo,
+  GitBranchListReply as GeneratedGitBranchListReply,
+  GitBranchRequest,
+  GitCheckoutRequest,
+  GitCloneRequest,
+  GitCommitInfo as GeneratedGitCommitInfo,
+  GitCommitReply as GeneratedGitCommitReply,
+  GitCommitRequest,
+  GitConflictReply as GeneratedGitConflictReply,
+  GitDiffReply as GeneratedGitDiffReply,
+  GitDiffRequest,
+  GitFileChange as GeneratedGitFileChange,
+  GitInitRequest,
+  GitLogRequest,
+  GitPathsRequest,
+  GitProgress as GeneratedGitProgress,
+  GitRemoteInfo as GeneratedGitRemoteInfo,
+  GitRemoteListReply as GeneratedGitRemoteListReply,
+  GitRemoteSetRequest,
+  GitResolveRequest,
+  GitStatusReply as GeneratedGitStatusReply,
+  GitSyncReply as GeneratedGitSyncReply,
+  GitSyncRequest,
   RuntimeProgress as GeneratedRuntimeProgress,
   SafDocument as GeneratedSafDocument,
   SearchMatch as GeneratedSearchMatch,
+  SecretSetRequest,
+  SshHostAnswerRequest,
+  SshHostPrompt as GeneratedSshHostPrompt,
+  SshKeyIdRequest,
+  SshKeyGenerateRequest,
+  SshKeyImportRequest,
+  SshKeyInfo as GeneratedSshKeyInfo,
+  SshKnownHostDeleteRequest,
+  SshKnownHostInfo as GeneratedSshKnownHostInfo,
   StorageInfo as GeneratedStorageInfo,
   TermInfo as GeneratedTermInfo,
   WorkspaceInfo as GeneratedWorkspaceInfo
@@ -197,6 +230,57 @@ export interface RuntimeInstallHandle {
   cancel: () => void
 }
 
+// ------------------------------------------------------------ Git (Tasks 21–23)
+
+export type GitFileChange = GeneratedGitFileChange
+export type GitStatus = GeneratedGitStatusReply
+export type GitCommitResult = GeneratedGitCommitReply
+export type GitDiff = GeneratedGitDiffReply
+export type GitCommitEntry = GeneratedGitCommitInfo
+export type GitBranch = GeneratedGitBranchInfo
+export type GitBranchList = GeneratedGitBranchListReply
+export type GitAuth = GeneratedGitAuth
+export type GitRemote = GeneratedGitRemoteInfo
+export type GitRemoteList = GeneratedGitRemoteListReply
+export type GitSyncResult = GeneratedGitSyncReply
+export type GitConflict = GeneratedGitConflictReply
+export type GitProgress = GeneratedGitProgress
+export type SshKey = GeneratedSshKeyInfo
+export type SshHostPrompt = GeneratedSshHostPrompt
+export type SshKnownHost = GeneratedSshKnownHostInfo
+
+export type {
+  GitBranchRequest,
+  GitCheckoutRequest,
+  GitCloneRequest,
+  GitCommitRequest,
+  GitDiffRequest,
+  GitInitRequest,
+  GitLogRequest,
+  GitPathsRequest,
+  GitRemoteSetRequest,
+  GitResolveRequest,
+  GitSyncRequest,
+  SecretSetRequest,
+  SshHostAnswerRequest,
+  SshKeyGenerateRequest,
+  SshKeyIdRequest,
+  SshKeyImportRequest,
+  SshKnownHostDeleteRequest
+}
+
+/** Which conflict side a block should keep. */
+export type GitResolveStrategy = "ours" | "theirs"
+
+/**
+ * Request-scoped event handlers for the long Git network operations
+ * (`git.progress`) and the SSH host-key prompt (`ssh.hostkey.prompt`).
+ */
+export interface GitStream {
+  onProgress?: (progress: GitProgress) => void
+  onHostKeyPrompt?: (prompt: SshHostPrompt) => void
+}
+
 /**
  * v1 bridge surface. Only methods listed here may cross the WebView boundary.
  * The Android implementation mirrors docs/bridge-contract.md; keep them in sync.
@@ -308,6 +392,107 @@ export interface Bridge {
     content: string,
     options?: RequestOptions
   ): Promise<{ name: string; uri: string } | null>
+
+  // ------------------------------------------------------------ git (Tasks 21–23)
+  gitInit(request: GitInitRequest, options?: RequestOptions): Promise<GitStatus>
+  gitStatus(path?: string | null, options?: RequestOptions): Promise<GitStatus>
+  gitAdd(
+    path: string | null,
+    paths: string[],
+    options?: RequestOptions
+  ): Promise<GitStatus>
+  gitReset(
+    path: string | null,
+    paths: string[],
+    options?: RequestOptions
+  ): Promise<GitStatus>
+  gitCommit(request: GitCommitRequest, options?: RequestOptions): Promise<GitCommitResult>
+  gitDiff(request: GitDiffRequest, options?: RequestOptions): Promise<GitDiff>
+  gitLog(
+    path?: string | null,
+    max?: number,
+    options?: RequestOptions
+  ): Promise<GitCommitEntry[]>
+  gitBranchList(path?: string | null, options?: RequestOptions): Promise<GitBranchList>
+  gitBranchCreate(
+    request: GitBranchRequest,
+    options?: RequestOptions
+  ): Promise<GitStatus>
+  gitBranchDelete(
+    path: string | null,
+    name: string,
+    options?: RequestOptions
+  ): Promise<GitStatus>
+  gitCheckout(
+    request: GitCheckoutRequest,
+    options?: RequestOptions
+  ): Promise<GitStatus>
+  gitRemoteList(path?: string | null, options?: RequestOptions): Promise<GitRemoteList>
+  gitRemoteSet(
+    request: GitRemoteSetRequest,
+    options?: RequestOptions
+  ): Promise<GitRemoteList>
+  gitRemoteRemove(
+    path: string | null,
+    name: string,
+    options?: RequestOptions
+  ): Promise<GitRemoteList>
+  /** Long request; progress and host-key prompts arrive through [stream]. */
+  gitClone(
+    request: GitCloneRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitStatus>
+  gitFetch(
+    request: GitSyncRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitSyncResult>
+  gitPull(
+    request: GitSyncRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitSyncResult>
+  gitPush(
+    request: GitSyncRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitSyncResult>
+  gitCancel(opId: string, options?: RequestOptions): Promise<boolean>
+  gitConflict(
+    path: string | null,
+    file: string,
+    options?: RequestOptions
+  ): Promise<GitConflict>
+  gitResolve(
+    path: string | null,
+    file: string,
+    strategy: GitResolveStrategy,
+    options?: RequestOptions
+  ): Promise<GitStatus>
+
+  // ------------------------------------------------------------------ ssh
+  sshKeysList(options?: RequestOptions): Promise<SshKey[]>
+  sshKeyGenerate(
+    request: SshKeyGenerateRequest,
+    options?: RequestOptions
+  ): Promise<SshKey>
+  sshKeyImport(request: SshKeyImportRequest, options?: RequestOptions): Promise<SshKey>
+  sshKeyDelete(id: string, options?: RequestOptions): Promise<void>
+  sshHostKeyAnswer(
+    promptId: string,
+    trust: boolean,
+    remember?: boolean,
+    options?: RequestOptions
+  ): Promise<void>
+  sshHostKeyList(options?: RequestOptions): Promise<SshKnownHost[]>
+  sshHostKeyDelete(host: string, port?: number, options?: RequestOptions): Promise<void>
+
+  // --------------------------------------------------------------- secrets
+  secretsTokenSet(host: string, token: string, options?: RequestOptions): Promise<void>
+  secretsTokenDelete(host: string, options?: RequestOptions): Promise<void>
+  /** Host keys only; a stored token value never crosses the bridge. */
+  secretsTokenList(options?: RequestOptions): Promise<string[]>
 }
 
 /**

@@ -8,6 +8,25 @@ import {
   type DraftInfo,
   type FileEntry,
   type FileStat,
+  type GitBranchList,
+  type GitBranchRequest,
+  type GitCheckoutRequest,
+  type GitCloneRequest,
+  type GitCommitEntry,
+  type GitCommitRequest,
+  type GitCommitResult,
+  type GitConflict,
+  type GitDiff,
+  type GitDiffRequest,
+  type GitInitRequest,
+  type GitProgress,
+  type GitRemoteList,
+  type GitRemoteSetRequest,
+  type GitResolveStrategy,
+  type GitStatus,
+  type GitStream,
+  type GitSyncRequest,
+  type GitSyncResult,
   type ProcessEvent,
   type ReadChunk,
   type RequestOptions,
@@ -20,6 +39,11 @@ import {
   type SearchMatch,
   type SearchOptions,
   type SearchSummary,
+  type SshHostPrompt,
+  type SshKey,
+  type SshKeyGenerateRequest,
+  type SshKeyImportRequest,
+  type SshKnownHost,
   type StorageInfo,
   type TerminalAttach,
   type TerminalAttachOptions,
@@ -698,6 +722,21 @@ export class AndroidBridge implements Bridge {
     return () => this.themeListeners.delete(listener)
   }
 
+  /**
+   * Map the request-scoped Git/SSH events. Both events belong to the long
+   * request that started the network operation, so they share one stream.
+   */
+  private gitEvents(stream?: GitStream): StreamHandler | undefined {
+    if (!stream) return undefined
+    return (event, payload) => {
+      if (event === "git.progress") {
+        stream.onProgress?.(payload as GitProgress)
+      } else if (event === "ssh.hostkey.prompt") {
+        stream.onHostKeyPrompt?.(payload as SshHostPrompt)
+      }
+    }
+  }
+
   // -------------------------------------------------------------- terminal
 
   async openTerminal(
@@ -879,6 +918,348 @@ export class AndroidBridge implements Bridge {
       { name: filename, content },
       options
     )
+  }
+
+  // ----------------------------------------------------------- git (Tasks 21–23)
+
+  async gitInit(request: GitInitRequest, options?: RequestOptions): Promise<GitStatus> {
+    return this.request<GitStatus>(
+      "git.init",
+      { path: request.path, branch: request.branch },
+      options
+    )
+  }
+
+  async gitStatus(path?: string | null, options?: RequestOptions): Promise<GitStatus> {
+    return this.request<GitStatus>("git.status", { path }, options)
+  }
+
+  async gitAdd(
+    path: string | null,
+    paths: string[],
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>("git.add", { path, paths }, options)
+  }
+
+  async gitReset(
+    path: string | null,
+    paths: string[],
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>("git.reset", { path, paths }, options)
+  }
+
+  async gitCommit(
+    request: GitCommitRequest,
+    options?: RequestOptions
+  ): Promise<GitCommitResult> {
+    return this.request<GitCommitResult>(
+      "git.commit",
+      {
+        path: request.path,
+        message: request.message,
+        authorName: request.authorName,
+        authorEmail: request.authorEmail
+      },
+      options
+    )
+  }
+
+  async gitDiff(request: GitDiffRequest, options?: RequestOptions): Promise<GitDiff> {
+    return this.request<GitDiff>(
+      "git.diff",
+      {
+        path: request.path,
+        file: request.file,
+        staged: request.staged,
+        maxBytes: request.maxBytes
+      },
+      options
+    )
+  }
+
+  async gitLog(
+    path?: string | null,
+    max?: number,
+    options?: RequestOptions
+  ): Promise<GitCommitEntry[]> {
+    const reply = await this.request<{ commits?: GitCommitEntry[] }>(
+      "git.log",
+      { path, max },
+      options
+    )
+    return reply.commits ?? []
+  }
+
+  async gitBranchList(
+    path?: string | null,
+    options?: RequestOptions
+  ): Promise<GitBranchList> {
+    const reply = await this.request<GitBranchList>("git.branch.list", { path }, options)
+    return {
+      branches: reply.branches ?? [],
+      current: reply.current ?? ""
+    }
+  }
+
+  async gitBranchCreate(
+    request: GitBranchRequest,
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>(
+      "git.branch.create",
+      { path: request.path, name: request.name, startPoint: request.startPoint },
+      options
+    )
+  }
+
+  async gitBranchDelete(
+    path: string | null,
+    name: string,
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>("git.branch.delete", { path, name }, options)
+  }
+
+  async gitCheckout(
+    request: GitCheckoutRequest,
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>(
+      "git.checkout",
+      { path: request.path, name: request.name, create: request.create },
+      options
+    )
+  }
+
+  async gitRemoteList(
+    path?: string | null,
+    options?: RequestOptions
+  ): Promise<GitRemoteList> {
+    const reply = await this.request<GitRemoteList>("git.remote.list", { path }, options)
+    return {
+      remotes: reply.remotes ?? [],
+      current: reply.current ?? null
+    }
+  }
+
+  async gitRemoteSet(
+    request: GitRemoteSetRequest,
+    options?: RequestOptions
+  ): Promise<GitRemoteList> {
+    return this.request<GitRemoteList>(
+      "git.remote.set",
+      {
+        path: request.path,
+        name: request.name,
+        url: request.url,
+        authKind: request.authKind,
+        username: request.username,
+        token: request.token,
+        keyId: request.keyId
+      },
+      options
+    )
+  }
+
+  async gitRemoteRemove(
+    path: string | null,
+    name: string,
+    options?: RequestOptions
+  ): Promise<GitRemoteList> {
+    return this.request<GitRemoteList>("git.remote.remove", { path, name }, options)
+  }
+
+  async gitClone(
+    request: GitCloneRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>(
+      "git.clone",
+      {
+        url: request.url,
+        path: request.path,
+        name: request.name,
+        auth: request.auth,
+        opId: request.opId
+      },
+      options,
+      this.gitEvents(stream)
+    )
+  }
+
+  async gitFetch(
+    request: GitSyncRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitSyncResult> {
+    return this.request<GitSyncResult>(
+      "git.fetch",
+      {
+        path: request.path,
+        remote: request.remote,
+        branch: request.branch,
+        auth: request.auth,
+        opId: request.opId
+      },
+      options,
+      this.gitEvents(stream)
+    )
+  }
+
+  async gitPull(
+    request: GitSyncRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitSyncResult> {
+    return this.request<GitSyncResult>(
+      "git.pull",
+      {
+        path: request.path,
+        remote: request.remote,
+        branch: request.branch,
+        auth: request.auth,
+        opId: request.opId
+      },
+      options,
+      this.gitEvents(stream)
+    )
+  }
+
+  async gitPush(
+    request: GitSyncRequest,
+    stream?: GitStream,
+    options?: RequestOptions
+  ): Promise<GitSyncResult> {
+    return this.request<GitSyncResult>(
+      "git.push",
+      {
+        path: request.path,
+        remote: request.remote,
+        branch: request.branch,
+        auth: request.auth,
+        opId: request.opId,
+        force: request.force
+      },
+      options,
+      this.gitEvents(stream)
+    )
+  }
+
+  async gitCancel(opId: string, options?: RequestOptions): Promise<boolean> {
+    const reply = await this.request<{ cancelled?: boolean }>(
+      "git.cancel",
+      { opId },
+      { timeoutMs: 2_000, ...options }
+    )
+    return Boolean(reply.cancelled)
+  }
+
+  async gitConflict(
+    path: string | null,
+    file: string,
+    options?: RequestOptions
+  ): Promise<GitConflict> {
+    return this.request<GitConflict>("git.conflict", { path, file }, options)
+  }
+
+  async gitResolve(
+    path: string | null,
+    file: string,
+    strategy: GitResolveStrategy,
+    options?: RequestOptions
+  ): Promise<GitStatus> {
+    return this.request<GitStatus>("git.resolve", { path, file, strategy }, options)
+  }
+
+  // ------------------------------------------------------------------ ssh
+
+  async sshKeysList(options?: RequestOptions): Promise<SshKey[]> {
+    const reply = await this.request<{ keys?: SshKey[] }>("ssh.keys.list", {}, options)
+    return reply.keys ?? []
+  }
+
+  async sshKeyGenerate(
+    request: SshKeyGenerateRequest,
+    options?: RequestOptions
+  ): Promise<SshKey> {
+    return this.request<SshKey>(
+      "ssh.keys.generate",
+      {
+        type: request.type,
+        comment: request.comment,
+        passphrase: request.passphrase,
+        label: request.label,
+        bits: request.bits
+      },
+      options
+    )
+  }
+
+  async sshKeyImport(
+    request: SshKeyImportRequest,
+    options?: RequestOptions
+  ): Promise<SshKey> {
+    return this.request<SshKey>(
+      "ssh.keys.import",
+      { content: request.content, passphrase: request.passphrase, label: request.label },
+      options
+    )
+  }
+
+  async sshKeyDelete(id: string, options?: RequestOptions): Promise<void> {
+    await this.request("ssh.keys.delete", { id }, options)
+  }
+
+  async sshHostKeyAnswer(
+    promptId: string,
+    trust: boolean,
+    remember = true,
+    options?: RequestOptions
+  ): Promise<void> {
+    await this.request("ssh.hostkey.answer", { promptId, trust, remember }, options)
+  }
+
+  async sshHostKeyList(options?: RequestOptions): Promise<SshKnownHost[]> {
+    const reply = await this.request<{ hosts?: SshKnownHost[] }>(
+      "ssh.hostkey.list",
+      {},
+      options
+    )
+    return reply.hosts ?? []
+  }
+
+  async sshHostKeyDelete(
+    host: string,
+    port = 22,
+    options?: RequestOptions
+  ): Promise<void> {
+    await this.request("ssh.hostkey.delete", { host, port }, options)
+  }
+
+  // --------------------------------------------------------------- secrets
+
+  async secretsTokenSet(
+    host: string,
+    token: string,
+    options?: RequestOptions
+  ): Promise<void> {
+    await this.request("secrets.token.set", { host, token }, options)
+  }
+
+  async secretsTokenDelete(host: string, options?: RequestOptions): Promise<void> {
+    await this.request("secrets.token.delete", { host }, options)
+  }
+
+  async secretsTokenList(options?: RequestOptions): Promise<string[]> {
+    const reply = await this.request<{ hosts?: string[] }>(
+      "secrets.token.list",
+      {},
+      options
+    )
+    return reply.hosts ?? []
   }
 }
 
