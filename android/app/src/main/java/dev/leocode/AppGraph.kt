@@ -9,11 +9,14 @@ import dev.leocode.bridge.AppInfo
 import dev.leocode.bridge.BridgeJson
 import dev.leocode.bridge.DraftHandler
 import dev.leocode.bridge.FsHandler
+import dev.leocode.bridge.GitHandler
 import dev.leocode.bridge.ProcHandler
 import dev.leocode.bridge.RuntimeHandler
 import dev.leocode.bridge.SafHandler
 import dev.leocode.bridge.SafPort
 import dev.leocode.bridge.SearchHandler
+import dev.leocode.bridge.SecretHandler
+import dev.leocode.bridge.SshHandler
 import dev.leocode.bridge.TermHandler
 import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.WorkspaceHandler
@@ -25,6 +28,12 @@ import dev.leocode.core.PtySession
 import dev.leocode.core.TerminalRegistry
 import dev.leocode.core.Trash
 import dev.leocode.core.Workspace
+import dev.leocode.core.secrets.AndroidSecretCipher
+import dev.leocode.core.secrets.FileSecretStore
+import dev.leocode.git.GitEngine
+import dev.leocode.ssh.HostKeyPrompts
+import dev.leocode.ssh.KnownHostsStore
+import dev.leocode.ssh.SshKeyStore
 import dev.leocode.workspace.Drafts
 import dev.leocode.workspace.SearchEngine
 import dev.leocode.workspace.WorkspaceStore
@@ -45,6 +54,8 @@ class AppGraph(private val app: Application) {
         private const val TRASH_DIR = ".trash"
         private const val SHARED_TRASH_DIR = ".leocode-trash"
         private const val RUN_DIR = "run"
+        private const val SECRETS_DIR = "secrets"
+        private const val SSH_DIR = "ssh"
     }
 
     val json = BridgeJson.value
@@ -110,6 +121,37 @@ class AppGraph(private val app: Application) {
         sessionCountChanged()
     }
 
+    // Phase F: tokens and SSH private keys are sealed with a Keystore key. The
+    // cipher is lazy so app start does not touch the Keystore before it is needed.
+    private val secretCipher by lazy { AndroidSecretCipher() }
+
+    val secretStore: FileSecretStore by lazy {
+        FileSecretStore(File(app.filesDir, SECRETS_DIR), secretCipher)
+    }
+
+    val sshDir: File get() = File(app.filesDir, SSH_DIR)
+
+    val sshKeys: SshKeyStore by lazy {
+        SshKeyStore(sshDir, secretStore, json)
+    }
+
+    val knownHosts: KnownHostsStore by lazy {
+        KnownHostsStore(File(sshDir, "known_hosts"))
+    }
+
+    val hostKeyPrompts: HostKeyPrompts by lazy { HostKeyPrompts(knownHosts) }
+
+    val gitEngine: GitEngine by lazy {
+        GitEngine(
+            workspaceRoot = { workspaceStore.activeDirectory() },
+            secrets = secretStore,
+            keyStore = sshKeys,
+            knownHosts = knownHosts,
+            prompts = hostKeyPrompts,
+            json = json
+        )
+    }
+
     private val procHandler = ProcHandler(workspace, jail, supervisor)
     private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json)
     private val runtimeHandler = RuntimeHandler(
@@ -144,6 +186,12 @@ class AppGraph(private val app: Application) {
 
     fun runtimeHandler(): RuntimeHandler = runtimeHandler
 
+    fun gitHandler(): GitHandler = GitHandler(gitEngine, json)
+
+    fun secretHandler(): SecretHandler = SecretHandler(secretStore, json)
+
+    fun sshHandler(): SshHandler = SshHandler(sshKeys, knownHosts, hostKeyPrompts, json)
+
     fun runningCount(): Int = synchronized(countLock) { terminalCount + processCount }
 
     /**
@@ -160,7 +208,11 @@ class AppGraph(private val app: Application) {
         // Terminals reattach through term.attach after a new page loads. Jobs
         // have no attach path, so a renderer/finish teardown must cancel them
         // instead of leaving them running into a dead reply proxy (B-09).
-        if (cancelJobs) runCatching { supervisor.close() }
+        if (cancelJobs) {
+            runCatching { supervisor.close() }
+            runCatching { gitEngine.cancelAll() }
+        }
+        runCatching { hostKeyPrompts.cancelAll() }
         runCatching { terminalHandler.detachAll() }
     }
 
@@ -169,6 +221,8 @@ class AppGraph(private val app: Application) {
         runCatching { supervisor.close() }
         runCatching { terminalHandler.close() }
         runCatching { runtimeHandler.close() }
+        runCatching { gitEngine.cancelAll() }
+        runCatching { hostKeyPrompts.cancelAll() }
         SessionService.stop(app)
     }
 

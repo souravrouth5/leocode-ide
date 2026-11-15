@@ -478,6 +478,11 @@ class GitEngine(
         return true
     }
 
+    /** Cancels every running network operation; used when the bridge detaches. */
+    fun cancelAll() {
+        for (flag in activeOps.values) flag.set(true)
+    }
+
     // --------------------------------------------------------------- conflicts
 
     fun conflict(request: GitConflictRequest): GitConflictReply {
@@ -598,9 +603,12 @@ class GitEngine(
     private fun validPaths(paths: List<String>): List<String> =
         paths.map { sanitizePath(it) }.filter { it.isNotEmpty() }.distinct()
 
-    private fun statusOf(git: Git): GitStatusReply {
-        val repo = git.repository
-        val status = git.status().call()
+    private fun statusOf(git: Git): GitStatusReply = statusOf(git.repository)
+
+    private fun statusOf(repo: Repository): GitStatusReply {
+        // The wrapper is not closed: the caller still owns [repo]. Git itself is
+        // a thin command factory, so leaving it to the GC is safe here.
+        val status = Git(repo).status().call()
         val branch = repo.branch ?: ""
         val head = repo.resolve(Constants.HEAD)?.name?.take(7)
         val upstreamRef = trackingRef(repo)
@@ -727,7 +735,7 @@ class GitEngine(
             ?: throw BridgeException(ErrorCode.E_NOT_FOUND, "remote $name is not configured")
 
     private fun syncReply(repo: Repository, message: String): GitSyncReply {
-        val status = Git(repo).use { statusOf(it) }
+        val status = statusOf(repo)
         return GitSyncReply(
             branch = status.branch,
             ahead = status.ahead,

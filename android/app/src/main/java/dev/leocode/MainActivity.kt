@@ -652,7 +652,10 @@ class MainActivity : ComponentActivity(), SafPort {
                 (application as LeoApp).graphOrThrow().procHandler(),
                 (application as LeoApp).graphOrThrow().termHandler(),
                 (application as LeoApp).graphOrThrow().safHandler(this),
-                (application as LeoApp).graphOrThrow().runtimeHandler()
+                (application as LeoApp).graphOrThrow().runtimeHandler(),
+                (application as LeoApp).graphOrThrow().gitHandler(),
+                (application as LeoApp).graphOrThrow().sshHandler(),
+                (application as LeoApp).graphOrThrow().secretHandler()
             ),
             { message -> Log.w("LeoCodeBridge", message) }
         )
