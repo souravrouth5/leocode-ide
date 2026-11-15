@@ -77,6 +77,8 @@ android {
                 "META-INF/*.SF",
                 "META-INF/*.DSA",
                 "META-INF/*.RSA",
+                // Both JGit jars ship an OSGi plugin.properties; only build tooling reads it.
+                "plugin.properties",
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*"
@@ -104,8 +106,15 @@ dependencies {
     // are not on API 28 without core-library desugaring. Re-test 6.x on D1 before
     // any future major bump; see docs/decisions/README.md (D-016).
     implementation("org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r")
-    implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache:5.13.3.202401111512-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache:5.13.3.202401111512-r") {
+        // The POM pulls sshd-osgi, an uber-jar that already bundles sshd-core,
+        // sshd-common and sshd-sftp. Keeping it next to the modular artifacts
+        // below duplicates every class and the group17.prime resource, which
+        // fails mergeDebugJavaResource. Use the modular jars at one version.
+        exclude(group = "org.apache.sshd", module = "sshd-osgi")
+    }
     implementation("org.apache.sshd:sshd-core:2.13.2")
+    implementation("org.apache.sshd:sshd-sftp:2.13.2")
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
