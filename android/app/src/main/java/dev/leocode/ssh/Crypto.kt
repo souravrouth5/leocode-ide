@@ -46,23 +46,31 @@ object Crypto {
     @Volatile
     private var bouncyCastle: Provider? = null
 
-    /** Registers BouncyCastle once; safe to call from any thread. */
+    /**
+     * Installs the real BouncyCastle provider once; safe to call from any thread.
+     *
+     * MINA resolves algorithms by provider name (`Security.getProvider("BC")`),
+     * and since Android 12 the platform `BC` provider is a stripped stub that
+     * no longer implements `SHA-256`. Leaving it in place makes both
+     * `KeyUtils.getFingerPrint` and the SSH transport's digest lookups fail with
+     * `no such algorithm: SHA-256 for provider BC`, so the bundled jar replaces
+     * the stub under the same name. Only that one name is touched; every other
+     * platform provider is left alone and `AndroidOpenSSL` stays the default.
+     */
     @Synchronized
     fun ensureProviders(): Provider {
         bouncyCastle?.let { return it }
+        val bundled = BouncyCastleProvider()
         val existing = Security.getProvider("BC")
-        if (existing != null) {
-            // Android's platform BC keeps the name; newer algorithms are reached
-            // through the provider object returned by bouncyCastle().
-            bouncyCastle = existing
-            return existing
+        if (existing != null && existing !is BouncyCastleProvider) {
+            // The platform stub is missing SHA-256; drop it before installing.
+            runCatching { Security.removeProvider(existing.name) }
         }
-        val provider = BouncyCastleProvider()
-        if (Security.getProvider(provider.name) == null) {
-            Security.addProvider(provider)
+        if (Security.getProvider(bundled.name) == null) {
+            Security.addProvider(bundled)
         }
-        bouncyCastle = provider
-        return provider
+        bouncyCastle = Security.getProvider("BC") ?: bundled
+        return bouncyCastle!!
     }
 
     fun bouncyCastle(): Provider = bouncyCastle ?: ensureProviders()

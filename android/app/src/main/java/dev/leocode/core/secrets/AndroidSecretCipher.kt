@@ -67,11 +67,14 @@ class AndroidSecretCipher(
     }
 
     override fun seal(plaintext: ByteArray): ByteArray {
-        val iv = ByteArray(IV_BYTES)
-        SecureRandom().nextBytes(iv)
         return try {
+            // The key is created with setRandomizedEncryptionRequired(true), so
+            // Keystore2 refuses a caller-supplied IV (CALLER_NONCE_PROHIBITED).
+            // Initialise without one and read back the IV it chose; it is
+            // stored in the header so open() can use it.
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val iv = cipher.iv
             val ciphertext = cipher.doFinal(plaintext)
             val out = ByteArray(HEADER_BYTES + iv.size + ciphertext.size)
             MAGIC.copyInto(out, 0)
