@@ -112,33 +112,38 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 
 ## Phase 0D — Git / SSH (Tasks 19–23)
 
-> **Results pending.** The contract is locked (`c69ff45`); implementation is in progress in the
-> `phase-f-core` / `phase-f-web` worktrees. Nothing below is measured yet, so each T10–T14 cell
-> reads **pending (Phase F implementation)**. Fill one cell per device only after that device ran
-> the check.
+> **D2 measured, D1 pending.** The Phase F worktrees merged on `v9-impl`, the Android and web gates are
+> green, and a debug APK (versionCode 2, targetSdk 28) was run on D2 against a scratch workspace:
+> T10, T11 and T14 pass. T12 and T13 are **pending** — the app UID could not complete a connection to
+> the local SSH test server. D1 was unavailable for the session, so every D1 cell reads
+> **pending (D1 unavailable)**. Fill one cell per device only after that device ran the check.
 
 | Test | D1 | D2 |
 |---|---|---|
-| T10 JGit HTTPS clone (public repo) | pending (Phase F implementation) | pending (Phase F implementation) |
-| T11 Ed25519 keygen (MINA + BC) | pending (Phase F implementation) | pending (Phase F implementation) |
-| T12 SSH clone | pending (Phase F implementation) | pending (Phase F implementation) |
-| T13 push to test repo | pending (Phase F implementation) | pending (Phase F implementation) |
-| T14 Keystore envelope round-trip (StrongBox: yes/no) | pending (Phase F implementation) | pending (Phase F implementation) |
-| JGit version used (D-016) | | |
+| T10 JGit HTTPS clone (public repo) | pending (D1 unavailable) | **PASS** — `https://github.com/octocat/Hello-World.git`, 3181 ms, 7 `git.progress` events, reply on finish, branch `master` head `7fd1a60`, tree `.git,README` |
+| T11 Ed25519 keygen (MINA + BC) | pending (D1 unavailable) | **PASS** — `id=115dc0c8-3eba-4326-b98d-6447d4be7dd4`, fingerprint `SHA256:DfJYcVRxlSyI4b1liTdws+EKLTztCn1GFwac0kgOWNc` matching `ssh-keygen -lf`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF+/yexV1AMqZ0Ox2W17Z4VZG+PsDiWACpPNuGPPJ/Lr leocode-harness`; private key stored as an 82-byte ciphertext blob |
+| T12 SSH clone | pending (D1 unavailable) | pending — app UID `SocketTimeoutException` to the loopback test server `127.0.0.1:2222`; JGit reaches the connect stage |
+| T13 push to test repo | pending (D1 unavailable) | pending — same blocker as T12 |
+| T14 Keystore envelope round-trip (StrongBox: yes/no) | pending (D1 unavailable) | **PASS** — token round-trip matched; `LCS1` ciphertext blob, 57 bytes; `plaintextOnDisk=false`; survives force-stop + relaunch; log `LeoCodeSecrets: strongBox=false` (no StrongBox) |
+| JGit version used (D-016) | pending (D1 unavailable) | 5.13.3.202401111512-r |
 | status / add / commit | | |
 | diff / log / branch | | |
 | pull / push over SSH | | |
 | pull / push over HTTPS token | | |
 | conflict detected + resolved | | |
-| RSA keygen | | |
+| RSA keygen | pending (D1 unavailable) | **PASS** — generated in the same run as T11, fingerprint `SHA256:RpJ6TZbbLRuwl4l8hrbs0hRHSEyUsx6Ge7sePeQk/7E` |
 | passphrase-protected key import | | |
-| host-key prompt + fingerprint | | |
-| changed host key rejected | | |
-| no key material in logcat | | |
+| host-key prompt + fingerprint | pending (D1 unavailable) | pending (needs T12) |
+| changed host key rejected | pending (D1 unavailable) | pending |
+| no key material in logcat | pending (D1 unavailable) | pending — `scripts/ssh-key-logcat.sh` not run |
 
-**How to run (after the Phase F handlers merge).** Use a debug APK from the merged tree and a
-scratch workspace; never run destructive steps against a real project. Run each row separately on
-D1 and D2 and record the serial in the run notes.
+The JVM and web gates behind these rows are recorded in
+[`reports/phase-f-verification.md`](reports/phase-f-verification.md): 350 Android unit tests, 277 web
+tests in 40 files, `lintDebug`, `assembleDebug` and the web build all pass.
+
+**How to run.** Use a debug APK from the merged tree and a scratch workspace; never run destructive
+steps against a real project. Run each row separately on D1 and D2 and record the serial in the run
+notes.
 
 1. **T10 — HTTPS clone.** Git tab → Clone → `https://github.com/octocat/Hello-World.git` into an
    empty workspace. Expect `git.progress` then a `GitStatusReply`; the clone must finish before the
@@ -164,6 +169,15 @@ D1 and D2 and record the serial in the run notes.
 7. **D-016 compatibility.** Test the build pinned to JGit 5.13.3.202401111512-r. D1 is the API 28 /
    no-desugaring gate; a failure there reopens D-016. D2 covers Android 15. Do not copy a result
    from one device to the other.
+
+**Environment prerequisites.** Two device properties decide whether these rows mean anything:
+
+- **A third-party VPN on the phone blocks every app-UID socket.** With one (`free.vpnindia…turbo`)
+  active, DNS failed (`UnknownHostException` for every name), as did loopback through `adb reverse`
+  and LAN, while the `adb shell` UID was exempt. T10 and T13 require it to be off.
+- **MINA needs `user.home` on Android.** MINA's `PathUtils` reads `System.getProperty("user.home")`,
+  which Android never sets, so every SSH transport failed with `ExceptionInInitializerError`. `LeoApp`
+  now sets it to the app's `filesDir/home` (the same `$HOME` the shells get) before MINA initialises.
 
 Raw logs go in `docs/device-reports/` and are cited in the tracker/report next to each cell;
 screenshots are optional but useful for the host-key prompt.
