@@ -73,11 +73,11 @@ alone and the final clean run on an idle machine was green.
    host-side cancel API (the SAF copy loop has no cancellation token). Deferred.
 3. **PD-16 — `mkdir` parent semantics.** Fixed in the merge follow-up (`8eceac6`): the mock now
    creates ancestors like the host's `mkdirs()`.
-4. **Device-dependent checks.** PD-02 on the real WebView (dialogs now in-app), PD-05 jank on a long
-   import, PD-12 battery/heat over a 10-minute session, PD-01/PD-20 corrupt-index recovery after a
-   forced kill, PD-06 partial-import rollback with a revoked provider, and PD-07/PD-22 kill-during-
-   restore still need the D1/D2 pass. The unit suites cover the logic; the SAF Activity wiring is
-   compile- and lint-verified only (no Robolectric).
+4. **Device pass.** The D2 pass on 2026-11-15 covered PD-02, PD-05, PD-06, PD-07, PD-11, PD-12,
+   PD-14, PD-17, PD-21, PD-22, PD-25, PD-01/PD-20 and the delete-active-workspace fallback; see
+   [Device verification (D2)](#device-verification-d2). D1 stayed disconnected. PD-19 and PD-25
+   cancellation are not reachable through the UI, and the 20 000-file import cap-hit rollback is
+   unit-tested only. The SAF Activity wiring is compile- and lint-verified only (no Robolectric).
 
 ## Deviations and residual risks
 
@@ -94,3 +94,110 @@ alone and the final clean run on an idle machine was green.
   copy and is exercised only by unit tests on one filesystem.
 - `SafHandler.safError` now maps `IllegalStateException` to `E_LIMIT` with its message. Only the
   import budget throws that type today; any future misuse would surface its text to the UI.
+
+## Device verification (D2)
+
+Verification ran on 2026-11-15 against a debug APK built from `v9-impl`, containing the Phase D
+fixes plus `5d6c6fa` (the fallback-session fix). Device: POCO F1 (`beryllium`), Android 15 /
+API 35, 1080×2246 @ 440 dpi, serial `192.168.29.3:42077`. D1 (Redmi Note 7S) was disconnected for
+the whole pass, so every result below is D2-only. Screenshots are stored in `docs/device-reports/`
+with names starting `20261115-`; references below give only the trailing numbers.
+
+- **PD-02 — in-app dialogs (High). PASS.** Overflow/workspace menu → **New workspace…** opened the
+  in-app prompt with the keyboard up; a native `window.prompt` is dead in this WebView, so the
+  prompt rendering and taking input is itself the check. Created `pd02check`, **Rename current…**
+  renamed it to `pd02renamed`, and **Delete current…** showed the in-app confirm sheet. System
+  Back dismissed the confirm without deleting (workspace list unchanged); confirming Delete moved
+  the workspace to the trash and fell back to Default. Screenshots 02–18.
+- **PD-01 / PD-20 — registry recovery and orphan adoption (High). PASS.** With the app stopped,
+  `files/workspaces.json` was replaced by invalid JSON and an extra directory
+  `files/workspaces/adopted1/note.txt` was created. On launch the corrupt file was preserved
+  verbatim as `files/workspaces.json.corrupt-1794721718229`, a fresh registry was written with
+  Default kept under its friendly name, and `adopted1` was re-registered from disk. Opening
+  `adopted1` from the switcher showed `note.txt`. Screenshots 19–25.
+- **PD-11 — per-workspace sessions. PASS.** Switching away from Default cleared its tabs;
+  switching back restored `perm.sh`, `big.txt` and `medium.txt` with `medium.txt` active. The
+  stored session survived force-stop plus relaunch. Screenshots 26–29, 56, 67–68.
+- **PD-11 tail — fallback session (`5d6c6fa`). PASS.** Deleting the workspace that is currently
+  active used to clear the editor but never restore the fallback root's session, so Default's tabs
+  stayed hidden until a restart. With the fix, deleting the freshly created `pd11fix` while it was
+  active brought Default's three tabs back immediately. Screenshots 77–78.
+- **PD-03 — large-file guard. PASS.** Opening the 2.3 MB `big.txt` showed **Large file mode /
+  Showing the first 1.0 MB of this file. Editing is disabled.**, and Save As warned **Only the
+  first 1 MB is loaded, so Save As would write a truncated copy.** Screenshots 39–41.
+- **PD-17 — workspace search → jump. PASS.** Header overflow → **Search in Workspace**. Searching
+  `echo` returned `perm.sh:1`; tapping it activated the tab with the caret on line 1. A second
+  check used a generated `medium.txt` (187 KB, 4000 lines) with `MARKER_PD17_SENTINEL` on line
+  4000: the result row showed `medium.txt:4000`, and tapping it scrolled the editor to line 4000,
+  highlighted that line and put the caret there, with no "Could not jump" or "pane unavailable"
+  notification. Screenshots 49–61.
+- **PD-14 — search state reset on switch. PASS.** With a completed search and one result on
+  screen, switching workspaces cleared the result list and count while keeping the typed query;
+  the new root's editor had no tabs. Screenshots 62–63.
+- **PD-12 — poll cost. PASS.** Three tabs open including the 2.3 MB `big.txt`, idle for 60 s:
+  33 CPU ticks = 0.33 s, about 0.55 % of one core, and `dumpsys gfxinfo` reported 0 frames
+  rendered in that window. Control run with a single 20-byte tab: 23 ticks. `/proc/<pid>/io` is
+  not readable from adb shell on this build, so the measurement is CPU- and frame-based. No sign
+  of the previous whole-file re-hash cadence.
+
+### Further device checks (D2, continued)
+
+Same device, APK build and serial as above; these ran after the checks listed above.
+
+- **PD-25 — persistent progress banner. PASS.** Started a 1 500-file folder import from
+  `/sdcard/Download/pd05big`, then immediately closed the Settings sheet. The banner stayed
+  visible outside Settings and read **Importing a folder — import: 230 files… — Continues if
+  Settings is closed**. Screenshot `20261115-101-banner-live.png` (also 98–100). The earlier
+  blind-tap attempts missed the ALLOW button because the native dialog height varies;
+  `uiautomator` bounds were used to tap it reliably.
+- **PD-21 — real progress counts. PASS.** After a successful export the Environment tab reported
+  **Backed up 44 files (23349.6 KB)**; the export archive was 21 231 174 bytes in
+  `/sdcard/Download/leocode-backup.zip`, and the app cache had no `backup-*.zip` left (scratch
+  deleted on success). Banner progress during import showed file counts (e.g. 230 files), not a
+  stuck 0. Screenshots 83–90.
+- **PD-05 — import frame cost. PASS.** Importing 1 500 files (500 per directory × 3, ~3.85 MB tar
+  payload) with `dumpsys gfxinfo` reset immediately before the ALLOW tap: 399 frames rendered,
+  14 janky (3.51 %), p50 15 ms, p90 19 ms, p95 20 ms, p99 32 ms. Idle control on the same screen:
+  0 frames rendered. No ANR, no visible stall. Screenshots 94–99.
+- **PD-06 — no-overwrite and rollback. PASS.** Before importing, `pd05big/keep.txt` and the
+  colliding `pd05big/dir0/f0000.txt` were seeded with `LOCAL-KEEP do not overwrite`. Three
+  consecutive imports of the same 1 500-file folder created `pd05big-2`, `pd05big-3` and
+  `pd05big-4` (1 500 files each) instead of merging. Both sentinels in the original `pd05big`
+  still read `LOCAL-KEEP do not overwrite`. No staging directory was left behind and no partial
+  documents appeared. (The 20 000-file cap-hit rollback path was not exercised on device; it is
+  covered by unit tests only.)
+- **PD-07 — kill during archive copy. PASS with a note.** A 21.2 MB export was restored into a
+  fresh empty workspace `restoretest` (id `209e19e0`) and the app was force-stopped as soon as the
+  restore scratch archive appeared in `cache/` (device-side watcher, killed after 260 polls). After
+  the kill: `cache/restore-1794732714957.zip` was 20 316 160 of 21 231 174 bytes, the workspace
+  directory was still empty, and there was no `files/workspace.tmp`. On relaunch the archive
+  survived, by design: `ScratchSweeper` only deletes `restore-*` older than a 1-hour TTL. Ageing it
+  with `touch -t 202601010000` and restarting swept it ("swept 1 stale scratch entr(ies)").
+- **PD-22 — kill during extraction. PASS; a sweep gap it exposed was fixed.** The restore was
+  repeated and the app force-stopped after the first files had been moved into place (on-device
+  watcher polling the workspace file count, killed at 3 files; 8 files had landed by the time the
+  process died). Eight files were present — `big.txt`, `medium.txt`, `perm.sh` and
+  `restorebulk/blob00.bin` … `blob04.bin` — and all eight were byte-identical to the archive
+  entries: md5 matched for every file when compared with `unzip -p`. No `.tmp` file existed
+  anywhere under `files/workspaces/209e19e0`, and no `files/workspace.tmp` existed; the in-flight
+  temp was `files/tmp/.blob05.bin.<uuid>.tmp` (474 991 bytes), under the scratch root and outside
+  the workspace tree, which is the PD-22 fix. The partial archive `cache/restore-<id>.zip` was the
+  full 21 231 174 bytes because the copy completes before extraction starts.
+
+  That kill also showed the per-entry temp name (`.name.<uuid>.tmp`) matched no `ScratchSweeper`
+  prefix, so it would have leaked forever. Fixed in this batch:
+  `ScratchSweeper.defaultRules(cacheDir, scratchDir)` now owns the startup rules and sweeps
+  hidden restore temps (prefix `.`) in the workspace scratch directory, in addition to
+  `restore-*` in `cache/` and `backup-*` / `import-*` in scratch. A failing unit test was written
+  first (`ScratchSweeperTest.default rules sweep a killed restore archive and its hidden temp`) and
+  now passes; it also asserts a young temp and an unrelated file are kept. On device the leftover
+  temp and archive were aged with `touch -t 202601010000`, a rebuilt APK was installed over the old
+  one, and the next launch logged `swept 2 stale scratch entr(ies)` with both entries gone. No temp
+  files remained in `cache/` or `files/tmp/`.
+
+**Still not covered.**
+
+- PD-19 (concurrent SAF operations) and PD-25 cancellation are not reproducible through the UI
+  alone: there is no host cancel API, and the picker serialises operations.
+- PD-06 cap-hit rollback (20 000 files / 512 MB) was not exercised on device; unit tests cover it.
+- D1 (Redmi Note 7S) stayed disconnected, so no D1 results exist.
