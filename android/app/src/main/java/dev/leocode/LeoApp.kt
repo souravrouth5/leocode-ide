@@ -93,13 +93,7 @@ class LeoApp : Application() {
                 // previous Activity instance survives.
                 val swept = runCatching {
                     ScratchSweeper().sweep(
-                        listOf(
-                            ScratchSweeper.Rule(cacheDir, listOf("restore-")),
-                            ScratchSweeper.Rule(
-                                created.workspace.tmp,
-                                listOf("backup-", "import-")
-                            )
-                        )
+                        ScratchSweeper.defaultRules(cacheDir, created.workspace.tmp)
                     )
                 }.getOrDefault(0)
                 if (swept > 0) Log.i("LeoCode", "swept $swept stale scratch entr(ies)")

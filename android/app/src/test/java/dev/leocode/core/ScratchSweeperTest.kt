@@ -107,6 +107,27 @@ class ScratchSweeperTest {
     }
 
     @Test
+    fun `default rules sweep a killed restore archive and its hidden temp`() {
+        val cache = File(root, "cache").apply { mkdirs() }
+        val scratch = File(root, "tmp").apply { mkdirs() }
+        val old = now - 2 * 60 * 60 * 1000
+        val archive = File(cache, "restore-a.zip").apply { writeText("x") }
+        val temp = File(scratch, ".big.txt.734eac09.tmp").apply { writeText("x") }
+        val youngTemp = File(scratch, ".medium.txt.9e19e0.tmp").apply { writeText("x") }
+        val unrelated = File(scratch, "notes.txt").apply { writeText("x") }
+        listOf(archive, temp, unrelated).forEach { assertTrue(it.setLastModified(old)) }
+        assertTrue(youngTemp.setLastModified(now - 5 * 60 * 1000))
+
+        val removed = sweeper.sweep(ScratchSweeper.defaultRules(cache, scratch))
+
+        assertEquals(2, removed)
+        assertFalse(archive.exists())
+        assertFalse(temp.exists())
+        assertTrue(youngTemp.exists())
+        assertTrue(unrelated.exists())
+    }
+
+    @Test
     fun `rules sweep several directories`() {
         val first = File(root, "cache").apply { mkdirs() }
         val second = File(root, "tmp").apply { mkdirs() }
