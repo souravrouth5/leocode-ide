@@ -360,3 +360,303 @@ data class RuntimeCancelRequest(val id: String? = null)
 
 @Serializable
 data class RuntimeCancelReply(val cancelling: Boolean)
+
+// ----------------------------------------------------------------- secrets
+
+@Serializable
+data class SecretSetRequest(val host: String? = null, val token: String? = null)
+
+@Serializable
+data class SecretHostsReply(val hosts: List<String> = emptyList())
+
+// --------------------------------------------------------------------- git
+
+@Serializable
+data class GitRepoRequest(val path: String? = null)
+
+@Serializable
+data class GitFileChange(
+    val path: String,
+    /**
+     * `added`, `modified`, `deleted`, `renamed`, `copied`, `untracked` or
+     * `conflicted`. A rename keeps its source in [oldPath].
+     */
+    val status: String,
+    val oldPath: String? = null
+)
+
+@Serializable
+data class GitStatusReply(
+    val initialized: Boolean,
+    /** Absolute repository root, for the UI header only. */
+    val root: String = "",
+    val branch: String = "",
+    /** Short HEAD sha, or null in a repository without commits. */
+    val head: String? = null,
+    val upstream: String? = null,
+    val remote: String? = null,
+    val ahead: Int = 0,
+    val behind: Int = 0,
+    val staged: List<GitFileChange> = emptyList(),
+    val changed: List<GitFileChange> = emptyList(),
+    val untracked: List<GitFileChange> = emptyList(),
+    val conflicts: List<GitFileChange> = emptyList(),
+    val clean: Boolean = true
+)
+
+@Serializable
+data class GitInitRequest(val path: String? = null, val branch: String? = null)
+
+@Serializable
+data class GitPathsRequest(
+    val path: String? = null,
+    val paths: List<String> = emptyList()
+)
+
+@Serializable
+data class GitCommitRequest(
+    val path: String? = null,
+    val message: String? = null,
+    val authorName: String? = null,
+    val authorEmail: String? = null
+)
+
+@Serializable
+data class GitCommitReply(val sha: String, val shortSha: String)
+
+@Serializable
+data class GitDiffRequest(
+    val path: String? = null,
+    /** Repository-relative file; null means the whole working tree. */
+    val file: String? = null,
+    val staged: Boolean = false,
+    val maxBytes: Int = 262_144
+)
+
+@Serializable
+data class GitDiffReply(
+    val file: String? = null,
+    val diff: String = "",
+    val truncated: Boolean = false,
+    val binary: Boolean = false
+)
+
+@Serializable
+data class GitLogRequest(val path: String? = null, val max: Int = 50)
+
+@Serializable
+data class GitCommitInfo(
+    val sha: String,
+    val shortSha: String,
+    val author: String,
+    val email: String,
+    val time: Long,
+    val message: String
+)
+
+@Serializable
+data class GitLogReply(val commits: List<GitCommitInfo> = emptyList())
+
+@Serializable
+data class GitBranchInfo(
+    val name: String,
+    val current: Boolean = false,
+    val remote: Boolean = false,
+    val sha: String = ""
+)
+
+@Serializable
+data class GitBranchListReply(
+    val branches: List<GitBranchInfo> = emptyList(),
+    val current: String = ""
+)
+
+@Serializable
+data class GitBranchRequest(
+    val path: String? = null,
+    val name: String? = null,
+    val startPoint: String? = null
+)
+
+@Serializable
+data class GitCheckoutRequest(
+    val path: String? = null,
+    val name: String? = null,
+    val create: Boolean = false
+)
+
+/** `kind` is `https`, `ssh` or `none`. */
+@Serializable
+data class GitAuth(
+    val kind: String = "none",
+    val username: String? = null,
+    val token: String? = null,
+    val keyId: String? = null,
+    val passphrase: String? = null
+)
+
+@Serializable
+data class GitRemoteInfo(
+    val name: String,
+    val url: String,
+    val authKind: String = "none",
+    val username: String? = null,
+    val hasToken: Boolean = false,
+    val keyId: String? = null
+)
+
+@Serializable
+data class GitRemoteListReply(
+    val remotes: List<GitRemoteInfo> = emptyList(),
+    val current: String? = null
+)
+
+@Serializable
+data class GitRemoteSetRequest(
+    val path: String? = null,
+    val name: String? = null,
+    val url: String? = null,
+    val authKind: String? = null,
+    val username: String? = null,
+    /** When present, stored in the SecretStore; never returned. */
+    val token: String? = null,
+    val keyId: String? = null
+)
+
+@Serializable
+data class GitCloneRequest(
+    val url: String? = null,
+    /** Destination relative to the active workspace; defaults to the repo name. */
+    val path: String? = null,
+    val name: String? = null,
+    val auth: GitAuth? = null,
+    val opId: String? = null
+)
+
+@Serializable
+data class GitSyncRequest(
+    val path: String? = null,
+    val remote: String? = null,
+    val branch: String? = null,
+    val auth: GitAuth? = null,
+    val opId: String? = null,
+    val force: Boolean = false
+)
+
+@Serializable
+data class GitSyncReply(
+    val branch: String = "",
+    val ahead: Int = 0,
+    val behind: Int = 0,
+    val message: String = ""
+)
+
+@Serializable
+data class GitCancelRequest(val opId: String? = null)
+
+@Serializable
+data class GitCancelReply(val cancelled: Boolean)
+
+@Serializable
+data class GitConflictRequest(val path: String? = null, val file: String? = null)
+
+@Serializable
+data class GitConflictReply(
+    val file: String,
+    val merged: String = "",
+    val ours: String? = null,
+    val theirs: String? = null,
+    val base: String? = null,
+    val binary: Boolean = false
+)
+
+/** `strategy` is `ours` or `theirs` (whole file). Per-block edits use `fs.write`. */
+@Serializable
+data class GitResolveRequest(
+    val path: String? = null,
+    val file: String? = null,
+    val strategy: String? = null
+)
+
+@Serializable
+data class GitProgress(
+    val op: String,
+    val opId: String? = null,
+    val task: String = "",
+    val done: Int = 0,
+    val total: Int = 0
+)
+
+// --------------------------------------------------------------------- ssh
+
+@Serializable
+data class SshKeyInfo(
+    val id: String,
+    val label: String,
+    val type: String,
+    val fingerprint: String,
+    val comment: String = "",
+    val hasPassphrase: Boolean = false,
+    val createdAt: Long = 0,
+    /** One OpenSSH public-key line, safe to show and copy. */
+    val publicKey: String = ""
+)
+
+@Serializable
+data class SshKeyListReply(val keys: List<SshKeyInfo> = emptyList())
+
+@Serializable
+data class SshKeyGenerateRequest(
+    /** `ed25519` (default) or `rsa`. */
+    val type: String? = null,
+    val comment: String? = null,
+    val passphrase: String? = null,
+    val label: String? = null,
+    val bits: Int = 0
+)
+
+@Serializable
+data class SshKeyImportRequest(
+    val content: String? = null,
+    val passphrase: String? = null,
+    val label: String? = null
+)
+
+@Serializable
+data class SshKeyIdRequest(val id: String? = null)
+
+@Serializable
+data class SshHostAnswerRequest(
+    val promptId: String? = null,
+    val trust: Boolean = false,
+    val remember: Boolean = true
+)
+
+@Serializable
+data class SshKnownHostInfo(
+    val host: String,
+    val port: Int = 22,
+    val keyType: String,
+    val fingerprint: String,
+    val addedAt: Long = 0
+)
+
+@Serializable
+data class SshKnownHostListReply(val hosts: List<SshKnownHostInfo> = emptyList())
+
+@Serializable
+data class SshKnownHostDeleteRequest(val host: String? = null, val port: Int = 22)
+
+@Serializable
+data class SshHostPrompt(
+    val promptId: String,
+    val host: String,
+    val port: Int,
+    val keyType: String,
+    val fingerprintSha256: String,
+    val changed: Boolean = false,
+    val previousFingerprint: String? = null
+)
+
+@Serializable
+data class GitOk(val ok: Boolean = true)

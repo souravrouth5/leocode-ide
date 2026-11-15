@@ -432,3 +432,278 @@ export interface SafDocument {
   content: string
   size: number
 }
+
+export interface SecretSetRequest {
+  host?: string | null
+  token?: string | null
+}
+
+export interface SecretHostsReply {
+  hosts?: string[]
+}
+
+export interface GitRepoRequest {
+  path?: string | null
+}
+
+export interface GitFileChange {
+  path: string
+  status: string
+  oldPath?: string | null
+}
+
+export interface GitStatusReply {
+  initialized: boolean
+  root?: string
+  branch?: string
+  head?: string | null
+  upstream?: string | null
+  remote?: string | null
+  ahead?: number
+  behind?: number
+  staged?: GitFileChange[]
+  changed?: GitFileChange[]
+  untracked?: GitFileChange[]
+  conflicts?: GitFileChange[]
+  clean?: boolean
+}
+
+export interface GitInitRequest {
+  path?: string | null
+  branch?: string | null
+}
+
+export interface GitPathsRequest {
+  path?: string | null
+  paths?: string[]
+}
+
+export interface GitCommitRequest {
+  path?: string | null
+  message?: string | null
+  authorName?: string | null
+  authorEmail?: string | null
+}
+
+export interface GitCommitReply {
+  sha: string
+  shortSha: string
+}
+
+export interface GitDiffRequest {
+  path?: string | null
+  file?: string | null
+  staged?: boolean
+  maxBytes?: number
+}
+
+export interface GitDiffReply {
+  file?: string | null
+  diff?: string
+  truncated?: boolean
+  binary?: boolean
+}
+
+export interface GitLogRequest {
+  path?: string | null
+  max?: number
+}
+
+export interface GitCommitInfo {
+  sha: string
+  shortSha: string
+  author: string
+  email: string
+  time: number
+  message: string
+}
+
+export interface GitLogReply {
+  commits?: GitCommitInfo[]
+}
+
+export interface GitBranchInfo {
+  name: string
+  current?: boolean
+  remote?: boolean
+  sha?: string
+}
+
+export interface GitBranchListReply {
+  branches?: GitBranchInfo[]
+  current?: string
+}
+
+export interface GitBranchRequest {
+  path?: string | null
+  name?: string | null
+  startPoint?: string | null
+}
+
+export interface GitCheckoutRequest {
+  path?: string | null
+  name?: string | null
+  create?: boolean
+}
+
+export interface GitAuth {
+  kind?: string
+  username?: string | null
+  token?: string | null
+  keyId?: string | null
+  passphrase?: string | null
+}
+
+export interface GitRemoteInfo {
+  name: string
+  url: string
+  authKind?: string
+  username?: string | null
+  hasToken?: boolean
+  keyId?: string | null
+}
+
+export interface GitRemoteListReply {
+  remotes?: GitRemoteInfo[]
+  current?: string | null
+}
+
+export interface GitRemoteSetRequest {
+  path?: string | null
+  name?: string | null
+  url?: string | null
+  authKind?: string | null
+  username?: string | null
+  token?: string | null
+  keyId?: string | null
+}
+
+export interface GitCloneRequest {
+  url?: string | null
+  path?: string | null
+  name?: string | null
+  auth?: GitAuth | null
+  opId?: string | null
+}
+
+export interface GitSyncRequest {
+  path?: string | null
+  remote?: string | null
+  branch?: string | null
+  auth?: GitAuth | null
+  opId?: string | null
+  force?: boolean
+}
+
+export interface GitSyncReply {
+  branch?: string
+  ahead?: number
+  behind?: number
+  message?: string
+}
+
+export interface GitCancelRequest {
+  opId?: string | null
+}
+
+export interface GitCancelReply {
+  cancelled: boolean
+}
+
+export interface GitConflictRequest {
+  path?: string | null
+  file?: string | null
+}
+
+export interface GitConflictReply {
+  file: string
+  merged?: string
+  ours?: string | null
+  theirs?: string | null
+  base?: string | null
+  binary?: boolean
+}
+
+export interface GitResolveRequest {
+  path?: string | null
+  file?: string | null
+  strategy?: string | null
+}
+
+export interface GitProgress {
+  op: string
+  opId?: string | null
+  task?: string
+  done?: number
+  total?: number
+}
+
+export interface SshKeyInfo {
+  id: string
+  label: string
+  type: string
+  fingerprint: string
+  comment?: string
+  hasPassphrase?: boolean
+  createdAt?: number
+  publicKey?: string
+}
+
+export interface SshKeyListReply {
+  keys?: SshKeyInfo[]
+}
+
+export interface SshKeyGenerateRequest {
+  type?: string | null
+  comment?: string | null
+  passphrase?: string | null
+  label?: string | null
+  bits?: number
+}
+
+export interface SshKeyImportRequest {
+  content?: string | null
+  passphrase?: string | null
+  label?: string | null
+}
+
+export interface SshKeyIdRequest {
+  id?: string | null
+}
+
+export interface SshHostAnswerRequest {
+  promptId?: string | null
+  trust?: boolean
+  remember?: boolean
+}
+
+export interface SshKnownHostInfo {
+  host: string
+  port?: number
+  keyType: string
+  fingerprint: string
+  addedAt?: number
+}
+
+export interface SshKnownHostListReply {
+  hosts?: SshKnownHostInfo[]
+}
+
+export interface SshKnownHostDeleteRequest {
+  host?: string | null
+  port?: number
+}
+
+export interface SshHostPrompt {
+  promptId: string
+  host: string
+  port: number
+  keyType: string
+  fingerprintSha256: string
+  changed?: boolean
+  previousFingerprint?: string | null
+}
+
+export interface GitOk {
+  ok?: boolean
+}
