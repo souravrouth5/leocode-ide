@@ -114,12 +114,12 @@ Decisions added by plan v9 (2026-11-11).
 **Alternatives** Hilt/Dagger (rejected: annotation processing cost, little gain at this size); Koin (acceptable, but another runtime dependency); Redux Toolkit (rejected: more boilerplate than needed); React context only (rejected: re-render churn in the editor).
 **Reopen if** the service count passes ~40 or tests need scoped graphs that manual wiring makes awkward.
 
-## D-016 — JGit version (open)
+## D-016 — JGit 5.13.3.202401111512-r
 
-**Context** JGit 6.x targets Java 11 and uses APIs that may be missing on Android API 28. JGit 5.13.x targets Java 8.
-**Decision** *Pending.* The Task 19 spike tries 6.x first on D1 and D2 (HTTPS clone, SSH clone, push) and falls back to 5.13.x. The result, with the failing APIs if any, is recorded here.
-**Alternatives** libgit2 via JNI (rejected: native code and licensing work); native git from a userspace (deferred with Track C1).
-**Reopen if** the chosen version blocks a required workflow.
+**Context** JGit 6.x is compiled for Java 11 and uses library APIs that do not exist on Android API 28 without core-library desugaring (for example `List.of`, `Map.of`, `InputStream.readAllBytes`, `String.isBlank`). LeoCode has minSdk 28 (D-002), no desugaring configured, and D1 — the only API 28 device — was offline during the Task 19 spike, so the 6.x branch could not be proven safe on the oldest supported device. JGit 5.13.x targets Java 8 and is the plan's documented fallback.
+**Decision** Pin `org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r` and `org.eclipse.jgit:org.eclipse.jgit.ssh.apache:5.13.3.202401111512-r`, with `org.apache.sshd:sshd-core:2.13.2`, `org.bouncycastle:bcprov-jdk18on:1.78.1` and `org.bouncycastle:bcpkix-jdk18on:1.78.1`. The Android app remains on targetSdk 28 / minSdk 28 with no desugaring. If 5.13.3 + SSHD 2.13.2 fails at runtime, pin SSHD to the version named by the JGit 5.13.3 POM rather than upgrading JGit.
+**Alternatives** JGit 6.x (rejected for this pass: unproven Java 11 API use on API 28; keep as the re-test target); libgit2 via JNI (rejected: native code and licensing work); native git from a userspace (deferred with Track C1); enabling core-library desugaring just for JGit (rejected: APK size and a global toolchain change for one dependency).
+**Reopen if** D1 is available to prove a 6.x line on API 28 before a major bump, or 5.13.x blocks a required workflow (hooks, LFS, complex submodules). Re-test 6.x on D1 before every future major JGit bump; the spike must cover HTTPS clone, SSH clone and push (T10–T13).
 
 ## D-017 — Python is the primary language
 

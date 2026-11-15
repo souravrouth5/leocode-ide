@@ -112,13 +112,18 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 
 ## Phase 0D — Git / SSH (Tasks 19–23)
 
+> **Results pending.** The contract is locked (`c69ff45`); implementation is in progress in the
+> `phase-f-core` / `phase-f-web` worktrees. Nothing below is measured yet, so each T10–T14 cell
+> reads **pending (Phase F implementation)**. Fill one cell per device only after that device ran
+> the check.
+
 | Test | D1 | D2 |
 |---|---|---|
-| T10 JGit HTTPS clone (public repo) | | |
-| T11 Ed25519 keygen (MINA + BC) | | |
-| T12 SSH clone | | |
-| T13 push to test repo | | |
-| T14 Keystore envelope round-trip (StrongBox: yes/no) | | |
+| T10 JGit HTTPS clone (public repo) | pending (Phase F implementation) | pending (Phase F implementation) |
+| T11 Ed25519 keygen (MINA + BC) | pending (Phase F implementation) | pending (Phase F implementation) |
+| T12 SSH clone | pending (Phase F implementation) | pending (Phase F implementation) |
+| T13 push to test repo | pending (Phase F implementation) | pending (Phase F implementation) |
+| T14 Keystore envelope round-trip (StrongBox: yes/no) | pending (Phase F implementation) | pending (Phase F implementation) |
 | JGit version used (D-016) | | |
 | status / add / commit | | |
 | diff / log / branch | | |
@@ -130,6 +135,38 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 | host-key prompt + fingerprint | | |
 | changed host key rejected | | |
 | no key material in logcat | | |
+
+**How to run (after the Phase F handlers merge).** Use a debug APK from the merged tree and a
+scratch workspace; never run destructive steps against a real project. Run each row separately on
+D1 and D2 and record the serial in the run notes.
+
+1. **T10 — HTTPS clone.** Git tab → Clone → `https://github.com/octocat/Hello-World.git` into an
+   empty workspace. Expect `git.progress` then a `GitStatusReply`; the clone must finish before the
+   reply (the UI shows progress until then), and `git.cancel` with the same `opId` must work.
+2. **T11 — Ed25519 keygen.** SSH keys → Generate → Ed25519. Expect one `ssh-ed25519` public line;
+   compare its fingerprint with `ssh-keygen -lf` on a laptop and with `ssh.hostkey.list`. RSA
+   keygen is the separate row below.
+3. **T12 — SSH clone.** Add the generated public key to a test account, then clone
+   `git@github.com:<account>/<test-repo>.git`. First connection must show `ssh.hostkey.prompt` with
+   a SHA-256 fingerprint before auth; the clone must block until the answer. `remember: true` must
+   add one `known_hosts` line.
+4. **T13 — push.** Commit in the clone, then push a throwaway branch to the test repo
+   (`git.push`). Verify the branch on the remote and with a fresh clone. Repeat over HTTPS with a
+   token (`secrets.token.set`) and confirm the token never appears in a reply or log.
+5. **T14 — Keystore round-trip.** Store a token, force-stop and relaunch, and confirm the token
+   still authenticates while `files/secrets/` contains ciphertext only. Capture the host log line
+   `LeoCodeSecrets: strongBox=<boolean>` and put `yes` or `no` in the cell. If Keystore invalidation
+   can be induced safely on a throwaway build, confirm it maps to `E_UNSUPPORTED` with the
+   "re-enter them" message; do not remove a device lock on a phone holding real data.
+6. **No key material in logcat.** After T10–T14, run `scripts/ssh-key-logcat.sh [serial]`
+   (exit 0 = clean, 1 = a private-key marker was found, 2 = adb/logcat error). Investigate any hit
+   before recording PASS.
+7. **D-016 compatibility.** Test the build pinned to JGit 5.13.3.202401111512-r. D1 is the API 28 /
+   no-desugaring gate; a failure there reopens D-016. D2 covers Android 15. Do not copy a result
+   from one device to the other.
+
+Raw logs go in `docs/device-reports/` and are cited in the tracker/report next to each cell;
+screenshots are optional but useful for the host-key prompt.
 
 ## Phase 0E — PTY / terminal
 
