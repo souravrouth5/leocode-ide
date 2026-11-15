@@ -1,5 +1,6 @@
 package dev.leocode.ssh
 
+import java.io.File
 import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -58,8 +59,9 @@ object Crypto {
      * platform provider is left alone and `AndroidOpenSSL` stays the default.
      */
     @Synchronized
-    fun ensureProviders(): Provider {
+    fun ensureProviders(home: File? = null): Provider {
         bouncyCastle?.let { return it }
+        ensureUserHome(home)
         val bundled = BouncyCastleProvider()
         val existing = Security.getProvider("BC")
         if (existing != null && existing !is BouncyCastleProvider) {
@@ -71,6 +73,25 @@ object Crypto {
         }
         bouncyCastle = Security.getProvider("BC") ?: bundled
         return bouncyCastle!!
+    }
+
+    /**
+     * MINA's `PathUtils` reads `System.getProperty("user.home")` during class
+     * initialisation and throws `IllegalArgumentException: No user home` when it
+     * is absent — which it always is on Android. JGit's SSHD transport touches
+     * it, so every SSH operation died with `ExceptionInInitializerError` before
+     * connecting. [home] is the app's `$HOME` ([dev.leocode.core.Workspace.home]);
+     * it is created if missing so MINA never resolves to an unwritable path.
+     */
+    @Synchronized
+    private fun ensureUserHome(home: File?) {
+        val current = System.getProperty("user.home")
+        if (!current.isNullOrEmpty() && File(current).isAbsolute) return
+        val target = home ?: File(System.getProperty("java.io.tmpdir").orEmpty(), "leocode-home")
+        runCatching {
+            if (!target.isDirectory) target.mkdirs()
+        }
+        System.setProperty("user.home", target.absolutePath)
     }
 
     fun bouncyCastle(): Provider = bouncyCastle ?: ensureProviders()

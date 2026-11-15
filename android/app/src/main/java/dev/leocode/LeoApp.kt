@@ -79,9 +79,12 @@ class LeoApp : Application() {
         super.onCreate()
         // Must run before any MINA/SSHD class is touched: `BuiltinDigests`
         // caches whether SHA-256 exists at class-initialisation time, and on
-        // Android 12+ the platform "BC" stub does not provide it.
-        runCatching { dev.leocode.ssh.Crypto.ensureProviders() }
-            .onFailure { Log.w("LeoCode", "crypto providers unavailable: ${it.message}") }
+        // Android 12+ the platform "BC" stub does not provide it. MINA also
+        // needs `user.home`, which Android never sets. `filesDir/home` is the
+        // same $HOME shells get (see Workspace.childEnv).
+        runCatching {
+            dev.leocode.ssh.Crypto.ensureProviders(java.io.File(filesDir, "home"))
+        }.onFailure { Log.w("LeoCode", "crypto providers unavailable: ${it.message}") }
         CrashStore.install(this)
         try {
             val created = AppGraph(this)
