@@ -1,8 +1,8 @@
 # Phase F — implementation plan and contract lock (Tasks 19–23)
 
-Status: implementation in progress (2026-11-15). Phase E is deliberately deferred: D2 has no
-`su`, and no rooted device is available. This document is the shared contract for the parallel
-worktrees; code and docs must match it.
+Status: implemented and merged (2026-11-15). Phase E is deliberately deferred: D2 has no
+`su`, and no rooted device is available. This document is the shared contract the implementation was
+built against; results are in [`phase-f-verification.md`](phase-f-verification.md).
 
 ## Scope
 

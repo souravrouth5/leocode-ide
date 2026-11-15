@@ -5,9 +5,10 @@
 **Contract:** commit `c69ff45` · **Plan:** [`phase-f-plan.md`](phase-f-plan.md)
 
 The `phase-f-core` and `phase-f-web` worktrees are merged on `v9-impl`. The Android and web gates are
-green and three device-only defects were found and fixed. Device verification ran on D2 only: T10,
-T11 and T14 pass, T12 and T13 are still pending, and D1 was unavailable, so every D1 cell remains
-pending.
+green, and five defects that no JVM test could reach were found and fixed — one build failure and four
+device-only faults. Device verification ran on D2 only: T10–T14 all pass, along with local Git
+operations, conflict resolution, pinned-host reuse, changed-key rejection and the logcat key-material
+check. D1 was unavailable, so every D1 cell remains pending and API 28 is unproven.
 
 ## Scope
 
@@ -15,9 +16,9 @@ pending.
 |---|---|---|
 | 19 | JGit version decision (D-016), dependency cleanup, HTTPS clone spike | done — D-016 recorded; duplicate-class merge failure fixed in `993d4ad`; T10 HTTPS clone PASS on D2 |
 | 20 | `SecretStore`: Keystore-wrapped AES-GCM blob store | done — JVM suites pass; T14 PASS on D2 |
-| 21 | Local Git operations + Git tab | done — JVM and web suites pass; no per-operation device row yet |
-| 22 | HTTPS/SSH remotes (`fetch/pull/push`), progress, errors, conflicts | code complete, gates green — device rows pending (T10 PASS; T12/T13 not yet run) |
-| 23 | SSH key manager, host-key prompt and `known_hosts` | code complete, gates green — T11 PASS on D2; host-key prompt and `known_hosts` device rows pending (T12) |
+| 21 | Local Git operations + Git tab | done — JVM and web suites pass; status/add/commit/diff/log/branch and a resolved conflict PASS on D2 |
+| 22 | HTTPS/SSH remotes (`fetch/pull/push`), progress, errors, conflicts | done — T10 HTTPS clone, T12 SSH clone and T13 SSH push PASS on D2; pull and the HTTPS-token variant unrun |
+| 23 | SSH key manager, host-key prompt and `known_hosts` | done — T11 keygen PASS; prompt, pinned-host reuse and changed-key rejection PASS on D2; passphrase import unrun |
 
 Out of scope for this pass: Git hooks, LFS, submodules, shallow clones, GitHub OAuth device flow,
 root mode (Phase E) and Python (Phase G). Phase E stays deferred and D2 stays unrooted; nothing in
@@ -41,7 +42,7 @@ named by the JGit 5.13.3 POM; do not upgrade JGit. Re-test 6.x on D1 before any 
 covering HTTPS clone, SSH clone and push (T10–T13).
 
 **Evidence.** The merged Android tree builds and its unit suite passes with this dependency set:
-`testDebugUnitTest` 350 tests, `lintDebug` and `assembleDebug` green. HTTPS clone (T10) passed on D2.
+`testDebugUnitTest` 356 tests, `lintDebug` and `assembleDebug` green. HTTPS clone (T10) passed on D2.
 The set first failed to *assemble* on the merged tree; the `sshd-osgi` duplicate-class fix is in
 [Device-only defects found and fixed](#device-only-defects-found-and-fixed). SSH clone and push
 (T12/T13) remain unexercised on a device, and D1 has not run at all. Decision record:
@@ -147,7 +148,7 @@ exists on that tree and ran green there.
 | `HostKeyPromptsTest` | prompt emitted, answer accepted/rejected, 120 s timeout, changed-key shortcut | PASS |
 | `GitHandlerTest` | dispatch + error mapping with a fake engine/temp repos, bad `opId`, cancel, missing args, non-repo status, token never in replies | Pending — no `GitHandlerTest` exists on the merged tree; handler dispatch, `opId`/cancel and no-secret-in-reply are covered by `PhaseFHandlerTest` |
 
-Run note: **350 Android unit tests pass on the merged tree (`testDebugUnitTest`)**. The run reports one
+Run note: **356 Android unit tests pass on the merged tree (`testDebugUnitTest`)**. The run reports one
 total; per-suite counts were not captured, so none are recorded here.
 
 ### Web
@@ -164,7 +165,7 @@ Run note: **277 tests in 40 files pass** (`npm test`).
 
 | Check | Result |
 |---|---|
-| Android `testDebugUnitTest` | PASS — 350 tests |
+| Android `testDebugUnitTest` | PASS — 356 tests |
 | Android `lintDebug` | PASS |
 | Web `npm test` | PASS — 277 tests in 40 files |
 | Web `npm run typecheck` / `lint` / `build` | PASS |
@@ -182,6 +183,12 @@ APK built from the merged tree (versionCode 2, targetSdk 28) against a scratch w
 on each device; never infer one device's result from the other. Steps are in
 [`docs/test-matrix.md`](../test-matrix.md#phase-0d--git--ssh-tasks-1923).
 
+The raw run is
+[`20261115-211717-phaseF-D2-e76846f.txt`](../device-reports/20261115-211717-phaseF-D2-e76846f.txt):
+one logcat buffer covering T11, T10, T12, T12B, T13, T14 and T21 with seven PASS lines and no FAIL,
+followed by `scripts/ssh-key-logcat.sh` exiting 0. T11 mints a fresh key each run, so its public key
+must be added to the test server's `authorized_keys` before T12/T13.
+
 | Test | D1 (Android 9, API 28) | D2 (Android 15) | Evidence |
 |---|---|---|---|
 | T10 JGit HTTPS clone of a public repo | **Pending** — D1 unavailable this session | **PASS** | `https://github.com/octocat/Hello-World.git` cloned in 3181 ms with 7 `git.progress` events and the reply sent on finish; branch `master`, head `7fd1a60`, working tree `.git,README` |
@@ -197,9 +204,11 @@ key rejected, conflict detected/resolved, and pull/push over both HTTPS and SSH.
 | Extra row | D2 result |
 |---|---|
 | RSA keygen | **PASS** — `SHA256:RpJ6TZbbLRuwl4l8hrbs0hRHSEyUsx6Ge7sePeQk/7E`, generated in the same run as T11 |
+| Local Git: init/status/add/commit/diff/log/branch | **PASS** — `init` created `main`; `a.txt` reported untracked then `added:a.txt` after `add`; commit `266ec63`; `diff` returned 8 lines (`binary=false`); `log` = `[main change, second, first]`; branches `[feature, main*]` |
+| Conflict detected and resolved | **PASS** — merging `feature` into `main` left one conflict on `a.txt`; `git.conflict` returned standard markers with both `ours` and `theirs` parsed; `git.resolve` with the `ours` strategy cleared the conflict list and the file ended as `one/two/main` |
 | Pinned host reconnects without a prompt | **PASS** — second clone with the pin in place reported `promptEvents=0` and succeeded |
 | Changed host key rejected | **PASS** — after rotating the server host key the clone failed with `E_HOSTKEY_CHANGED` ("The host key changed; forget the host before trusting the new key") and emitted **no** prompt, which is the required fail-closed behaviour; restoring the original key restored the clone |
-| Passphrase-protected import, conflict detected/resolved, pull/push over HTTPS | **Not run** |
+| Passphrase-protected import, pull/push over HTTPS token | **Not run** |
 
 **T12/T13 status.** Both now pass on D2 against a local SSH server (`/tmp/pf-ssh`, paramiko,
 reached over the host's LAN address because the app UID could not use `adb reverse` loopback). Three
@@ -219,9 +228,10 @@ Android 15 but cannot prove the API 28 behaviour, and D1 has not run.
 
 ## Device-only defects found and fixed
 
-Three defects surfaced only on a device: no JVM test can reach these Android adapters, because the
-unit suites substitute a fake cipher, a full Bouncy Castle and a real `user.home`. The first two were
-fixed in `69de290`; the third, the `user.home` fix, followed it.
+Four defects surfaced only on a device: no JVM test can reach these Android adapters, because the
+unit suites substitute a fake cipher, a full Bouncy Castle, a JVM `user.home` and a same-thread event
+sink. They were fixed in `69de290` (defects 1–2), `fb675a4` (defect 3), `2c4a2ac` (defect 4) and
+`560a4aa` (defect 5).
 
 Context first: no gate could run until a merged-tree build failure was fixed in `993d4ad`. That one is
 a dependency-resolution fault, not a device-only defect, so it is recorded separately.
@@ -263,14 +273,34 @@ a dependency-resolution fault, not a device-only defect, so it is recorded separ
   first SSH transport.
 - **Root cause.** MINA's `PathUtils` reads `System.getProperty("user.home")`, which Android never sets.
 - **Fix.** `user.home` is set to the app's `filesDir/home` — the same `$HOME` the shells get — before
-  MINA initialises. `Crypto.ensureProviders()` takes that directory and sets the property; the change
-  landed in the follow-up commit after `69de290`.
+  MINA initialises. `Crypto.ensureProviders()` takes that directory and sets the property; fixed in
+  `fb675a4`.
 
-**D-016 relevance.** Defect 1 is the reason D-016 cannot be settled from JVM tests: the JVM suites run
-with a full Bouncy Castle and a real `user.home`, so `KeyUtils.getFingerPrint` and MINA digest
-resolution only break on a device — and the failure mode depends on the API level, since the Android
-12 provider stub is why this surfaced at all. JGit/SSHD digest resolution must therefore be proven on
-a device, and D1 — the API 28 gate — still has not run.
+### 4. The host-key prompt was never emitted (`2c4a2ac`)
+
+- **Symptom.** An SSH clone to an unknown host blocked for the full 120 s wait and then failed, with
+  `promptEvents=0` — the user was never asked to trust the key, and the operation could not succeed.
+- **Root cause.** The prompt was emitted through a `ThreadLocal` stream sink bound in `withProgress()`
+  on the calling thread. MINA invokes `ServerKeyDatabase.accept` on its own I/O thread, where that
+  `ThreadLocal` is empty, so the emitter resolved to null and returned silently without emitting.
+- **Fix.** `authFor()` takes the request's `StreamSink` directly and the emitter captures it, which is
+  correct from any thread. The `ThreadLocal` was removed.
+
+### 5. `known_hosts` rows were unusable on a non-default port (`560a4aa`)
+
+- **Symptom.** Pinning a host on port 2222 wrote
+  `[[192.168.58.247]:2222]:2222 ssh-ed25519 AAAA…` — not valid OpenSSH. The pin was never matched
+  again, so the host was re-prompted on every connection and `ssh.hostkey.delete` could not forget it.
+- **Root cause.** JGit passes the connect address to `lookup`/`accept` as `[host]:port`, and that value
+  was used verbatim as the `known_hosts` and prompt key.
+- **Fix.** `LeoSshSessionFactory.normalizeHost()` strips the brackets and trailing port at the factory
+  boundary, keeping an IPv6 literal intact. Six unit tests cover the shapes JGit can pass.
+
+**D-016 relevance.** Defects 1 and 5 are why D-016 cannot be settled from JVM tests: the JVM suites run
+with a full Bouncy Castle and hand the factory a bare host, so MINA digest resolution and the
+`[host]:port` key shape only break on a device — and the failure mode depends on the API level, since
+the Android 12 provider stub is why defect 1 surfaced at all. JGit/SSHD digest resolution must
+therefore be proven on a device, and D1 — the API 28 gate — still has not run.
 
 ## Security notes
 
@@ -290,9 +320,10 @@ a device, and D1 — the API 28 gate — still has not run.
 
 ## Known gaps
 
-- **Device coverage is D2 only.** T10, T11 and T14 pass on D2; T12 and T13 are unverified because the
-  app UID could not reach the loopback test server; the logcat key-material check was not run; D1 has
-  not run at all, so nothing here proves API 28. T10/T14 PASS values are single-run measurements on
+- **Device coverage is D2 only.** T10–T14, the local Git rows, conflict resolution, pinned-host reuse,
+  the changed-key rejection and the logcat key-material check all pass on D2. D1 has not run at all, so
+  nothing here proves API 28, and the D-016 compatibility gate is still open. The passphrase-protected
+  import, `pull` and the HTTPS-token push variant are unrun. PASS values are single-run measurements on
   one device.
 - **Network rows depend on the phone's VPN being off.** With the third-party VPN active no app-UID
   socket works, so a network row measured with it on is not evidence of anything.
@@ -314,20 +345,24 @@ a device, and D1 — the API 28 gate — still has not run.
 
 Done:
 
-- Fill the JVM/web suite rows and the gate table with real counts — 350 Android unit tests, 277 web
+- Fill the JVM/web suite rows and the gate table with real counts — 356 Android unit tests, 277 web
   tests in 40 files, all gates PASS.
-- Fix the merged-tree build failure and any device-only defects before filling device rows — `993d4ad`
-  (build), `69de290` (two device-only defects) and the `user.home` fix that followed it.
-- Fill the T10, T11 and T14 rows for D2, with evidence in the device table and `docs/test-matrix.md`.
+- Fix the merged-tree build failure and the device-only defects before filling device rows — `993d4ad`
+  (build), `69de290` (two defects), `fb675a4` (`user.home`), `2c4a2ac` (prompt sink), `560a4aa`
+  (`known_hosts` host key).
+- Fill the D2 device rows: T10–T14, local Git operations, conflict resolution, pinned-host reuse,
+  changed-key rejection, and the logcat key-material check, with evidence in both the device table and
+  `docs/test-matrix.md`.
 
 Still open:
 
 - **Run T10–T14 on D1.** Every D1 cell is pending; a 5.13.3 failure there reopens D-016 — record the
   failing API and stack before changing versions.
-- **Verify T12 and T13 on D2.** The loopback SSH test server works from the host; the app UID
-  connection did not complete. Cover the host-key prompt, `remember` → one `known_hosts` line, the
-  changed-host-key rejection, and SSH clone plus push.
-- **Run `scripts/ssh-key-logcat.sh <serial>`** after the device pass and attach the exit status; the
-  "No key material in logcat" row is pending until then.
+- **Finish the unrun D2 rows:** passphrase-protected key import, `pull`, and push/pull over an HTTPS
+  token including the assertion that the token never appears in a reply or a log.
+- **Record the test server setup** if T12/T13 are to be repeated: they ran against a local paramiko
+  SSH server on the host's LAN address, not a public host. That server is committed as
+  [`scripts/test-ssh-git-server.py`](../../scripts/test-ssh-git-server.py) with setup steps in its
+  header; the device's VPN must be off for any network row.
 - Record any deviation from the contract in `docs/bridge-contract.md` first, then in this report.
 - Keep the Phase E/root and Android 10–14 status text unchanged unless those were actually tested.

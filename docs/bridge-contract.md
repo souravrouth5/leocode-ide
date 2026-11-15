@@ -10,8 +10,10 @@ verification is tracked in `docs/test-matrix.md`), **planned** = added by the v9
 
 **Phase F (Tasks 19–23).** The `git.*`, `ssh.keys.*`, `ssh.hostkey.*` and `secrets.token.*` DTOs
 and generated types are committed (`c69ff45`), so those methods are marked **live (Task 19–23)** and
-are part of v1. The handlers are being implemented in the `phase-f-core` and `phase-f-web`
-worktrees; device evidence for T10–T14 is **pending** and is not claimed here.
+are part of v1. The handlers are merged on `v9-impl`. D2 device evidence covers T10–T14, local Git
+operations, conflict resolution, pinned-host reuse, changed-key rejection and the logcat
+key-material check; D1 (API 28) has not run, and `pull`, the HTTPS-token push and
+passphrase-protected import are unrun. Details in `docs/reports/phase-f-verification.md`.
 
 ## Envelope
 
