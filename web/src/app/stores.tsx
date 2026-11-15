@@ -25,6 +25,7 @@ import {
 } from "../features/editor/findReplaceStore"
 import { createDialogStore, type DialogState } from "../features/dialogs/dialogStore"
 import { createBackupStore, type BackupState } from "../features/workspace/backupStore"
+import { createGitStore, type GitStore } from "../features/git/gitStore"
 
 export interface AppStores {
   bridge: Bridge
@@ -41,6 +42,8 @@ export interface AppStores {
   dialogs: StoreApi<DialogState>
   /** Import/export/restore progress, shown outside the Settings sheet (PD-25). */
   backup: StoreApi<BackupState>
+  /** Git, SSH keys and host keys for the active workspace (Phase F). */
+  git: GitStore
   /** Remove listeners the stores installed on `window` (W-26). */
   dispose(): void
 }
@@ -92,6 +95,13 @@ export function createAppStores(bridge: Bridge): AppStores {
   })
   const findReplace = createFindReplaceStore()
   const backup = createBackupStore()
+  const git = createGitStore({
+    bridge,
+    settings,
+    notifications,
+    errors,
+    dialogs
+  })
 
   let disposed = false
   return {
@@ -108,6 +118,7 @@ export function createAppStores(bridge: Bridge): AppStores {
     findReplace,
     dialogs,
     backup,
+    git,
     dispose() {
       if (disposed) return
       disposed = true
@@ -115,6 +126,7 @@ export function createAppStores(bridge: Bridge): AppStores {
       run.dispose()
       settings.dispose()
       findReplace.dispose()
+      git.dispose()
     }
   }
 }

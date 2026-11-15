@@ -27,6 +27,10 @@ export interface UserSettings {
 
   // Terminal
   terminalFontSize: number
+
+  // Git identity (Phase F, Tasks 21–22). Empty means "let the host decide".
+  gitName: string
+  gitEmail: string
 }
 
 export const FONT_FAMILIES = [
@@ -74,7 +78,9 @@ export const DEFAULT_SETTINGS: UserSettings = {
   showHiddenFiles: false,
   filterBinaryFiles: true,
   sortBy: "name-asc",
-  terminalFontSize: 13
+  terminalFontSize: 13,
+  gitName: "",
+  gitEmail: ""
 }
 
 const STORAGE_KEY = "leocode.user-settings"
@@ -133,6 +139,9 @@ export function coerceSettings(input: unknown): UserSettings {
   if (typeof input.terminalFontSize === "number" && Number.isFinite(input.terminalFontSize)) {
     next.terminalFontSize = clamp(Math.round(input.terminalFontSize), 8, 28)
   }
+  // The Git identity is free text; only its type is checked (Phase F).
+  if (typeof input.gitName === "string") next.gitName = input.gitName
+  if (typeof input.gitEmail === "string") next.gitEmail = input.gitEmail
   return next
 }
 

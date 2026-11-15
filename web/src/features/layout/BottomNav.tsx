@@ -1,11 +1,12 @@
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
-import { CodeIcon, CpuIcon, FolderIcon, TerminalIcon } from "../../components/Icons"
+import { CodeIcon, CpuIcon, FolderIcon, GitIcon, TerminalIcon } from "../../components/Icons"
 import type { View } from "../shell/shellStore"
 
 const TABS: Array<{ id: View; label: string; Icon: typeof FolderIcon }> = [
   { id: "files", label: "Explorer", Icon: FolderIcon },
   { id: "editor", label: "Editor", Icon: CodeIcon },
+  { id: "git", label: "Git", Icon: GitIcon },
   { id: "terminal", label: "Terminal", Icon: TerminalIcon },
   { id: "runtimes", label: "Runtimes", Icon: CpuIcon }
 ]

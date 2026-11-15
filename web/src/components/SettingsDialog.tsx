@@ -7,6 +7,7 @@ import {
 } from "./editorThemes"
 import {
   CpuIcon,
+  GitIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -33,6 +34,9 @@ interface Props {
   onRestoreBackup?: () => void
   backupBusy?: boolean
   backupStatus?: string | null
+  /** Phase F: open the Git/SSH sheets from Settings. */
+  onOpenSshKeys?: () => void
+  onOpenRemotes?: () => void
 }
 
 export function SettingsDialog({
@@ -49,9 +53,11 @@ export function SettingsDialog({
   onExportBackup,
   onRestoreBackup,
   backupBusy = false,
-  backupStatus = null
+  backupStatus = null,
+  onOpenSshKeys,
+  onOpenRemotes
 }: Props) {
-  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "about">("editor")
+  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about">("editor")
 
   const changeFontSize = (delta: number) => {
     const current = settings.fontSize
@@ -82,6 +88,13 @@ export function SettingsDialog({
           >
             <PaletteIcon size={16} />
             <span>Appearance</span>
+          </button>
+          <button
+            className={"settings-nav-btn" + (activeTab === "git" ? " active" : "")}
+            onClick={() => setActiveTab("git")}
+          >
+            <GitIcon size={16} />
+            <span>Git</span>
           </button>
           <button
             className={"settings-nav-btn" + (activeTab === "about" ? " active" : "")}
@@ -276,6 +289,58 @@ export function SettingsDialog({
                   </span>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "git" && (
+          <div className="settings-panel">
+            <div className="settings-card">
+              <label className="settings-card-label">Commit identity</label>
+              <p className="guide-intro">
+                Used for new commits. Leave both empty to let the host fall back to the
+                repository configuration.
+              </p>
+              <label className="git-field">
+                <span>Name</span>
+                <input
+                  value={settings.gitName}
+                  placeholder="Your name"
+                  onChange={(event) => onUpdate({ gitName: event.target.value })}
+                />
+              </label>
+              <label className="git-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={settings.gitEmail}
+                  placeholder="you@example.com"
+                  onChange={(event) => onUpdate({ gitEmail: event.target.value })}
+                />
+              </label>
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Remotes and credentials</label>
+              <p className="guide-intro">
+                A token is sealed with the device keystore and is never shown again.
+                SSH private keys stay in the keystore; only the public key leaves it.
+              </p>
+              {onOpenRemotes && (
+                <button className="btn ghost full-width" onClick={onOpenRemotes}>
+                  <GitIcon size={18} />
+                  <span>Manage remotes</span>
+                </button>
+              )}
+              {onOpenSshKeys && (
+                <button className="btn ghost full-width" onClick={onOpenSshKeys}>
+                  <span>Manage SSH keys and known hosts</span>
+                </button>
+              )}
             </div>
           </div>
         )}

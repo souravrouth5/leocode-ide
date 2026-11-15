@@ -9,12 +9,17 @@ import { ErrorSurfaces } from "../../errors/ErrorSurfaces"
 import { PaneBoundary } from "../../errors/PaneBoundary"
 import { describeProgress } from "../workspace/backupStore"
 import { DialogHost } from "../dialogs/DialogHost"
+import { ConflictSheet } from "../git/ConflictSheet"
+import { DiffSheet } from "../git/DiffSheet"
+import { HostKeySheet } from "../git/HostKeySheet"
+import { RemoteSheet } from "../git/RemoteSheet"
+import { SshKeysSheet } from "../git/SshKeysSheet"
 import { submitPrompt } from "../shell/promptActions"
 
 /** All sheets/dialogs, wired to their stores. */
 export function AppDialogs({ version }: { version: string }) {
   const stores = useStores()
-  const { run, shell, settings, errors, notifications, files, bridge, editor, backup, dialogs } =
+  const { run, shell, settings, errors, notifications, files, bridge, editor, backup, dialogs, git } =
     stores
   const runState = useStore(run, (state) => state.run)
   const sheetOpen = useStore(run, (state) => state.sheetOpen)
@@ -151,6 +156,14 @@ export function AppDialogs({ version }: { version: string }) {
           onRestoreBackup={() => void restoreBackup()}
           backupBusy={backupBusy}
           backupStatus={backupStatus}
+          onOpenSshKeys={() => {
+            shell.getState().setSettingsOpen(false)
+            void git.getState().openSshKeys()
+          }}
+          onOpenRemotes={() => {
+            shell.getState().setSettingsOpen(false)
+            void git.getState().openRemotes()
+          }}
         />
       </PaneBoundary>
 
@@ -168,6 +181,14 @@ export function AppDialogs({ version }: { version: string }) {
 
       <PaneBoundary title="The dialog crashed">
         <DialogHost />
+      </PaneBoundary>
+
+      <PaneBoundary title="The Git sheets crashed">
+        <DiffSheet />
+        <ConflictSheet />
+        <RemoteSheet />
+        <SshKeysSheet />
+        <HostKeySheet />
       </PaneBoundary>
 
       <PaneBoundary title="The error notifications crashed">

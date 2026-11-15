@@ -26,6 +26,10 @@ export interface PromptDialogOptions {
   placeholder?: string
   confirmLabel?: string
   cancelLabel?: string
+  /** Mask the input (passphrases, tokens). */
+  secret?: boolean
+  /** Keep leading/trailing spaces; defaults to trimming the value. */
+  trim?: boolean
   /**
    * Return an error string to keep the dialog open with an inline message;
    * `null` accepts the trimmed value.
