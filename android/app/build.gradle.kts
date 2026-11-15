@@ -100,7 +100,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // Phase 0D (declared now so versions are pinned early; exercised in Phase 0D)
-    implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.0.202406032230-r")
+    // D-016: JGit 5.13.x targets Java 8. JGit 6.x uses Java 11 library APIs that
+    // are not on API 28 without core-library desugaring. Re-test 6.x on D1 before
+    // any future major bump; see docs/decisions/README.md (D-016).
+    implementation("org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache:5.13.3.202401111512-r")
     implementation("org.apache.sshd:sshd-core:2.13.2")
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
