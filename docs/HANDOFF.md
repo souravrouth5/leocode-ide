@@ -128,6 +128,9 @@ decision for the owner.
 
 ## Suggested next steps
 
+For the full list of what remains before a release, with each gate's measured status, see
+[`RELEASE-READINESS.md`](RELEASE-READINESS.md).
+
 1. **Run T10–T14 on D1.** This is the only thing blocking Tasks 21–23 from closing and D-016 from
    being settled. If 5.13.3 fails there, reopen D-016 and record the failing API and stack *before*
    changing versions.
