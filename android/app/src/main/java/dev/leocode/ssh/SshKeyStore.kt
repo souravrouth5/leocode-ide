@@ -65,6 +65,9 @@ class SshKeyStore(
 
     fun list(): List<SshKeyInfo> = read().map { it.toInfo() }
 
+    /** Directory holding `keys.json`; used for the SSH known_hosts/identity layout. */
+    fun directory(): File = dir
+
     fun info(id: String): SshKeyInfo? = read().firstOrNull { it.id == id }?.toInfo()
 
     fun generate(request: SshKeyGenerateRequest): SshKeyInfo {
