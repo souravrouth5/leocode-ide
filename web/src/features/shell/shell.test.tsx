@@ -36,4 +36,20 @@ describe("mock-mode shell smoke (Task 13)", () => {
       { timeout: 5_000 }
     )
   })
+
+  it("opens the Git tab for a workspace without a repository", async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getAllByText("README.md").length).toBeGreaterThan(0))
+
+    const nav = screen.getByRole("navigation", { name: "Main" })
+    within(nav).getByRole("button", { name: /^Git$/ }).click()
+
+    await waitFor(
+      () => {
+        expect(document.querySelector(".git-view.current")).not.toBeNull()
+        expect(screen.getByText("Initialize repository")).toBeTruthy()
+      },
+      { timeout: 5_000 }
+    )
+  })
 })

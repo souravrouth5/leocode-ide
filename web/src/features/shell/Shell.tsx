@@ -6,6 +6,8 @@ import { useTheme } from "../../theme/ThemeProvider"
 import { EditorView } from "../editor/EditorView"
 import { ExplorerDrawer } from "../files/ExplorerDrawer"
 import { FilesView } from "../files/FilesView"
+import { GitProgressBanner } from "../git/GitProgressBanner"
+import { GitView } from "../git/GitView"
 import { AppDialogs } from "../layout/AppDialogs"
 import { AppHeader } from "../layout/AppHeader"
 import { AppStatusBar } from "../layout/AppStatusBar"
@@ -67,9 +69,11 @@ export function Shell({ info }: { info: AppInfo | null }) {
     <div className={"app" + (view === "editor" ? " view-editor" : "")}>
       <AppHeader />
       <BackupProgressBanner />
+      <GitProgressBanner />
       <main className="views">
         <FilesView />
         <EditorView />
+        <GitView />
         {terminalMounted && <TerminalView />}
         <RuntimesView info={info} />
       </main>

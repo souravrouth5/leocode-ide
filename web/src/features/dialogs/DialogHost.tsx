@@ -76,7 +76,16 @@ function ConfirmBody({ request }: { request: ConfirmRequest }) {
 
 function PromptBody({ request }: { request: PromptRequest }) {
   const { dialogs } = useStores()
-  const { label, initial, placeholder, confirmLabel, cancelLabel, validate } = request.options
+  const {
+    label,
+    initial,
+    placeholder,
+    confirmLabel,
+    cancelLabel,
+    validate,
+    secret,
+    trim = true
+  } = request.options
   const [value, setValue] = useState(initial ?? "")
   const [error, setError] = useState<string | null>(null)
   const input = useRef<HTMLInputElement | null>(null)
@@ -93,17 +102,17 @@ function PromptBody({ request }: { request: PromptRequest }) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    const trimmed = value.trim()
-    if (!trimmed) {
+    const answer = trim ? value.trim() : value
+    if (!answer) {
       setError("Enter a value.")
       return
     }
-    const problem = validate?.(trimmed) ?? null
+    const problem = validate?.(answer) ?? null
     if (problem) {
       setError(problem)
       return
     }
-    dialogs.getState().answer(trimmed)
+    dialogs.getState().answer(answer)
   }
 
   return (
@@ -113,6 +122,7 @@ function PromptBody({ request }: { request: PromptRequest }) {
         id={inputId}
         ref={input}
         value={value}
+        type={secret ? "password" : "text"}
         placeholder={placeholder}
         autoComplete="off"
         autoCapitalize="none"
@@ -138,7 +148,7 @@ function PromptBody({ request }: { request: PromptRequest }) {
         >
           {cancelLabel ?? "Cancel"}
         </button>
-        <button type="submit" className="btn primary" disabled={!value.trim()}>
+        <button type="submit" className="btn primary" disabled={trim ? !value.trim() : !value}>
           {confirmLabel ?? "OK"}
         </button>
       </div>

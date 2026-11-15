@@ -2,7 +2,7 @@ import { createStore, type StoreApi } from "zustand/vanilla"
 import type { FileEntry } from "../../bridge"
 import { createSheetStack, type SheetStack, type SheetStackEntry } from "./sheetStack"
 
-export type View = "files" | "editor" | "terminal" | "runtimes"
+export type View = "files" | "editor" | "terminal" | "runtimes" | "git"
 
 export interface PromptState {
   title: string
