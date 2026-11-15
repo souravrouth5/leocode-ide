@@ -7,6 +7,7 @@ on-demand language runtimes — running entirely on the phone, rooted or unroote
 > (D1) and Android 15 (D2). D2 is measured but currently **unrooted** (no `su`): root mode
 > (Phase E) waits for a root manager. Not production-grade yet: see the audit in plan v9 §3.
 > Live task list: [`PROGRESS.md`](PROGRESS.md) · Plan: [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md)
+> · Picking this up? Start with [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## Key decisions
 
