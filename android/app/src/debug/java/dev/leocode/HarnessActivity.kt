@@ -47,6 +47,25 @@ class HarnessActivity : Activity() {
     private lateinit var supervisor: ProcessSupervisor
     private var busy = false
 
+    /** Phase F (Tasks 19–23) tests; null when the app graph failed to start. */
+    private var phaseF: PhaseFHarness? = null
+    private val phaseFNet by lazy {
+        val intent = intent
+        PhaseFHarness.Net(
+            httpsRepo = intent?.getStringExtra("httpsRepo") ?: PhaseFHarness.DEFAULT_HTTPS_REPO,
+            sshHost = intent?.getStringExtra("sshHost") ?: PhaseFHarness.DEFAULT_SSH_HOST,
+            sshPort = intent?.getStringExtra("sshPort")?.toIntOrNull() ?: PhaseFHarness.DEFAULT_SSH_PORT,
+            sshUser = intent?.getStringExtra("sshUser") ?: PhaseFHarness.DEFAULT_SSH_USER
+        )
+    }
+    private val phaseFRepos by lazy {
+        val intent = intent
+        PhaseFHarness.Repos(
+            clone = intent?.getStringExtra("sshCloneRepo") ?: "t12.git",
+            push = intent?.getStringExtra("sshPushRepo") ?: "t13.git"
+        )
+    }
+
     private data class Test(val id: String, val title: String, val body: () -> String)
 
     private lateinit var tests: List<Test>
@@ -67,11 +86,49 @@ class HarnessActivity : Activity() {
             Test("T7", "system shell applet inventory") { t7Toybox() },
             Test("T8", "PTY child environment is allowlisted") { t8PtyEnv() },
             Test("T9", "PTY child has no fds above stderr") { t9PtyFds() },
-            Test("S1", "shared storage with legacy permissions") { s1SharedStorage() }
+            Test("S1", "shared storage with legacy permissions") { s1SharedStorage() },
+            Test("T10", "Git HTTPS clone (JGit, reply on finish)") { phaseF { it.t10(phaseFNet) } },
+            Test("T11", "Ed25519 keygen + sealed private key") { phaseF { it.t11() } },
+            Test("DX", "Phase F crypto diagnostics") { phaseF { it.diagnostics() } },
+            Test("D10", "raw JGit clone (unmapped errors)") {
+                phaseF { it.t10Diagnostic(phaseFNet) }
+            },
+            Test("DN", "app network reachability") { phaseF { it.networkDiagnostic(phaseFNet) } },
+            Test("T10L", "Git clone over adb-reverse HTTP (no DNS)") {
+                phaseF { it.t10Loopback(phaseFNet) }
+            },
+            Test("D12", "raw JGit SSH clone (unmapped errors)") {
+                phaseF { it.t12Diagnostic(phaseFNet, phaseFRepos) }
+            },
+            Test("T12", "SSH clone with host-key prompt") {
+                phaseF { it.t12(phaseFNet, phaseFRepos) }
+            },
+            Test("T21", "local Git: status/add/commit/diff/branch/conflict") {
+                phaseF { it.t21Local() }
+            },
+            Test("T12B", "pinned host connects without a prompt") {
+                phaseF { it.t12Reuse(phaseFNet, phaseFRepos) }
+            },
+            Test("T13", "commit + push over SSH") {
+                phaseF { it.t13(phaseFNet, phaseFRepos) }
+            },
+            Test("T14", "Keystore envelope round-trip") { phaseF { it.t14() } }
         )
 
         setContentView(buildUi())
         append(DeviceReport.collect(this, workspace))
+
+        // Phase F tests need the production graph (Keystore, SSH stores, Git
+        // engine). It is built once by LeoApp.onCreate; a startup failure is
+        // reported instead of crashing the harness.
+        val graph = (application as? LeoApp)?.graph
+        phaseF = graph?.let { PhaseFHarness(this, it) }
+        if (graph == null) {
+            append("Phase F tests unavailable: the app graph did not start " +
+                "(${((application as? LeoApp)?.startupError) ?: "unknown error"})")
+        } else {
+            dev.leocode.ssh.Crypto.ensureProviders()
+        }
 
         when (val run = intent?.getStringExtra("run")) {
             null -> Unit
@@ -183,6 +240,12 @@ class HarnessActivity : Activity() {
         test.body()
     } catch (t: Throwable) {
         "  FAIL ${t.javaClass.simpleName}: ${t.message}"
+    }
+
+    /** Runs a Phase F body, or explains why the production graph is unavailable. */
+    private fun phaseF(body: (PhaseFHarness) -> String): String {
+        val harness = phaseF ?: return "  SKIP — app graph unavailable"
+        return body(harness)
     }
 
     private fun runSpec(spec: ProcessSupervisor.Spec): HarnessProcess.Result =
