@@ -45,6 +45,7 @@ class PhaseFHarness(
         const val DEFAULT_SSH_HOST = "127.0.0.1"
         const val DEFAULT_SSH_PORT = 2222
         const val DEFAULT_SSH_USER = "git"
+        const val DEFAULT_HTTPS_PORT = 8080
     }
 
     /** Records the events one Git request emits, for assertions and evidence. */
@@ -73,7 +74,14 @@ class PhaseFHarness(
         val httpsRepo: String = DEFAULT_HTTPS_REPO,
         val sshHost: String = DEFAULT_SSH_HOST,
         val sshPort: Int = DEFAULT_SSH_PORT,
-        val sshUser: String = DEFAULT_SSH_USER
+        val sshUser: String = DEFAULT_SSH_USER,
+        /** Host used for the token-auth HTTP test server (T13t). */
+        val httpsHost: String = DEFAULT_SSH_HOST,
+        val httpsPort: Int = DEFAULT_HTTPS_PORT,
+        val httpsRepoName: String = "t14.git",
+        val httpsUser: String = "x-access-token",
+        /** Token the test HTTP server expects; supplied per run by the caller. */
+        val httpsToken: String = ""
     ) {
         fun sshUrl(repo: String): String = "ssh://$sshUser@$sshHost:$sshPort/$repo"
     }
@@ -278,6 +286,54 @@ class PhaseFHarness(
             appendLine("  rsa=${rsa.map { "${it.type} ${it.fingerprint}" }.getOrElse { "FAIL ${it.message}" }}")
             appendLine("  ciphertextBlob=${blob?.name ?: "<none>"} bytes=${blob?.length() ?: 0}")
             append(if (generated.publicKey.startsWith("ssh-ed25519 ")) "  PASS" else "  FAIL — not an ed25519 public line")
+        }
+    }
+
+    // ------------------------------------------------------- T11b passphrase
+
+    /**
+     * T11b: import an OpenSSH private key that is protected by a passphrase,
+     * unlock it with the right passphrase, and reject a wrong one. The key is
+     * generated here with the app's own crypto, exported in PKCS#8, and sealed
+     * with a passphrase — the same shape an imported file has.
+     */
+    fun t11Passphrase(): String {
+        val passphrase = "correct horse battery staple"
+        return try {
+            // Build a real PEM private key. Bouncy Castle writes PKCS#8 PEM,
+            // which is one of the shapes SshKeyStore.import accepts.
+            val pair = dev.leocode.ssh.Crypto.generateEd25519()
+            val keyWriter = java.io.StringWriter()
+            org.bouncycastle.openssl.jcajce.JcaPEMWriter(keyWriter).use { writer ->
+                writer.writeObject(pair.private)
+            }
+            val pem = keyWriter.toString()
+
+            val imported = graph.sshKeys.import(
+                dev.leocode.bridge.SshKeyImportRequest(
+                    content = pem,
+                    passphrase = passphrase,
+                    label = "harness passphrase key"
+                )
+            )
+            val unlocked = runCatching { graph.sshKeys.keyPair(imported.id, passphrase) }
+            val wrong = runCatching { graph.sshKeys.keyPair(imported.id, "definitely-wrong") }
+            val noPass = runCatching { graph.sshKeys.keyPair(imported.id, null) }
+
+            buildString {
+                appendLine("  importedId=${imported.id}")
+                appendLine("  type=${imported.type} hasPassphrase=${imported.hasPassphrase}")
+                appendLine("  fingerprint=${imported.fingerprint}")
+                appendLine("  unlockWithCorrect=${unlocked.isSuccess}")
+                appendLine("  unlockWithWrong=${wrong.isFailure} (${wrong.exceptionOrNull()?.message})")
+                appendLine("  unlockWithoutPassphrase=${noPass.isFailure}")
+                append(
+                    if (imported.hasPassphrase && unlocked.isSuccess && wrong.isFailure && noPass.isFailure)
+                        "  PASS" else "  FAIL — passphrase handling is wrong"
+                )
+            }
+        } catch (e: Throwable) {
+            "  FAIL ${e.javaClass.simpleName}: ${e.message}"
         }
     }
 
@@ -508,6 +564,183 @@ class PhaseFHarness(
                 appendLine("  push branch=${sync.branch} ahead=${sync.ahead} behind=${sync.behind} message=${sync.message}")
                 appendLine("  progressEvents=${recorder.progress.size} lastTask=${recorder.progress.lastOrNull()?.task ?: "-"}")
                 append("  PASS — push returned without error")
+            }
+        } catch (e: Exception) {
+            "  FAIL ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+    /**
+     * T13b: `git.pull` over SSH. Two working copies are cloned from the same
+     * remote; the second commits and pushes, then the first pulls and must
+     * fast-forward to that commit. This proves the receive path — the push rows
+     * only prove we can send.
+     */
+    fun t13Pull(net: Net, repos: Repos): String {
+        val keyId = rememberedKeyId() ?: return "  SKIP — run T11 first (no stored key)"
+        val first = "pf-pull-a"
+        val second = "pf-pull-b"
+        freshDirectory(first)
+        freshDirectory(second)
+        val auth = GitAuth(kind = "ssh", keyId = keyId)
+        return try {
+            graph.gitEngine.clone(
+                GitCloneRequest(url = net.sshUrl(repos.clone), path = first, auth = auth),
+                Recorder()
+            )
+            graph.gitEngine.clone(
+                GitCloneRequest(url = net.sshUrl(repos.clone), path = second, auth = auth),
+                Recorder()
+            )
+            val before = graph.gitEngine.status(dev.leocode.bridge.GitRepoRequest(path = first))
+
+            // Make the remote advance from the second working copy.
+            File(graph.workspaceStore.activeDirectory(), "$second/from-second.txt")
+                .writeText("written by the second clone at ${System.currentTimeMillis()}\n")
+            graph.gitEngine.add(
+                dev.leocode.bridge.GitPathsRequest(path = second, paths = listOf("from-second.txt"))
+            )
+            val pushed = graph.gitEngine.commit(
+                dev.leocode.bridge.GitCommitRequest(path = second, message = "harness: pull source commit")
+            )
+            graph.gitEngine.push(
+                GitSyncRequest(path = second, remote = "origin", branch = "main", auth = auth),
+                Recorder()
+            )
+
+            // The first working copy must now receive it.
+            val recorder = Recorder()
+            val sync = graph.gitEngine.pull(
+                GitSyncRequest(path = first, remote = "origin", branch = "main", auth = auth),
+                recorder
+            )
+            val after = graph.gitEngine.status(dev.leocode.bridge.GitRepoRequest(path = first))
+            val received = File(graph.workspaceStore.activeDirectory(), "$first/from-second.txt")
+            val fetchedShort = pushed.shortSha
+
+            buildString {
+                appendLine("  advancedFrom=${before.head} to=${after.head} (remote commit $fetchedShort)")
+                appendLine("  pull branch=${sync.branch} ahead=${sync.ahead} behind=${sync.behind} message=${sync.message}")
+                appendLine("  fileArrived=${received.isFile} contents=${received.takeIf { it.isFile }?.readText()?.trim()}")
+                appendLine("  progressEvents=${recorder.progress.size}")
+                append(
+                    if (received.isFile && after.head != before.head)
+                        "  PASS — pull fast-forwarded to the pushed commit"
+                    else "  FAIL — pull did not bring the new commit"
+                )
+            }
+        } catch (e: Exception) {
+            "  FAIL ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+
+    /**
+     * Diagnostic for T13T: runs the raw JGit HTTPS clone without the engine's
+     * error mapping, so the real exception is visible.
+     */
+    fun t13tDiagnostic(net: Net): String {
+        val token = net.httpsToken.ifBlank { return "  SKIP — pass --es httpsToken <token>" }
+        val url = "http://${net.httpsHost}:${net.httpsPort}/${net.httpsRepoName}"
+        val dir = File(graph.workspaceStore.activeDirectory(), "pf-t13tdx").apply {
+            if (exists()) deleteRecursively()
+        }
+        return try {
+            org.eclipse.jgit.api.Git.cloneRepository()
+                .setURI(url)
+                .setDirectory(dir)
+                .setCredentialsProvider(
+                    org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider(net.httpsUser, token)
+                )
+                .call()
+                .close()
+            "  raw clone OK url=$url files=${dir.listFiles()?.size ?: 0}\n  (diagnostic only)"
+        } catch (e: Throwable) {
+            buildString {
+                appendLine("  url=$url")
+                appendLine("  FAILED ${e.javaClass.name}: ${e.message}")
+                var cause: Throwable? = e.cause
+                var depth = 1
+                while (cause != null && depth <= 6) {
+                    appendLine("  cause$depth=${cause.javaClass.name}: ${cause.message}")
+                    cause = cause.cause
+                    depth++
+                }
+                append("  (diagnostic only)")
+            }
+        }
+    }
+
+    /**
+     * T13t: push over HTTPS with a token held in the SecretStore. The token is
+     * set through the bridge's own `SecretHandler` path and never appears in a
+     * reply: the assertion is that the push succeeds while no reply contains it.
+     */
+    fun t13HttpsToken(net: Net): String {
+        val token = net.httpsToken.ifBlank { return "  SKIP — pass --es httpsToken <token>" }
+        val host = net.httpsHost
+        val port = net.httpsPort
+        val url = "http://$host:$port/${net.httpsRepoName}"
+        val local = "pf-https"
+        freshDirectory(local)
+        val recorder = Recorder()
+        val replies = StringBuilder()
+
+        return try {
+            graph.secretStore.put("token:$host", token.toByteArray(Charsets.UTF_8))
+            val clone = graph.gitEngine.clone(
+                GitCloneRequest(
+                    url = url,
+                    path = local,
+                    auth = GitAuth(
+                        kind = "https",
+                        username = net.httpsUser,
+                        token = token
+                    )
+                ),
+                recorder
+            )
+            replies.append(BridgeJson.value.encodeToString(
+                dev.leocode.bridge.GitStatusReply.serializer(), clone
+            ))
+            File(graph.workspaceStore.activeDirectory(), "$local/token-push.txt")
+                .writeText("pushed over https at ${System.currentTimeMillis()}\n")
+            graph.gitEngine.add(dev.leocode.bridge.GitPathsRequest(path = local, paths = listOf("token-push.txt")))
+            val commit = graph.gitEngine.commit(
+                dev.leocode.bridge.GitCommitRequest(path = local, message = "harness: T13 https token push")
+            )
+            val sync = graph.gitEngine.push(
+                GitSyncRequest(
+                    path = local,
+                    remote = "origin",
+                    branch = "main",
+                    auth = GitAuth(kind = "https", username = net.httpsUser, token = token)
+                ),
+                recorder
+            )
+            replies.append(BridgeJson.value.encodeToString(
+                dev.leocode.bridge.GitSyncReply.serializer(), sync
+            ))
+            val storedTokenLeaked = replies.contains(token)
+            val remoteList = runCatching {
+                BridgeJson.value.encodeToString(
+                    dev.leocode.bridge.GitRemoteListReply.serializer(),
+                    graph.gitEngine.remotes(dev.leocode.bridge.GitRepoRequest(path = local))
+                )
+            }.getOrDefault("")
+            val remoteLeaked = remoteList.contains(token)
+            val hasTokenFlag = remoteList.contains("\"hasToken\":true")
+
+            buildString {
+                appendLine("  url=$url clone=${clone.initialized} branch=${clone.branch}")
+                appendLine("  commit=${commit.shortSha} pushMsg=${sync.message}")
+                appendLine("  tokenInReplies=$storedTokenLeaked remoteListExposesValue=$remoteLeaked hasToken=$hasTokenFlag")
+                appendLine("  progressEvents=${recorder.progress.size}")
+                append(
+                    if (!storedTokenLeaked && !remoteLeaked && commit.shortSha.isNotBlank())
+                        "  PASS — push authed with the token and the value never came back"
+                    else "  FAIL — token leaked into a reply or the push did not run"
+                )
             }
         } catch (e: Exception) {
             "  FAIL ${e.javaClass.simpleName}: ${e.message}"

@@ -55,7 +55,14 @@ class HarnessActivity : Activity() {
             httpsRepo = intent?.getStringExtra("httpsRepo") ?: PhaseFHarness.DEFAULT_HTTPS_REPO,
             sshHost = intent?.getStringExtra("sshHost") ?: PhaseFHarness.DEFAULT_SSH_HOST,
             sshPort = intent?.getStringExtra("sshPort")?.toIntOrNull() ?: PhaseFHarness.DEFAULT_SSH_PORT,
-            sshUser = intent?.getStringExtra("sshUser") ?: PhaseFHarness.DEFAULT_SSH_USER
+            sshUser = intent?.getStringExtra("sshUser") ?: PhaseFHarness.DEFAULT_SSH_USER,
+            httpsHost = intent?.getStringExtra("httpsHost")
+                ?: intent?.getStringExtra("sshHost")
+                ?: PhaseFHarness.DEFAULT_SSH_HOST,
+            httpsPort = intent?.getStringExtra("httpsPort")?.toIntOrNull()
+                ?: PhaseFHarness.DEFAULT_HTTPS_PORT,
+            httpsRepoName = intent?.getStringExtra("httpsRepoName") ?: "t14.git",
+            httpsToken = intent?.getStringExtra("httpsToken") ?: ""
         )
     }
     private val phaseFRepos by lazy {
@@ -105,6 +112,14 @@ class HarnessActivity : Activity() {
             },
             Test("T21", "local Git: status/add/commit/diff/branch/conflict") {
                 phaseF { it.t21Local() }
+            },
+            Test("T11B", "passphrase-protected key import") { phaseF { it.t11Passphrase() } },
+            Test("T13P", "pull over SSH (two working copies)") {
+                phaseF { it.t13Pull(phaseFNet, phaseFRepos) }
+            },
+            Test("D13T", "raw HTTPS token clone (unmapped)") { phaseF { it.t13tDiagnostic(phaseFNet) } },
+            Test("T13T", "push over HTTPS with a stored token") {
+                phaseF { it.t13HttpsToken(phaseFNet) }
             },
             Test("T12B", "pinned host connects without a prompt") {
                 phaseF { it.t12Reuse(phaseFNet, phaseFRepos) }

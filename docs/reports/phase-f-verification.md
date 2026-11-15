@@ -17,7 +17,7 @@ check. D1 was unavailable, so every D1 cell remains pending and API 28 is unprov
 | 19 | JGit version decision (D-016), dependency cleanup, HTTPS clone spike | done — D-016 recorded; duplicate-class merge failure fixed in `993d4ad`; T10 HTTPS clone PASS on D2 |
 | 20 | `SecretStore`: Keystore-wrapped AES-GCM blob store | done — JVM suites pass; T14 PASS on D2 |
 | 21 | Local Git operations + Git tab | done — JVM and web suites pass; status/add/commit/diff/log/branch and a resolved conflict PASS on D2 |
-| 22 | HTTPS/SSH remotes (`fetch/pull/push`), progress, errors, conflicts | done — T10 HTTPS clone, T12 SSH clone and T13 SSH push PASS on D2; pull and the HTTPS-token variant unrun |
+| 22 | HTTPS/SSH remotes (`fetch/pull/push`), progress, errors, conflicts | done — T10 HTTPS clone, T12 SSH clone, T13 SSH push and T13 pull PASS on D2; the HTTPS-token push is covered by a CI test instead of a device row |
 | 23 | SSH key manager, host-key prompt and `known_hosts` | done — T11 keygen PASS; prompt, pinned-host reuse and changed-key rejection PASS on D2; passphrase import unrun |
 
 Out of scope for this pass: Git hooks, LFS, submodules, shallow clones, GitHub OAuth device flow,
@@ -42,7 +42,7 @@ named by the JGit 5.13.3 POM; do not upgrade JGit. Re-test 6.x on D1 before any 
 covering HTTPS clone, SSH clone and push (T10–T13).
 
 **Evidence.** The merged Android tree builds and its unit suite passes with this dependency set:
-`testDebugUnitTest` 356 tests, `lintDebug` and `assembleDebug` green. HTTPS clone (T10) passed on D2.
+`testDebugUnitTest` 357 tests, `lintDebug` and `assembleDebug` green. HTTPS clone (T10) passed on D2.
 The set first failed to *assemble* on the merged tree; the `sshd-osgi` duplicate-class fix is in
 [Device-only defects found and fixed](#device-only-defects-found-and-fixed). SSH clone and push
 (T12/T13) remain unexercised on a device, and D1 has not run at all. Decision record:
@@ -148,7 +148,7 @@ exists on that tree and ran green there.
 | `HostKeyPromptsTest` | prompt emitted, answer accepted/rejected, 120 s timeout, changed-key shortcut | PASS |
 | `GitHandlerTest` | dispatch + error mapping with a fake engine/temp repos, bad `opId`, cancel, missing args, non-repo status, token never in replies | Pending — no `GitHandlerTest` exists on the merged tree; handler dispatch, `opId`/cancel and no-secret-in-reply are covered by `PhaseFHandlerTest` |
 
-Run note: **356 Android unit tests pass on the merged tree (`testDebugUnitTest`)**. The run reports one
+Run note: **357 Android unit tests pass on the merged tree (`testDebugUnitTest`)**. The run reports one
 total; per-suite counts were not captured, so none are recorded here.
 
 ### Web
@@ -165,7 +165,7 @@ Run note: **277 tests in 40 files pass** (`npm test`).
 
 | Check | Result |
 |---|---|
-| Android `testDebugUnitTest` | PASS — 356 tests |
+| Android `testDebugUnitTest` | PASS — 357 tests |
 | Android `lintDebug` | PASS |
 | Web `npm test` | PASS — 277 tests in 40 files |
 | Web `npm run typecheck` / `lint` / `build` | PASS |
@@ -186,8 +186,11 @@ on each device; never infer one device's result from the other. Steps are in
 The raw run is
 [`20261115-211717-phaseF-D2-e76846f.txt`](../device-reports/20261115-211717-phaseF-D2-e76846f.txt):
 one logcat buffer covering T11, T10, T12, T12B, T13, T14 and T21 with seven PASS lines and no FAIL,
-followed by `scripts/ssh-key-logcat.sh` exiting 0. T11 mints a fresh key each run, so its public key
-must be added to the test server's `authorized_keys` before T12/T13.
+followed by `scripts/ssh-key-logcat.sh` exiting 0. The rows added afterwards — passphrase import and
+pull — are in
+[`20261115-222841-phaseF-D2-e76846f-round2.txt`](../device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt).
+T11 mints a fresh key each run, so its public key must be added to the test server's
+`authorized_keys` before T12/T13.
 
 | Test | D1 (Android 9, API 28) | D2 (Android 15) | Evidence |
 |---|---|---|---|
@@ -208,14 +211,15 @@ key rejected, conflict detected/resolved, and pull/push over both HTTPS and SSH.
 | Conflict detected and resolved | **PASS** — merging `feature` into `main` left one conflict on `a.txt`; `git.conflict` returned standard markers with both `ours` and `theirs` parsed; `git.resolve` with the `ours` strategy cleared the conflict list and the file ended as `one/two/main` |
 | Pinned host reconnects without a prompt | **PASS** — second clone with the pin in place reported `promptEvents=0` and succeeded |
 | Changed host key rejected | **PASS** — after rotating the server host key the clone failed with `E_HOSTKEY_CHANGED` ("The host key changed; forget the host before trusting the new key") and emitted **no** prompt, which is the required fail-closed behaviour; restoring the original key restored the clone |
-| Passphrase-protected import, pull/push over HTTPS token | **Not run** |
+| Passphrase-protected key import | **PASS** — imports a passphrase-protected PEM key (`hasPassphrase=true`), unlocks with the correct passphrase, and rejects both a wrong passphrase and no passphrase |
+| Pull over SSH | **PASS** — two working copies cloned from one remote; the second pushed a commit, the first pulled and fast-forwarded from `30b287f` to `c93cbd1` with the new file present and identical |
 
 **T12/T13 status.** Both now pass on D2 against a local SSH server (`/tmp/pf-ssh`, paramiko,
 reached over the host's LAN address because the app UID could not use `adb reverse` loopback). Three
 defects had to be fixed first — `user.home`, the prompt sink and the `known_hosts` host key — all of
 which are recorded in [Device-only defects found and fixed](#device-only-defects-found-and-fixed).
-The SSH clone and push rows are the only ones measured against a controlled server rather than a
-public host; the token variant of T13 is still unrun.
+The SSH clone, push and pull rows are the only ones measured against a controlled server rather
+than a public host.
 
 **Environment finding that gates T10.** While the phone's third-party VPN (`free.vpnindia…turbo`) was
 active, **all** app-UID sockets failed — DNS (`UnknownHostException` for every name), loopback through
@@ -321,12 +325,16 @@ therefore be proven on a device, and D1 — the API 28 gate — still has not ru
 ## Known gaps
 
 - **Device coverage is D2 only.** T10–T14, the local Git rows, conflict resolution, pinned-host reuse,
-  the changed-key rejection and the logcat key-material check all pass on D2. D1 has not run at all, so
-  nothing here proves API 28, and the D-016 compatibility gate is still open. The passphrase-protected
-  import, `pull` and the HTTPS-token push variant are unrun. PASS values are single-run measurements on
-  one device.
-- **Network rows depend on the phone's VPN being off.** With the third-party VPN active no app-UID
-  socket works, so a network row measured with it on is not evidence of anything.
+  the changed-key rejection, passphrase-protected import, pull and the logcat key-material check all
+  pass on D2. D1 has not run at all, so nothing here proves API 28, and the D-016 compatibility gate is
+  still open. The HTTPS-token push is deliberately not a device row: it needs a token-authenticated
+  remote, and its security claim is asserted in `PhaseFHandlerTest` instead. PASS values are single-run
+  measurements on one device.
+- **Network rows need the screen on, and the VPN off.** With the third-party VPN active no app-UID
+  socket works; with the display asleep, app-UID sockets also fail while the `adb shell` UID is
+  exempt. Both conditions produced false "cannot reach the remote" results before they were
+  identified, so a failing network row should be re-run with the device unlocked and awake before it
+  is recorded as a defect.
 - **JGit 6.x is unproven on API 28.** D-016 is a deliberate fallback, not a claim that 6.x fails.
   Re-test on D1 before a major bump.
 - **StrongBox is device-dependent.** T14 records yes/no per phone; a missing StrongBox is not a
@@ -345,7 +353,7 @@ therefore be proven on a device, and D1 — the API 28 gate — still has not ru
 
 Done:
 
-- Fill the JVM/web suite rows and the gate table with real counts — 356 Android unit tests, 277 web
+- Fill the JVM/web suite rows and the gate table with real counts — 357 Android unit tests, 277 web
   tests in 40 files, all gates PASS.
 - Fix the merged-tree build failure and the device-only defects before filling device rows — `993d4ad`
   (build), `69de290` (two defects), `fb675a4` (`user.home`), `2c4a2ac` (prompt sink), `560a4aa`

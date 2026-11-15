@@ -74,6 +74,60 @@ class PhaseFHandlerTest {
         )
     }
 
+    /**
+     * The token path's security claim, which a device row could only have shown
+     * once: a token handed to `git.remote.set` is stored, never returned by
+     * `git.remote.list`, and reported only as `hasToken`.
+     */
+    @Test
+    fun `remote token is stored but only flagged in replies`() {
+        val router = router()
+        router.dispatch(request("git.init", "path" to "repo", "branch" to "main"))
+
+        val set = router.dispatch(
+            request(
+                "git.remote.set",
+                "path" to "repo",
+                "name" to "origin",
+                "url" to "https://example.test/owner/repo.git",
+                "authKind" to "https",
+                "username" to "x-access-token",
+                "token" to "ghp_supersecretvalue"
+            )
+        )
+        assertTrue(set.ok())
+        assertFalse("token leaked into the set reply", set.payload().toString().contains("ghp_supersecretvalue"))
+
+        val listed = router.dispatch(request("git.remote.list", "path" to "repo"))
+        assertTrue(listed.ok())
+        val payload = listed.payload().toString()
+        assertFalse("token leaked into the list reply", payload.contains("ghp_supersecretvalue"))
+
+        val remotes = listed.payload().array("remotes")
+        assertEquals(1, remotes.size)
+        val remote = remotes.single().jsonObject
+        assertEquals("origin", remote.getValue("name").jsonPrimitive.content)
+        assertTrue(remote.getValue("hasToken").jsonPrimitive.content.toBoolean())
+        assertEquals("x-access-token", remote.getValue("username").jsonPrimitive.content)
+
+        // An empty token clears the stored secret instead of storing "".
+        val cleared = router.dispatch(
+            request(
+                "git.remote.set",
+                "path" to "repo",
+                "name" to "origin",
+                "url" to "https://example.test/owner/repo.git",
+                "authKind" to "https",
+                "token" to ""
+            )
+        )
+        assertTrue(cleared.ok())
+        assertFalse(
+            cleared.payload().array("remotes").single().jsonObject
+                .getValue("hasToken").jsonPrimitive.content.toBoolean()
+        )
+    }
+
     private fun router(): BridgeRouter {
         val state = File(workspace, "state")
         val secrets = TestSecrets.store(state)

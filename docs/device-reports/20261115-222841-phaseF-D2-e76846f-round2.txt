@@ -1,0 +1,50 @@
+Phase F device pass (round 2) — D2 (POCO F1, LineageOS, Android 15 / API 35)
+serial: e76846f (USB)
+captured: 2026-11-15T22:28:41+05:30
+jgit: 5.13.3.202401111512-r
+ssh server: local paramiko, host LAN address
+covers the rows added after round 1: T11B passphrase import, T13P pull,
+and a re-run of T12 to re-pin the rotated host key.
+
+--- harness output ---
+--------- beginning of main
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: heap       : max 256 MB
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 22:27:32.207 16586 16586 I LeoCodeHarness: native pty : loaded
+11-15 22:27:32.618 16586 16586 I LeoCodeHarness: ▶ T11B — passphrase-protected key import
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   importedId=70447856-7bb4-425f-9772-c4d9dac025ba
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   type=ed25519 hasPassphrase=true
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   fingerprint=SHA256:Jwn9v9GYTKZLO15DCQwW2s/dAIhXZ6/lPSMKXjAj3LU
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   unlockWithCorrect=true
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   unlockWithWrong=true (wrong passphrase for this key)
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   unlockWithoutPassphrase=true
+11-15 22:27:36.618 16586 16586 I LeoCodeHarness:   PASS
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: heap       : max 256 MB
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 22:28:00.447 16587 16587 I LeoCodeHarness: native pty : loaded
+11-15 22:28:00.857 16587 16587 I LeoCodeHarness: ▶ T13P — pull over SSH (two working copies)
+11-15 22:28:08.927 16587 16587 I LeoCodeHarness:   advancedFrom=c93cbd1 to=22aabec (remote commit 22aabec)
+11-15 22:28:08.927 16587 16587 I LeoCodeHarness:   pull branch=main ahead=0 behind=0 message=Pulled from origin
+11-15 22:28:08.927 16587 16587 I LeoCodeHarness:   fileArrived=true contents=written by the second clone at 1794761885456
+11-15 22:28:08.927 16587 16587 I LeoCodeHarness:   progressEvents=13
+11-15 22:28:08.927 16587 16587 I LeoCodeHarness:   PASS — pull fast-forwarded to the pushed commit
