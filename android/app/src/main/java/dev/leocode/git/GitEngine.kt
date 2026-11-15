@@ -366,7 +366,7 @@ class GitEngine(
         if (dir.exists() && dir.list()?.isNotEmpty() == true) {
             throw BridgeException(ErrorCode.E_EXISTS, "the destination directory is not empty")
         }
-        val auth = authFor(url, request.auth, null)
+        val auth = authFor(url, request.auth, null, sink)
         try {
             withProgress("clone", request.opId, sink) { monitor ->
                 Git.cloneRepository()
@@ -389,7 +389,7 @@ class GitEngine(
         return git.use { repo ->
             val remote = remoteName(repo.repository, request.remote)
             val url = remoteUrl(repo.repository, remote)
-            val auth = authFor(url, request.auth, remoteConfig(repo.repository, remote))
+            val auth = authFor(url, request.auth, remoteConfig(repo.repository, remote), sink)
             try {
                 withProgress("fetch", request.opId, sink) { monitor ->
                     repo.fetch()
@@ -411,7 +411,7 @@ class GitEngine(
         return git.use { repo ->
             val remote = remoteName(repo.repository, request.remote)
             val url = remoteUrl(repo.repository, remote)
-            val auth = authFor(url, request.auth, remoteConfig(repo.repository, remote))
+            val auth = authFor(url, request.auth, remoteConfig(repo.repository, remote), sink)
             try {
                 val result = withProgress("pull", request.opId, sink) { monitor ->
                     repo.pull()
@@ -445,7 +445,7 @@ class GitEngine(
         return git.use { repo ->
             val remote = remoteName(repo.repository, request.remote)
             val url = remoteUrl(repo.repository, remote)
-            val auth = authFor(url, request.auth, remoteConfig(repo.repository, remote))
+            val auth = authFor(url, request.auth, remoteConfig(repo.repository, remote), sink)
             val branch = request.branch?.trim()?.takeIf { it.isNotEmpty() }
             try {
                 val results = withProgress("push", request.opId, sink) { monitor ->
@@ -774,7 +774,8 @@ class GitEngine(
     private fun authFor(
         url: String,
         request: GitAuth?,
-        stored: GitRemoteInfo?
+        stored: GitRemoteInfo?,
+        sink: StreamSink
     ): Auth {
         val kind = request?.kind?.takeIf { it != "none" }
             ?: stored?.authKind?.takeIf { it != "none" }
@@ -793,8 +794,11 @@ class GitEngine(
                     knownHosts = knownHosts,
                     prompts = prompts,
                     emit = { prompt ->
+                        // Runs on MINA's I/O thread, not the request thread, so
+                        // the sink must be captured here rather than read from
+                        // a per-thread holder.
                         runCatching {
-                            promptSink.get()?.event(
+                            sink.event(
                                 "ssh.hostkey.prompt",
                                 json.encodeToJsonElement(
                                     dev.leocode.bridge.SshHostPrompt.serializer(),
@@ -854,13 +858,6 @@ class GitEngine(
         }
     }
 
-    /**
-     * The prompt emitter needs the request sink inside JGit callbacks. The engine is
-     * shared across requests, so the sink is bound to the calling thread for the
-     * duration of one network operation.
-     */
-    private val promptSink = ThreadLocal<StreamSink?>()
-
     private fun sshDirectory(): File = keyStore.directory()
 
     // ----------------------------------------------------------------- progress
@@ -878,14 +875,12 @@ class GitEngine(
                 throw BridgeException(ErrorCode.E_BUSY, "an operation with this id is already running")
             }
         }
-        promptSink.set(sink)
         try {
             val monitor = GitProgressMonitor(op, key, sink, flag)
             val result = block(monitor)
             if (flag.get()) throw BridgeException(ErrorCode.E_CANCELLED, "cancelled")
             return result
         } finally {
-            promptSink.remove()
             if (key != null) activeOps.remove(key, flag)
         }
     }
