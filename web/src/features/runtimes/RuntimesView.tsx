@@ -5,6 +5,7 @@ import type { AppInfo } from "../../bridge"
 import { PaneError } from "../../errors/CrashScreen"
 import { ErrorBoundary } from "../../errors/ErrorBoundary"
 import { lazyWithRetry } from "../../errors/lazyWithRetry"
+import { PythonProjectPanel } from "../python/PythonProjectPanel"
 
 const RuntimeManager = lazyWithRetry(() =>
   import("../../components/RuntimeManager").then((module) => ({ default: module.RuntimeManager }))
@@ -29,6 +30,7 @@ export function RuntimesView({ info }: { info: AppInfo | null }) {
           />
         )}
       >
+        <PythonProjectPanel />
         <Suspense fallback={<div className="empty">Loading runtimes…</div>}>
           <RuntimeManager
             bridge={bridge}

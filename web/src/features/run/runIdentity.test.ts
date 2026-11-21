@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createAppStores } from "../../app/stores"
 import { MockBridge } from "../../bridge/mock"
-import type { ProcessEvent, RunHandle } from "../../bridge"
-import { PYTHON_HINT } from "./runStore"
+import type { ProcessEvent, PythonStatus, RunHandle } from "../../bridge"
 
 interface PendingRun {
   onEvent: (event: ProcessEvent) => void
@@ -110,52 +109,114 @@ describe("run identity (W-14)", () => {
   })
 })
 
-describe("Python probe cache (W-13)", () => {
-  it("re-probes after a miss so a fresh install is picked up", async () => {
+describe("Python project run (Task 26)", () => {
+  const pythonDoc = () => ({
+    path: "main.py",
+    content: "print(1)\n",
+    saved: "print(1)\n",
+    eol: "\n" as const
+  })
+
+  const status = (overrides: Partial<PythonStatus> = {}): PythonStatus => ({
+    runtimeInstalled: true,
+    runtimePython: "/data/usr/bin/python3",
+    venvExists: true,
+    venvPath: "/data/project/.venv",
+    venvPython: "/data/project/.venv/bin/python",
+    requirementsExists: false,
+    requirementsPath: null,
+    requirementsHash: null,
+    requirementsInstalled: false,
+    aliasesReady: true,
+    ...overrides
+  })
+
+  it("runs with the project venv and its environment", async () => {
     const bridge = new MockBridge()
-    let probes = 0
-    bridge.run = async (argv) => {
-      if (argv[0] === "python3" && argv[1] === "--version") {
-        probes += 1
-        return probes === 1 ? 127 : 0
-      }
+    bridge.pythonStatus = async () => status()
+    let argvSeen: string[] = []
+    let envSeen: Record<string, string> | undefined
+    bridge.run = async (argv, _cwd, _onEvent, _onStart, options) => {
+      argvSeen = argv
+      envSeen = options?.env
       return 0
     }
     const stores = createAppStores(bridge)
-    stores.editor.setState({
-      docs: [{ path: "main.py", content: "print(1)\n", saved: "print(1)\n", eol: "\n" }],
-      activePath: "main.py"
-    })
+    stores.editor.setState({ docs: [pythonDoc()], activePath: "main.py" })
 
     await stores.run.getState().runFile()
-    expect(stores.run.getState().run?.hint).toBe(PYTHON_HINT)
 
-    // The user installed Python in Runtime Manager: the next Run must try again.
-    await stores.run.getState().runFile()
-    expect(probes).toBe(2)
-    expect(stores.run.getState().run?.hint).toBeNull()
+    expect(argvSeen[0]).toBe("/data/project/.venv/bin/python")
+    expect(envSeen?.VIRTUAL_ENV).toBe("/data/project/.venv")
+    expect(envSeen?.PATH).toContain("/data/project/.venv/bin")
     expect(stores.run.getState().run?.exitCode).toBe(0)
   })
 
-  it("forgets a successful probe when invalidated", async () => {
+  it("does not spawn when the user declines trust", async () => {
     const bridge = new MockBridge()
-    let probes = 0
-    bridge.run = async (argv) => {
-      if (argv[0] === "python3" && argv[1] === "--version") probes += 1
-      return 0
-    }
-    const stores = createAppStores(bridge)
-    stores.editor.setState({
-      docs: [{ path: "main.py", content: "print(1)\n", saved: "print(1)\n", eol: "\n" }],
-      activePath: "main.py"
+    bridge.pythonStatus = async () => status()
+    bridge.trustCheck = async (request) => ({
+      trusted: false,
+      action: request.action ?? "script",
+      fingerprint: "sha256:test"
     })
+    const run = vi.fn(async () => 0)
+    bridge.run = run
+    const stores = createAppStores(bridge)
+    stores.dialogs.setState({ confirm: async () => false })
+    stores.editor.setState({ docs: [pythonDoc()], activePath: "main.py" })
 
     await stores.run.getState().runFile()
+
+    expect(run).not.toHaveBeenCalled()
+    expect(stores.run.getState().run?.hint).toContain("not trusted")
+  })
+
+  it("installs missing requirements before the first run", async () => {
+    const bridge = new MockBridge()
+    let installed = false
+    bridge.pythonStatus = async () =>
+      status({
+        requirementsExists: true,
+        requirementsPath: "/data/project/requirements.txt",
+        requirementsHash: "sha256:req",
+        requirementsInstalled: installed
+      })
+    let installs = 0
+    bridge.pythonInstallRequirements = async (_request, onLine) => {
+      installs += 1
+      installed = true
+      onLine("Successfully installed requests")
+      return { ok: true, exitCode: 0, output: "Successfully installed requests\n" }
+    }
+    const run = vi.fn(async () => 0)
+    bridge.run = run
+    const stores = createAppStores(bridge)
+    stores.dialogs.setState({ confirm: async () => true })
+    stores.editor.setState({ docs: [pythonDoc()], activePath: "main.py" })
+
+    await stores.run.getState().runFile()
+
+    expect(installs).toBe(1)
+    expect(run).toHaveBeenCalled()
+    expect(stores.python.getState().status?.requirementsInstalled).toBe(true)
+  })
+
+  it("refreshes the cached status when a runtime is installed", async () => {
+    const bridge = new MockBridge()
+    let probes = 0
+    bridge.pythonStatus = async () => {
+      probes += 1
+      return status()
+    }
+    bridge.run = async () => 0
+    const stores = createAppStores(bridge)
+    stores.editor.setState({ docs: [pythonDoc()], activePath: "main.py" })
+
     await stores.run.getState().runFile()
     expect(probes).toBe(1)
 
     stores.run.getState().invalidatePythonProbe()
-    await stores.run.getState().runFile()
-    expect(probes).toBe(2)
+    await vi.waitFor(() => expect(probes).toBe(2))
   })
 })

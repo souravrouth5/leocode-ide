@@ -380,6 +380,53 @@ data class RuntimeCancelRequest(val id: String? = null)
 @Serializable
 data class RuntimeCancelReply(val cancelling: Boolean)
 
+// ------------------------------------------------------------- trust/python
+// Task 26: per-project trust decisions and the Python environment.
+
+@Serializable
+data class TrustRequest(
+    val project: String? = null,
+    val action: String? = null,
+    /** The script for `script`, relative to the project; ignored by other actions. */
+    val path: String? = null
+)
+
+@Serializable
+data class TrustReply(
+    val trusted: Boolean,
+    val action: String,
+    val fingerprint: String
+)
+
+@Serializable
+data class TrustRevokeRequest(val project: String? = null, val action: String? = null)
+
+@Serializable
+data class PythonProjectRequest(val project: String? = null)
+
+@Serializable
+data class PythonStatusReply(
+    val runtimeInstalled: Boolean,
+    val runtimePython: String? = null,
+    val venvExists: Boolean,
+    val venvPath: String,
+    val venvPython: String? = null,
+    val requirementsExists: Boolean,
+    val requirementsPath: String? = null,
+    val requirementsHash: String? = null,
+    val requirementsInstalled: Boolean,
+    val aliasesReady: Boolean
+)
+
+@Serializable
+data class PythonVenvReply(val created: Boolean, val status: PythonStatusReply)
+
+@Serializable
+data class PythonRequirementsReply(val ok: Boolean, val exitCode: Int, val output: String)
+
+@Serializable
+data class PythonInstallEvent(val data: String)
+
 // ----------------------------------------------------------------- secrets
 
 @Serializable

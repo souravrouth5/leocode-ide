@@ -93,6 +93,9 @@ class LeoApp : Application() {
             graph = created
             // Reaping waits up to 200 ms per orphan; keep it off the main thread.
             thread(name = "leocode-reap", isDaemon = true) {
+                // Task 26: an existing runtime gains `python`/`pip` aliases without
+                // a reinstall; a missing runtime simply skips this.
+                created.ensurePythonAliases()
                 val reaped = runCatching { created.reapOrphans() }.getOrDefault(0)
                 if (reaped > 0) Log.i("LeoCode", "reaped $reaped orphan process group(s)")
                 // A killed import/export/restore leaves staging and archive files

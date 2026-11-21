@@ -11,6 +11,7 @@ import { createShellStore, type ShellState } from "../features/shell/shellStore"
 import { createFilesStore, type FilesState } from "../features/files/filesStore"
 import { createEditorStore, type EditorStore } from "../features/editor/editorStore"
 import { createRunStore, type RunStore } from "../features/run/runStore"
+import { createPythonStore, type PythonState } from "../features/python/pythonStore"
 import {
   createWorkspaceStore,
   type WorkspaceState
@@ -35,6 +36,8 @@ export interface AppStores {
   shell: StoreApi<ShellState>
   files: StoreApi<FilesState>
   editor: EditorStore
+  /** Per-project venv, requirements and trust decisions (Task 26). */
+  python: StoreApi<PythonState>
   run: RunStore
   workspace: StoreApi<WorkspaceState>
   search: StoreApi<SearchState>
@@ -76,7 +79,8 @@ export function createAppStores(bridge: Bridge): AppStores {
     dialogs,
     workspaceId: () => workspace?.getState().activeId ?? null
   })
-  const run = createRunStore({ bridge, editor, notifications })
+  const python = createPythonStore({ bridge, dialogs, notifications, errors })
+  const run = createRunStore({ bridge, editor, notifications, python })
   workspace = createWorkspaceStore({
     bridge,
     files,
@@ -112,6 +116,7 @@ export function createAppStores(bridge: Bridge): AppStores {
     shell,
     files,
     editor,
+    python,
     run,
     workspace,
     search,

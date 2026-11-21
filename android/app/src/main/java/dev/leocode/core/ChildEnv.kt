@@ -14,13 +14,18 @@ object ChildEnv {
         "TMP",
         "PATH",
         "PYTHONHOME",
+        "VIRTUAL_ENV",
         "LD_LIBRARY_PATH",
         "SSL_CERT_FILE",
         "TERM",
         "LANG",
         "PWD",
         "COLUMNS",
-        "LINES"
+        "LINES",
+        // Optional user proxy for pip/requests; never required by the app.
+        "http_proxy",
+        "https_proxy",
+        "no_proxy"
     )
 
     /** Allowlisted keys from [base], with allowlisted [extra] values taking precedence. */

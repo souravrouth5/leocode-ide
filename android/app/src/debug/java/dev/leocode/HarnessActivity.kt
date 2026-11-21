@@ -52,6 +52,9 @@ class HarnessActivity : Activity() {
 
     /** Task 25 runtime installer tests. */
     private lateinit var runtime: RuntimeHarness
+
+    /** Task 26 Python workflow (venv, requests, markupsafe, fetch). */
+    private lateinit var python: PythonHarness
     private val phaseFNet by lazy {
         val intent = intent
         PhaseFHarness.Net(
@@ -86,6 +89,11 @@ class HarnessActivity : Activity() {
         workspace.ensure()
         supervisor = ProcessSupervisor(workspace.childEnv())
         runtime = RuntimeHarness(this, workspace)
+        python = PythonHarness(
+            workspace,
+            proxy = intent?.getStringExtra("proxy"),
+            wheel = intent?.getStringExtra("wheel")
+        )
 
         tests = listOf(
             Test("T1", "/system/bin/sh") { t1Shell() },
@@ -136,7 +144,8 @@ class HarnessActivity : Activity() {
                 runtime.install()
             },
             Test("T25L", "runtime catalog") { runtime.catalog() },
-            Test("T25C", "runtime cancel keeps the installed tree") { runtime.cancel() }
+            Test("T25C", "runtime cancel keeps the installed tree") { runtime.cancel() },
+            Test("T15", "Python venv + requests + markupsafe + fetch") { python.run() }
         )
 
         setContentView(buildUi())

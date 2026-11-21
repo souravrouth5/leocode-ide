@@ -39,7 +39,10 @@ const IDEMPOTENT_READS = new Set([
   "git.diff",
   "git.log",
   "git.branch.list",
-  "git.remote.list"
+  "git.remote.list",
+  // Task 26: status and trust checks are safe to retry.
+  "python.status",
+  "trust.check"
 ])
 
 /** Long Git network operations are progress-driven and cancelled by op id. */
@@ -63,6 +66,9 @@ export function defaultTimeoutMs(method: string): number | null {
   // `runtime.result`; the promise resolves on that event, not on the reply, so
   // no fixed timeout applies. Cancellation is `runtime.cancel`.
   if (method === "runtime.install" || method === "runtime.repair") return null
+  // Task 26: pip can download for minutes; venv creation is slow on D1.
+  if (method === "python.requirements.install") return null
+  if (method === "python.venv.create") return 180_000
   // A Git clone/fetch/pull/push runs until it finishes; the reply is the result,
   // not a start ack. Progress arrives meanwhile and `git.cancel` stops it.
   if (GIT_NETWORK_METHODS.has(method)) return null
@@ -70,6 +76,9 @@ export function defaultTimeoutMs(method: string): number | null {
   if (method === "fs.search.cancel" || method === "git.cancel") return 2_000
   // A broad workspace search is capped but still walks many files (Task 16).
   if (method === "fs.search") return 60_000
+  if (method === "python.venv.remove" || method === "trust.grant" || method === "trust.revoke") {
+    return WRITE_TIMEOUT_MS
+  }
   if (
     method === "fs.write" ||
     method === "draft.save" ||

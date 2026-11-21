@@ -30,6 +30,13 @@ import type {
   RuntimeProgress as GeneratedRuntimeProgress,
   RuntimeCatalogEntry as GeneratedRuntimeCatalogEntry,
   RuntimeResult as GeneratedRuntimeResult,
+  TrustRequest as GeneratedTrustRequest,
+  TrustReply as GeneratedTrustReply,
+  TrustRevokeRequest as GeneratedTrustRevokeRequest,
+  PythonProjectRequest as GeneratedPythonProjectRequest,
+  PythonStatusReply as GeneratedPythonStatusReply,
+  PythonVenvReply as GeneratedPythonVenvReply,
+  PythonRequirementsReply as GeneratedPythonRequirementsReply,
   SafDocument as GeneratedSafDocument,
   SearchMatch as GeneratedSearchMatch,
   SecretSetRequest,
@@ -234,6 +241,24 @@ export interface RuntimeInstallHandle {
   cancel: () => void
 }
 
+// ------------------------------------------------------- Python (Task 26)
+
+/** The actions a project trust decision can cover. */
+export type TrustAction = "script" | "pip" | "venv" | "git-hooks"
+
+export type TrustRequest = GeneratedTrustRequest
+export type TrustReply = GeneratedTrustReply
+export type TrustRevokeRequest = GeneratedTrustRevokeRequest
+export type PythonProjectRequest = GeneratedPythonProjectRequest
+export type PythonStatus = GeneratedPythonStatusReply
+export type PythonVenvResult = GeneratedPythonVenvReply
+export type PythonRequirementsResult = GeneratedPythonRequirementsReply
+
+/** `proc.run` environment overrides (allowlisted host-side). */
+export interface RunOptions extends RequestOptions {
+  env?: Record<string, string>
+}
+
 // ------------------------------------------------------------ Git (Tasks 21–23)
 
 export type GitFileChange = GeneratedGitFileChange
@@ -357,7 +382,7 @@ export interface Bridge {
     cwd: string,
     onEvent: (event: ProcessEvent) => void,
     onStart?: (handle: RunHandle) => void,
-    options?: RequestOptions
+    options?: RunOptions
   ): Promise<number>
   getTheme(options?: RequestOptions): Promise<ThemeState>
   setTheme(mode: ThemeMode, options?: RequestOptions): Promise<ThemeState>
@@ -398,6 +423,35 @@ export interface Bridge {
   catalogRuntimes?(options?: RequestOptions): Promise<RuntimeCatalogEntry[]>
   /** Remove an installed runtime and its rollback counter. */
   uninstallRuntime?(id: string, options?: RequestOptions): Promise<void>
+
+  // ------------------------------------------------------ trust (Task 26)
+  /** Whether this project already trusts [action] for the current files. */
+  trustCheck(request: TrustRequest, options?: RequestOptions): Promise<TrustReply>
+  /** Remember a decision for the current file fingerprint. */
+  trustGrant(request: TrustRequest, options?: RequestOptions): Promise<TrustReply>
+  trustRevoke(request: TrustRevokeRequest, options?: RequestOptions): Promise<TrustReply>
+
+  // ----------------------------------------------------- python (Task 26)
+  /** The active project's runtime, `.venv` and `requirements.txt` state. */
+  pythonStatus(
+    request?: PythonProjectRequest,
+    options?: RequestOptions
+  ): Promise<PythonStatus>
+  pythonCreateVenv(
+    request?: PythonProjectRequest,
+    options?: RequestOptions
+  ): Promise<PythonVenvResult>
+  pythonRemoveVenv(
+    request?: PythonProjectRequest,
+    options?: RequestOptions
+  ): Promise<PythonStatus>
+  /** Streams pip output; resolves after pip exits. */
+  pythonInstallRequirements(
+    request: PythonProjectRequest | undefined,
+    onLine: (line: string) => void,
+    options?: RequestOptions
+  ): Promise<PythonRequirementsResult>
+
   /** Device Storage & SAF capabilities */
   getStorageInfo?(options?: RequestOptions): Promise<StorageInfo>
   requestStoragePermission?(options?: RequestOptions): Promise<boolean>

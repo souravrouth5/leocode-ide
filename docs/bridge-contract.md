@@ -212,7 +212,13 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `runtime.repair` | `{ id }` → `{ id, started }`, then events as `runtime.install` | live (Task 25) | Keeps the current tree until the new one passes its health check |
 | `runtime.uninstall` | `{ id }` → `{}` | live (Task 25) | Removes the tree only when its marker names `id`; clears the rollback counter |
 | `language.list` | `{}` → `[{ id, name, extensions[], runtimeId, hasRepl, template }]` | planned (Task 30) | Language providers (D-017); Python is the first |
-| `trust.check` / `trust.grant` | `{ project, action }` → `{ trusted }` | planned (Task 26) | Scripts, pip, venv, Git hooks |
+| `trust.check` | `{ project?, action, path? }` → `{ trusted, action, fingerprint }` | live (Task 26) | Scripts, pip, venv, Git hooks; host computes the fingerprint |
+| `trust.grant` | `{ project?, action, path? }` → `{ trusted: true, action, fingerprint }` | live (Task 26) | Remembers the decision for the current files |
+| `trust.revoke` | `{ project?, action? }` → `{ trusted: false }` | live (Task 26) | Forgets one action or the whole project |
+| `python.status` | `{ project? }` → `PythonStatusReply` | live (Task 26) | Runtime, `.venv`, `requirements.txt`, aliases |
+| `python.venv.create` | `{ project? }` → `{ created, status }` | live (Task 26) | Requires a `venv` trust grant; reply on finish |
+| `python.venv.remove` | `{ project? }` → `PythonStatusReply` | live (Task 26) | Removes only the project's `.venv` |
+| `python.requirements.install` | `{ project? }` → `{ ok, exitCode, output }` + `python.install` events | live (Task 26) | Requires a `pip` trust grant; streams pip lines |
 
 > **Runtime events and codes.** `runtime.progress` carries `{ phase, bytes, total, message }` with
 > phases `preparing`, `download`, `verify`, `extract`, `configure`, `health`, `done`. The terminal

@@ -481,3 +481,43 @@
 }
 
 
+
+/* Task 26: the active project's Python environment. */
+.python-status {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.python-status > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.python-label {
+  color: var(--muted);
+}
+
+.python-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.python-log {
+  margin: 12px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

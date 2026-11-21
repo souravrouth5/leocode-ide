@@ -11,7 +11,9 @@ import dev.leocode.bridge.DraftHandler
 import dev.leocode.bridge.FsHandler
 import dev.leocode.bridge.GitHandler
 import dev.leocode.bridge.ProcHandler
+import dev.leocode.bridge.PythonHandler
 import dev.leocode.bridge.RuntimeHandler
+import dev.leocode.bridge.TrustHandler
 import dev.leocode.bridge.SafHandler
 import dev.leocode.bridge.SafPort
 import dev.leocode.bridge.SearchHandler
@@ -25,8 +27,10 @@ import dev.leocode.core.PathJail
 import dev.leocode.core.PidFileStore
 import dev.leocode.core.ProcessSupervisor
 import dev.leocode.core.PtySession
+import dev.leocode.core.PythonProject
 import dev.leocode.core.TerminalRegistry
 import dev.leocode.core.Trash
+import dev.leocode.core.TrustStore
 import dev.leocode.core.Workspace
 import dev.leocode.core.secrets.AndroidSecretCipher
 import dev.leocode.core.secrets.FileSecretStore
@@ -56,6 +60,7 @@ class AppGraph(private val app: Application) {
         private const val RUN_DIR = "run"
         private const val SECRETS_DIR = "secrets"
         private const val SSH_DIR = "ssh"
+        private const val TRUST_FILE = "trust/trust.json"
     }
 
     val json = BridgeJson.value
@@ -152,12 +157,26 @@ class AppGraph(private val app: Application) {
         )
     }
 
+    /** Per-project trust decisions for scripts, pip, venv and Git hooks (Task 26). */
+    val trustStore = TrustStore(File(app.filesDir, TRUST_FILE), json)
+
+    private val activeRoot: () -> File = { workspaceStore.activeDirectory() }
+
     private val procHandler = ProcHandler(workspace, jail, supervisor)
     private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json)
     private val runtimeHandler = RuntimeHandler(
         app,
         workspace,
         log = { line -> android.util.Log.w("LeoCodeRuntime", line) }
+    )
+    private val trustHandler = TrustHandler(workspace, jail, activeRoot, trustStore, json)
+    private val pythonHandler = PythonHandler(
+        workspace,
+        jail,
+        activeRoot,
+        trustStore,
+        json,
+        log = { line -> android.util.Log.w("LeoCodePython", line) }
     )
 
     fun fsHandler(): FsHandler =
@@ -185,6 +204,19 @@ class AppGraph(private val app: Application) {
     )
 
     fun runtimeHandler(): RuntimeHandler = runtimeHandler
+
+    fun trustHandler(): TrustHandler = trustHandler
+
+    fun pythonHandler(): PythonHandler = pythonHandler
+
+    /**
+     * Adds `python`/`pip` beside the installed launcher. Existing installations
+     * gain the aliases here; a fresh install creates them in `configure()`.
+     */
+    fun ensurePythonAliases(): Boolean =
+        runCatching {
+            PythonProject(workspace, workspaceStore.activeDirectory()).ensureAliases()
+        }.getOrDefault(false)
 
     fun gitHandler(): GitHandler = GitHandler(gitEngine, json)
 

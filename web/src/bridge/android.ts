@@ -28,9 +28,17 @@ import {
   type GitSyncRequest,
   type GitSyncResult,
   type ProcessEvent,
+  type PythonProjectRequest,
+  type PythonRequirementsResult,
+  type PythonStatus,
+  type PythonVenvResult,
   type ReadChunk,
   type RequestOptions,
   type RunHandle,
+  type RunOptions,
+  type TrustReply,
+  type TrustRequest,
+  type TrustRevokeRequest,
   type RuntimeCatalogEntry,
   type RuntimeInstallHandle,
   type RuntimeInstallProgress,
@@ -662,7 +670,7 @@ export class AndroidBridge implements Bridge {
     cwd: string,
     onEvent: (event: ProcessEvent) => void,
     onStart?: (handle: RunHandle) => void,
-    options?: RequestOptions
+    options?: RunOptions
   ): Promise<number> {
     let finish: (code: number) => void = () => {}
     let failExit: (reason: unknown) => void = () => {}
@@ -673,7 +681,7 @@ export class AndroidBridge implements Bridge {
 
     const { id, result } = this.send<{ jobId: string }>(
       "proc.run",
-      { argv, cwd },
+      { argv, cwd, env: options?.env ?? {} },
       (event, payload) => {
         if (event === "proc.stdout") onEvent({ stream: "stdout", data: payload.data })
         else if (event === "proc.stderr") onEvent({ stream: "stderr", data: payload.data })
@@ -883,6 +891,61 @@ export class AndroidBridge implements Bridge {
 
   async uninstallRuntime(id: string, options?: RequestOptions): Promise<void> {
     await this.request("runtime.uninstall", { id }, options)
+  }
+
+  // ------------------------------------------------------ trust (Task 26)
+
+  async trustCheck(request: TrustRequest, options?: RequestOptions): Promise<TrustReply> {
+    return this.request<TrustReply>("trust.check", request, options)
+  }
+
+  async trustGrant(request: TrustRequest, options?: RequestOptions): Promise<TrustReply> {
+    return this.request<TrustReply>("trust.grant", request, options)
+  }
+
+  async trustRevoke(
+    request: TrustRevokeRequest,
+    options?: RequestOptions
+  ): Promise<TrustReply> {
+    return this.request<TrustReply>("trust.revoke", request, options)
+  }
+
+  // ----------------------------------------------------- python (Task 26)
+
+  async pythonStatus(
+    request: PythonProjectRequest = {},
+    options?: RequestOptions
+  ): Promise<PythonStatus> {
+    return this.request<PythonStatus>("python.status", request, options)
+  }
+
+  async pythonCreateVenv(
+    request: PythonProjectRequest = {},
+    options?: RequestOptions
+  ): Promise<PythonVenvResult> {
+    return this.request<PythonVenvResult>("python.venv.create", request, options)
+  }
+
+  async pythonRemoveVenv(
+    request: PythonProjectRequest = {},
+    options?: RequestOptions
+  ): Promise<PythonStatus> {
+    return this.request<PythonStatus>("python.venv.remove", request, options)
+  }
+
+  async pythonInstallRequirements(
+    request: PythonProjectRequest | undefined,
+    onLine: (line: string) => void,
+    options?: RequestOptions
+  ): Promise<PythonRequirementsResult> {
+    return this.request<PythonRequirementsResult>(
+      "python.requirements.install",
+      request ?? {},
+      options,
+      (event, payload) => {
+        if (event === "python.install") onLine((payload as { data?: string }).data ?? "")
+      }
+    )
   }
 
   /**

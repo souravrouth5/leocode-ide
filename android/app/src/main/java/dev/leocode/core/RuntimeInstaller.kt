@@ -514,6 +514,9 @@ class RuntimeInstaller(
             rewriteShebangs(staging, staging.absolutePath, workspace.usr.absolutePath)
         }
 
+        // Task 26: `python` and `pip` in the terminal, not just python3/pip3.
+        PythonProject.ensureAliases(bin)
+
         File(staging, MARKER).writeText(
             """{"id":"${manifest.id}","version":"${manifest.version}",""" +
                 """"versionCode":${manifest.versionCode},"installedAt":${System.currentTimeMillis()}}""" +

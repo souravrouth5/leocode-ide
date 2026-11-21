@@ -29,8 +29,16 @@ import type {
   GitSyncRequest,
   GitSyncResult,
   ProcessEvent,
+  PythonProjectRequest,
+  PythonRequirementsResult,
+  PythonStatus,
+  PythonVenvResult,
   ReadChunk,
   RunHandle,
+  RunOptions,
+  TrustReply,
+  TrustRequest,
+  TrustRevokeRequest,
   RuntimeCatalogEntry,
   RuntimeInstallHandle,
   RuntimeInstallProgress,
@@ -1549,7 +1557,8 @@ export class MockBridge implements Bridge {
     argv: string[],
     cwd: string,
     onEvent: (event: ProcessEvent) => void,
-    onStart?: (handle: RunHandle) => void
+    onStart?: (handle: RunHandle) => void,
+    _options?: RunOptions
   ): Promise<number> {
     onStart?.({ cancel: () => {} })
     const emit = (data: string, stream: ProcessEvent["stream"] = "stdout") =>
@@ -1648,6 +1657,57 @@ export class MockBridge implements Bridge {
       throw new BridgeError("E_NOT_FOUND", `${id} is not installed`)
     }
     this.runtimeInstalled.set(id, false)
+  }
+
+  // ------------------------------------------------------ trust (Task 26)
+
+  async trustCheck(_request: TrustRequest): Promise<TrustReply> {
+    return { trusted: true, action: _request.action ?? "script", fingerprint: "mock" }
+  }
+
+  async trustGrant(request: TrustRequest): Promise<TrustReply> {
+    return { trusted: true, action: request.action ?? "script", fingerprint: "mock" }
+  }
+
+  async trustRevoke(request: TrustRevokeRequest): Promise<TrustReply> {
+    return { trusted: false, action: request.action ?? "", fingerprint: "" }
+  }
+
+  // ----------------------------------------------------- python (Task 26)
+
+  private mockPythonStatus(): PythonStatus {
+    return {
+      runtimeInstalled: true,
+      runtimePython: "python3",
+      venvExists: true,
+      venvPath: ".venv",
+      venvPython: "python3",
+      requirementsExists: false,
+      requirementsPath: null,
+      requirementsHash: null,
+      requirementsInstalled: false,
+      aliasesReady: true
+    }
+  }
+
+  async pythonStatus(_request?: PythonProjectRequest): Promise<PythonStatus> {
+    return this.mockPythonStatus()
+  }
+
+  async pythonCreateVenv(_request?: PythonProjectRequest): Promise<PythonVenvResult> {
+    return { created: false, status: this.mockPythonStatus() }
+  }
+
+  async pythonRemoveVenv(_request?: PythonProjectRequest): Promise<PythonStatus> {
+    return this.mockPythonStatus()
+  }
+
+  async pythonInstallRequirements(
+    _request: PythonProjectRequest | undefined,
+    onLine: (line: string) => void
+  ): Promise<PythonRequirementsResult> {
+    onLine("Requirement already satisfied (mock)")
+    return { ok: true, exitCode: 0, output: "Requirement already satisfied (mock)\n" }
   }
 
   async installRuntime(

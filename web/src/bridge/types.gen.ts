@@ -445,6 +445,55 @@ export interface RuntimeCancelReply {
   cancelling: boolean
 }
 
+export interface TrustRequest {
+  project?: string | null
+  action?: string | null
+  path?: string | null
+}
+
+export interface TrustReply {
+  trusted: boolean
+  action: string
+  fingerprint: string
+}
+
+export interface TrustRevokeRequest {
+  project?: string | null
+  action?: string | null
+}
+
+export interface PythonProjectRequest {
+  project?: string | null
+}
+
+export interface PythonStatusReply {
+  runtimeInstalled: boolean
+  runtimePython?: string | null
+  venvExists: boolean
+  venvPath: string
+  venvPython?: string | null
+  requirementsExists: boolean
+  requirementsPath?: string | null
+  requirementsHash?: string | null
+  requirementsInstalled: boolean
+  aliasesReady: boolean
+}
+
+export interface PythonVenvReply {
+  created: boolean
+  status: PythonStatusReply
+}
+
+export interface PythonRequirementsReply {
+  ok: boolean
+  exitCode: number
+  output: string
+}
+
+export interface PythonInstallEvent {
+  data: string
+}
+
 export interface SafDocument {
   name: string
   uri: string

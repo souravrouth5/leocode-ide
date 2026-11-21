@@ -2,6 +2,7 @@ import { createStore, type StoreApi } from "zustand/vanilla"
 import type { Bridge, ProcessEvent, RunHandle } from "../../bridge"
 import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { EditorState } from "../editor/editorStore"
+import type { PythonState } from "../python/pythonStore"
 import { baseName, dirName, isDirty } from "../editor/model"
 
 export interface RunSegment {
@@ -45,7 +46,7 @@ export type RunStore = StoreApi<RunState> & {
 export const RUN_LIMIT = 200_000
 
 export const PYTHON_HINT =
-  "Python is not installed on this device yet. The bundled CPython runtime is the next milestone — use the Terminal for shell work until then."
+  "Python is not installed on this device yet. Open Runtimes, install Python, then run the file again."
 
 export const runKind = (path: string): "python" | "shell" | null => {
   const lower = path.toLowerCase()
@@ -58,14 +59,14 @@ interface RunDeps {
   bridge: Bridge
   editor: StoreApi<EditorState>
   notifications: StoreApi<NotificationsState>
+  python: StoreApi<PythonState>
 }
 
 export function createRunStore(deps: RunDeps): RunStore {
-  const { bridge, editor, notifications } = deps
+  const { bridge, editor, notifications, python } = deps
   let handle: RunHandle | null = null
   let buffer: RunSegment[] = []
   let frame: number | null = null
-  let pythonReady: boolean | null = null
   /** Identifies the run that owns `buffer`/`handle`; stale events are dropped. */
   let runSeq = 0
   let activeRunId: number | null = null
@@ -163,17 +164,26 @@ export function createRunStore(deps: RunDeps): RunStore {
           // Never run stale bytes: persist the buffer first when it differs from disk.
           if (isDirty(doc) && !(await editor.getState().save(doc.path))) return
 
-          // `python3` is either present or not, but an install can land while the
-          // app is open: re-probe until it succeeds instead of caching "missing"
-          // for the whole session (W-13).
-          if (kind === "python" && pythonReady !== true) {
-            try {
-              pythonReady = (await bridge.run(["python3", "--version"], ".", () => {})) === 0
-            } catch {
-              pythonReady = false
+          // Task 26: every runnable file is project code, so ask for trust and
+          // resolve the project venv/requirements before spawning anything.
+          let plan: { interpreter: string; env: Record<string, string> } | null = null
+          if (kind === "python") {
+            const prepared = await python.getState().prepareForRun(doc.path)
+            if ("hint" in prepared) {
+              set({
+                sheetOpen: true,
+                run: {
+                  title: name,
+                  running: false,
+                  exitCode: null,
+                  segments: [],
+                  hint: prepared.hint
+                }
+              })
+              return
             }
-          }
-          if (kind === "python" && !pythonReady) {
+            plan = prepared
+          } else if (!(await python.getState().trust("script", doc.path))) {
             set({
               sheetOpen: true,
               run: {
@@ -181,7 +191,7 @@ export function createRunStore(deps: RunDeps): RunStore {
                 running: false,
                 exitCode: null,
                 segments: [],
-                hint: PYTHON_HINT
+                hint: "This script was not trusted, so it was not run."
               }
             })
             return
@@ -199,7 +209,7 @@ export function createRunStore(deps: RunDeps): RunStore {
             run: { title: name, running: true, exitCode: null, segments: [], hint: null }
           })
 
-          const argv = kind === "python" ? ["python3", name] : ["/system/bin/sh", name]
+          const argv = kind === "python" ? [plan!.interpreter, name] : ["/system/bin/sh", name]
           try {
             const code = await bridge.run(
               argv,
@@ -209,7 +219,8 @@ export function createRunStore(deps: RunDeps): RunStore {
                 // A handle from a run that is already over must not be installed.
                 if (activeRunId === runId) handle = next
                 else next.cancel()
-              }
+              },
+              plan ? { env: plan.env } : undefined
             )
             finish(runId, code, null)
           } catch (error) {
@@ -245,7 +256,9 @@ export function createRunStore(deps: RunDeps): RunStore {
       },
 
       invalidatePythonProbe() {
-        pythonReady = null
+        // A fresh runtime/venv can land while the app is open; drop the cached
+        // status so the next Run sees it (W-13).
+        void python.getState().refresh()
       }
     }
   })
