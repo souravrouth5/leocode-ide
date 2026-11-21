@@ -1,27 +1,28 @@
 # Phase F verification — Git, SSH and secrets (Tasks 19–23)
 
-**Date:** 2026-11-15 · **Branch:** `v9-impl` · **Status:** merged; gates green; device pass partial
-(D2 only — D1 unavailable)
+**Date:** 2026-11-15 · **D1 pass added:** 2026-11-21 · **Branch:** `v9-impl`
+**Status:** merged; gates green; device pass complete (D1 + D2)
 **Contract:** commit `c69ff45` · **Plan:** [`phase-f-plan.md`](phase-f-plan.md)
 
 The `phase-f-core` and `phase-f-web` worktrees are merged on `v9-impl`. The Android and web gates are
 green, and five defects that no JVM test could reach were found and fixed — one build failure and four
-device-only faults. Device verification ran on D2 only: T10–T14 all pass, along with local Git
-operations, conflict resolution, pinned-host reuse, changed-key rejection and the logcat key-material
-check. D1 was unavailable, so every D1 cell remains pending and API 28 is unproven.
+device-only faults. Device verification now covers both phones: T10–T14 all pass on D2 and on D1
+(Android 9 / API 28), along with local Git operations, conflict resolution, pinned-host reuse,
+changed-key rejection and the logcat key-material check. The D1 run closes the API 28 half of D-016:
+JGit 5.13.3 works on the oldest supported device.
 
 ## Scope
 
 | Task | Deliverable | Status |
 |---|---|---|
-| 19 | JGit version decision (D-016), dependency cleanup, HTTPS clone spike | done — D-016 recorded; duplicate-class merge failure fixed in `993d4ad`; T10 HTTPS clone PASS on D2 |
-| 20 | `SecretStore`: Keystore-wrapped AES-GCM blob store | done — JVM suites pass; T14 PASS on D2 |
-| 21 | Local Git operations + Git tab | done — JVM and web suites pass; status/add/commit/diff/log/branch and a resolved conflict PASS on D2 |
-| 22 | HTTPS/SSH remotes (`fetch/pull/push`), progress, errors, conflicts | done — T10 HTTPS clone, T12 SSH clone, T13 SSH push and T13 pull PASS on D2; the HTTPS-token push is covered by a CI test instead of a device row |
-| 23 | SSH key manager, host-key prompt and `known_hosts` | done — T11 keygen PASS; prompt, pinned-host reuse and changed-key rejection PASS on D2; passphrase import unrun |
+| 19 | JGit version decision (D-016), dependency cleanup, HTTPS clone spike | done — D-016 recorded and settled; duplicate-class merge failure fixed in `993d4ad`; T10 HTTPS clone PASS on D1 and D2 |
+| 20 | `SecretStore`: Keystore-wrapped AES-GCM blob store | done — JVM suites pass; T14 PASS on D1 and D2 |
+| 21 | Local Git operations + Git tab | done — JVM and web suites pass; status/add/commit/diff/log/branch and a resolved conflict PASS on D1 and D2 |
+| 22 | HTTPS/SSH remotes (`fetch/pull/push`), progress, errors, conflicts | done — T10 HTTPS clone, T12 SSH clone, T13 SSH push and T13 pull PASS on D1 and D2; the HTTPS-token push is covered by a CI test instead of a device row |
+| 23 | SSH key manager, host-key prompt and `known_hosts` | done — T11 keygen PASS; prompt, pinned-host reuse, passphrase import and changed-key rejection PASS on D1 and D2 |
 
 Out of scope for this pass: Git hooks, LFS, submodules, shallow clones, GitHub OAuth device flow,
-root mode (Phase E) and Python (Phase G). Phase E stays deferred and D2 stays unrooted; nothing in
+root mode (Phase E) and Python (Phase G). Phase E stays deferred and both phones stay unrooted; nothing in
 this phase changes that.
 
 ## D-016 — JGit 5.13.3.202401111512-r
@@ -42,11 +43,12 @@ named by the JGit 5.13.3 POM; do not upgrade JGit. Re-test 6.x on D1 before any 
 covering HTTPS clone, SSH clone and push (T10–T13).
 
 **Evidence.** The merged Android tree builds and its unit suite passes with this dependency set:
-`testDebugUnitTest` 357 tests, `lintDebug` and `assembleDebug` green. HTTPS clone (T10) passed on D2.
+`testDebugUnitTest` 357 tests, `lintDebug` and `assembleDebug` green. HTTPS clone (T10), SSH clone
+(T12), SSH push (T13) and SSH pull (T13P) pass on **both** D2 (Android 15) and D1 (Android 9 / API 28).
 The set first failed to *assemble* on the merged tree; the `sshd-osgi` duplicate-class fix is in
-[Device-only defects found and fixed](#device-only-defects-found-and-fixed). SSH clone and push
-(T12/T13) remain unexercised on a device, and D1 has not run at all. Decision record:
-`docs/decisions/README.md` D-016.
+[Device-only defects found and fixed](#device-only-defects-found-and-fixed). The D1 run is the API 28
+compatibility measurement the decision was waiting for, so D-016's pinned version is now settled for
+5.13.3. Decision record: `docs/decisions/README.md` D-016.
 
 ## Architecture
 
@@ -178,46 +180,52 @@ defects found on the device.
 
 ## Device verification (T10–T14)
 
-Only D2 was available for this session; **D1 was not**, so every D1 cell stays pending. D2 ran a debug
-APK built from the merged tree (versionCode 2, targetSdk 28) against a scratch workspace. Run each row
+Both phones ran a debug APK built from the merged tree (versionCode 2, targetSdk 28) against a scratch
+workspace. D2 ran on 2026-11-15; **D1 ran on 2026-11-21**, which closes the API 28 gap. Run each row
 on each device; never infer one device's result from the other. Steps are in
 [`docs/test-matrix.md`](../test-matrix.md#phase-0d--git--ssh-tasks-1923).
 
-The raw run is
-[`20261115-211717-phaseF-D2-e76846f.txt`](../device-reports/20261115-211717-phaseF-D2-e76846f.txt):
-one logcat buffer covering T11, T10, T12, T12B, T13, T14 and T21 with seven PASS lines and no FAIL,
-followed by `scripts/ssh-key-logcat.sh` exiting 0. The rows added afterwards — passphrase import and
-pull — are in
-[`20261115-222841-phaseF-D2-e76846f-round2.txt`](../device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt).
+The D2 raw runs are
+[`20261115-211717-phaseF-D2-e76846f.txt`](../device-reports/20261115-211717-phaseF-D2-e76846f.txt)
+and [`20261115-222841-phaseF-D2-e76846f-round2.txt`](../device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt).
+The D1 run is
+[`20261121-131954-phaseF-D1-11f98015.txt`](../device-reports/20261121-131954-phaseF-D1-11f98015.txt):
+one 16 MB logcat buffer covering T10, T11, T12, T12B, T13, T13P, T11B, T14 and T21 with nine PASS
+lines and no FAIL, plus the changed-host-key rotation and `scripts/ssh-key-logcat.sh` exiting 0.
 T11 mints a fresh key each run, so its public key must be added to the test server's
 `authorized_keys` before T12/T13.
 
-| Test | D1 (Android 9, API 28) | D2 (Android 15) | Evidence |
+D1 reached the test server through `adb reverse tcp:2222` as `127.0.0.1:2222` because the host
+(`192.168.34.247`) and D1 (`192.168.29.26`) were on different subnets; D1 has no VPN and its app UID
+can use the reverse-loopback socket. D2 used the host's LAN address.
+
+| Test | D1 (Android 9, API 28) | D2 (Android 15) | D2 evidence |
 |---|---|---|---|
-| T10 JGit HTTPS clone of a public repo | **Pending** — D1 unavailable this session | **PASS** | `https://github.com/octocat/Hello-World.git` cloned in 3181 ms with 7 `git.progress` events and the reply sent on finish; branch `master`, head `7fd1a60`, working tree `.git,README` |
-| T11 Ed25519 keygen | **Pending** — D1 unavailable this session | **PASS** | id `115dc0c8-3eba-4326-b98d-6447d4be7dd4`, `type=ed25519`, fingerprint `SHA256:DfJYcVRxlSyI4b1liTdws+EKLTztCn1GFwac0kgOWNc`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF+/yexV1AMqZ0Ox2W17Z4VZG+PsDiWACpPNuGPPJ/Lr leocode-harness`, identical to `ssh-keygen -lf` on that public key; private key stored as an 82-byte ciphertext blob |
-| T12 SSH clone | **Pending** — D1 unavailable this session | **PASS** | unknown host prompted once with `host=192.168.58.247`, `type=ssh-ed25519`, fingerprint `SHA256:fZbSQBKUY6xnK9glFydpKKFoAeFkEUJhC7R2G8iYd9o` — identical to `ssh-keygen -lf` on the server host key; `remember: true` wrote one valid line `[192.168.58.247]:2222 ssh-ed25519 …`; clone completed (`branch=main`, head `1e5c57d`, 5 files). A second clone with the pin in place prompted **zero** times and succeeded, so the stored key is found again |
-| T13 push to a test repo | **Pending** — D1 unavailable this session | **PASS** | commit `775ed7d` pushed over SSH (`branch=master`, message "Pushed to origin") after 12 `git.progress` events ending at "Writing objects"; verified independently with `git log` in the remote bare repository, which shows `775ed7d harness: T13 push from device`. Emphasis on the HTTPS-token variant and on asserting the token is absent from replies/logs was not run |
-| T14 Keystore envelope round-trip | **Pending** — D1 unavailable this session | **PASS** | token round-trip matched; blob is `LCS1` ciphertext, 57 bytes, `plaintextOnDisk=false`; survives force-stop + relaunch; log `LeoCodeSecrets: strongBox=false` (device reports no StrongBox) |
-| No key material in logcat | **Pending** — D1 unavailable this session | **PASS** | `scripts/ssh-key-logcat.sh 192.168.29.214:41293` printed "clean: no private-key markers in logcat" and exited 0 after the T10–T14 runs |
+| T10 JGit HTTPS clone of a public repo | **PASS** — `https://github.com/octocat/Hello-World.git`, 4515 ms, 7 `git.progress` events, reply on finish; branch `master`, head `7fd1a60`, tree `.git,README` | **PASS** | 3181 ms with 7 `git.progress` events and the reply sent on finish; branch `master`, head `7fd1a60`, working tree `.git,README` |
+| T11 Ed25519 keygen | **PASS** — id `91e826f9-3d78-4056-8b52-d1be73ad0e4b`, `type=ed25519`, fingerprint `SHA256:Z19SOjjoc7W8yMAIUSMTFY7ak6OtNrXclpKfCeRbysM`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJuxz/bdyPLIQBZj2cGxUDk22vDLKF3+Dxw7vRGNVgZc leocode-harness` matching `ssh-keygen -lf`; RSA fingerprint `SHA256:KDvWVDmjpyD04jJnqBjFSBxGyafvBL/8cpb/GJ0htMY`; private key an 82-byte ciphertext blob | **PASS** | id `115dc0c8-3eba-4326-b98d-6447d4be7dd4`, `type=ed25519`, fingerprint `SHA256:DfJYcVRxlSyI4b1liTdws+EKLTztCn1GFwac0kgOWNc`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF+/yexV1AMqZ0Ox2W17Z4VZG+PsDiWACpPNuGPPJ/Lr leocode-harness`, identical to `ssh-keygen -lf` on that public key; private key stored as an 82-byte ciphertext blob |
+| T12 SSH clone | **PASS** — unknown host prompted once (`host=127.0.0.1`, `ssh-ed25519`, fingerprint `SHA256:EMcf7dnfZ/cYIa7iG4b6dkHIwt6esb4e8tE+DAFULH4` matching the server); `remember: true` wrote the valid line `[127.0.0.1]:2222 ssh-ed25519 …`; clone completed (`main`, head `004e795`, 7 files) | **PASS** | unknown host prompted once with `host=192.168.58.247`, `type=ssh-ed25519`, fingerprint `SHA256:fZbSQBKUY6xnK9glFydpKKFoAeFkEUJhC7R2G8iYd9o` — identical to `ssh-keygen -lf` on the server host key; `remember: true` wrote one valid line `[192.168.58.247]:2222 ssh-ed25519 …`; clone completed (`branch=main`, head `1e5c57d`, 5 files). A second clone with the pin in place prompted **zero** times and succeeded, so the stored key is found again |
+| T13 push to a test repo | **PASS** — commit `c361695` pushed over SSH (`branch=main`, message "Pushed to origin") after 25 `git.progress` events ending at "Writing objects"; `git log` in the remote bare repository shows `c361695 harness: T13 push from device` | **PASS** | commit `775ed7d` pushed over SSH (`branch=master`, message "Pushed to origin") after 12 `git.progress` events ending at "Writing objects"; verified independently with `git log` in the remote bare repository, which shows `775ed7d harness: T13 push from device`. Emphasis on the HTTPS-token variant and on asserting the token is absent from replies/logs was not run |
+| T14 Keystore envelope round-trip | **PASS** — round-trip matched; blob `LCS1` ciphertext, 58 bytes, `plaintextOnDisk=false`; a second T14 after force-stop + relaunch also passed; log `LeoCodeSecrets: strongBox=false` (no StrongBox) | **PASS** | token round-trip matched; blob is `LCS1` ciphertext, 57 bytes, `plaintextOnDisk=false`; survives force-stop + relaunch; log `LeoCodeSecrets: strongBox=false` (device reports no StrongBox) |
+| No key material in logcat | **PASS** — `scripts/ssh-key-logcat.sh 11f98015` printed "clean: no private-key markers in logcat" and exited 0 after the T10–T14 runs | **PASS** | `scripts/ssh-key-logcat.sh 192.168.29.214:41293` printed "clean: no private-key markers in logcat" and exited 0 after the T10–T14 runs |
 
-Additional rows to fill after the main five: RSA keygen, passphrase-protected import, changed host
-key rejected, conflict detected/resolved, and pull/push over both HTTPS and SSH.
+Additional rows measured on both devices: RSA keygen, passphrase-protected import, changed host key
+rejected, conflict detected/resolved, and pull/push over SSH.
 
-| Extra row | D2 result |
-|---|---|
-| RSA keygen | **PASS** — `SHA256:RpJ6TZbbLRuwl4l8hrbs0hRHSEyUsx6Ge7sePeQk/7E`, generated in the same run as T11 |
-| Local Git: init/status/add/commit/diff/log/branch | **PASS** — `init` created `main`; `a.txt` reported untracked then `added:a.txt` after `add`; commit `266ec63`; `diff` returned 8 lines (`binary=false`); `log` = `[main change, second, first]`; branches `[feature, main*]` |
-| Conflict detected and resolved | **PASS** — merging `feature` into `main` left one conflict on `a.txt`; `git.conflict` returned standard markers with both `ours` and `theirs` parsed; `git.resolve` with the `ours` strategy cleared the conflict list and the file ended as `one/two/main` |
-| Pinned host reconnects without a prompt | **PASS** — second clone with the pin in place reported `promptEvents=0` and succeeded |
-| Changed host key rejected | **PASS** — after rotating the server host key the clone failed with `E_HOSTKEY_CHANGED` ("The host key changed; forget the host before trusting the new key") and emitted **no** prompt, which is the required fail-closed behaviour; restoring the original key restored the clone |
-| Passphrase-protected key import | **PASS** — imports a passphrase-protected PEM key (`hasPassphrase=true`), unlocks with the correct passphrase, and rejects both a wrong passphrase and no passphrase |
-| Pull over SSH | **PASS** — two working copies cloned from one remote; the second pushed a commit, the first pulled and fast-forwarded from `30b287f` to `c93cbd1` with the new file present and identical |
+| Extra row | D1 result | D2 result |
+|---|---|---|
+| RSA keygen | **PASS** — `SHA256:KDvWVDmjpyD04jJnqBjFSBxGyafvBL/8cpb/GJ0htMY`, generated in the same run as T11 | **PASS** — `SHA256:RpJ6TZbbLRuwl4l8hrbs0hRHSEyUsx6Ge7sePeQk/7E`, generated in the same run as T11 |
+| Local Git: init/status/add/commit/diff/log/branch | **PASS** — `init` created `main`; `a.txt` untracked then `added:a.txt`; commit `614da1f`; `diff` 8 lines (`binary=false`); `log` = `[main change, second, first]`; branches `[feature, main*]` | **PASS** — `init` created `main`; `a.txt` reported untracked then `added:a.txt` after `add`; commit `266ec63`; `diff` returned 8 lines (`binary=false`); `log` = `[main change, second, first]`; branches `[feature, main*]` |
+| Conflict detected and resolved | **PASS** — one conflict on `a.txt`; markers plus `ours`/`theirs` parsed; `resolve` with `ours` cleared it; final content `one/two/main` | **PASS** — merging `feature` into `main` left one conflict on `a.txt`; `git.conflict` returned standard markers with both `ours` and `theirs` parsed; `git.resolve` with the `ours` strategy cleared the conflict list and the file ended as `one/two/main` |
+| Pinned host reconnects without a prompt | **PASS** — second clone with the pin in place reported `promptEvents=0` and succeeded | **PASS** — second clone with the pin in place reported `promptEvents=0` and succeeded |
+| Changed host key rejected | **PASS** — after rotating the server key from `SHA256:EMcf…` to `SHA256:BH2/…`, T12B failed in 1.7 s with `E_HOSTKEY_CHANGED` ("The host key changed; forget the host before trusting the new key") and **no** prompt; raw D12 reported `Server key did not validate`; restoring the original key made T12B pass again | **PASS** — after rotating the server host key the clone failed with `E_HOSTKEY_CHANGED` ("The host key changed; forget the host before trusting the new key") and emitted **no** prompt, which is the required fail-closed behaviour; restoring the original key restored the clone |
+| Passphrase-protected key import | **PASS** — imported `b0b6895c-6491-4eec-9c3c-9670c5723c47` (`hasPassphrase=true`), unlocked with the correct passphrase, rejected a wrong passphrase and a missing one | **PASS** — imports a passphrase-protected PEM key (`hasPassphrase=true`), unlocks with the correct passphrase, and rejects both a wrong passphrase and no passphrase |
+| Pull over SSH | **PASS** — two working copies cloned from one remote; the second pushed, the first pulled and fast-forwarded from `004e795` to `45e8827` with the new file present and identical | **PASS** — two working copies cloned from one remote; the second pushed a commit, the first pulled and fast-forwarded from `30b287f` to `c93cbd1` with the new file present and identical |
 
-**T12/T13 status.** Both now pass on D2 against a local SSH server (`/tmp/pf-ssh`, paramiko,
-reached over the host's LAN address because the app UID could not use `adb reverse` loopback). Three
-defects had to be fixed first — `user.home`, the prompt sink and the `known_hosts` host key — all of
-which are recorded in [Device-only defects found and fixed](#device-only-defects-found-and-fixed).
+**T12/T13 status.** Both pass on both devices against a local SSH server (paramiko, committed as
+`scripts/test-ssh-git-server.py`). D2 reached it over the host's LAN address because its VPN blocked
+app-UID loopback; D1 reached it through `adb reverse` because it was on another subnet. Three defects
+had to be fixed first — `user.home`, the prompt sink and the `known_hosts` host key — all of which are
+recorded in [Device-only defects found and fixed](#device-only-defects-found-and-fixed).
 The SSH clone, push and pull rows are the only ones measured against a controlled server rather
 than a public host.
 
@@ -225,10 +233,11 @@ than a public host.
 active, **all** app-UID sockets failed — DNS (`UnknownHostException` for every name), loopback through
 `adb reverse`, and LAN — while the `adb shell` UID was exempt. T10 only passes with that VPN off. This
 is a property of the device environment, not a LeoCode defect, and any network row measured with the
-VPN on is meaningless.
+VPN on is meaningless. D1 had no VPN, so its T10 and reverse-loopback rows were unaffected.
 
-**D-016 note.** D1 is the compatibility gate: a 5.13.3 failure on API 28 reopens D-016. D2 exercises
-Android 15 but cannot prove the API 28 behaviour, and D1 has not run.
+**D-016 note.** D1 was the compatibility gate, and it now passes T10–T14 with JGit
+5.13.3.202401111512-r on API 28. The pinned version is settled; a future major bump still needs a
+fresh D1 run. D2 exercises Android 15. Android 10–14 remain unverified by decision D-014.
 
 ## Device-only defects found and fixed
 
@@ -300,11 +309,11 @@ a dependency-resolution fault, not a device-only defect, so it is recorded separ
 - **Fix.** `LeoSshSessionFactory.normalizeHost()` strips the brackets and trailing port at the factory
   boundary, keeping an IPv6 literal intact. Six unit tests cover the shapes JGit can pass.
 
-**D-016 relevance.** Defects 1 and 5 are why D-016 cannot be settled from JVM tests: the JVM suites run
-with a full Bouncy Castle and hand the factory a bare host, so MINA digest resolution and the
+**D-016 relevance.** Defects 1 and 5 are why D-016 could not be settled from JVM tests: the JVM suites
+run with a full Bouncy Castle and hand the factory a bare host, so MINA digest resolution and the
 `[host]:port` key shape only break on a device — and the failure mode depends on the API level, since
-the Android 12 provider stub is why defect 1 surfaced at all. JGit/SSHD digest resolution must
-therefore be proven on a device, and D1 — the API 28 gate — still has not run.
+the Android 12 provider stub is why defect 1 surfaced at all. JGit/SSHD digest resolution is therefore
+a device measurement, and D1 (API 28) now passes T10–T14, so D-016 is settled for the pinned version.
 
 ## Security notes
 
@@ -324,12 +333,15 @@ therefore be proven on a device, and D1 — the API 28 gate — still has not ru
 
 ## Known gaps
 
-- **Device coverage is D2 only.** T10–T14, the local Git rows, conflict resolution, pinned-host reuse,
-  the changed-key rejection, passphrase-protected import, pull and the logcat key-material check all
-  pass on D2. D1 has not run at all, so nothing here proves API 28, and the D-016 compatibility gate is
-  still open. The HTTPS-token push is deliberately not a device row: it needs a token-authenticated
-  remote, and its security claim is asserted in `PhaseFHandlerTest` instead. PASS values are single-run
-  measurements on one device.
+- **Device coverage is both supported phones.** T10–T14, the local Git rows, conflict resolution,
+  pinned-host reuse, the changed-key rejection, passphrase-protected import, pull and the logcat
+  key-material check pass on D1 (Android 9 / API 28) and D2 (Android 15). That closes the D-016
+  compatibility gate. The HTTPS-token push is deliberately not a device row: it needs a
+  token-authenticated remote, and its security claim is asserted in `PhaseFHandlerTest` instead. PASS
+  values are single-run measurements on each device, not a soak.
+- **D1 used a reverse-loopback SSH target.** The host and D1 were on different subnets, so the D1 run
+  reached the test server through `adb reverse tcp:2222` as `127.0.0.1:2222`; the transport and
+  host-key paths are the same, but the LAN path itself was exercised only on D2.
 - **Network rows need the screen on, and the VPN off.** With the third-party VPN active no app-UID
   socket works; with the display asleep, app-UID sockets also fail while the `adb shell` UID is
   exempt. Both conditions produced false "cannot reach the remote" results before they were
@@ -343,8 +355,8 @@ therefore be proven on a device, and D1 — the API 28 gate — still has not ru
   with a plain message rather than corrupt a repository.
 - **GitHub OAuth device flow is not implemented.** HTTPS remotes use a token or an existing
   credential; no browser login.
-- **Phase E/root status is unchanged.** D2 remains unrooted and Phase E remains deferred; Git/SSH
-  work does not depend on root.
+- **Phase E/root status is unchanged.** Both phones remain unrooted and Phase E remains deferred;
+  Git/SSH work does not depend on root.
 - **Android 10–14 remain unverified** (D-014); no hardware exists for them.
 - **SSH host-key UI is WebView-driven.** If the WebView is detached, the prompt cannot be answered
   and the operation ends at the 120 s timeout; the bridge-disconnect rules still apply.
@@ -361,15 +373,19 @@ Done:
 - Fill the D2 device rows: T10–T14, local Git operations, conflict resolution, pinned-host reuse,
   changed-key rejection, and the logcat key-material check, with evidence in both the device table and
   `docs/test-matrix.md`.
+- Fill the D1 device rows (2026-11-21): T10–T14, RSA keygen, passphrase-protected import, local Git
+  operations, conflict resolution, pinned-host reuse, changed-key rejection, pull, and the logcat
+  key-material check. Evidence:
+  [`20261121-131954-phaseF-D1-11f98015.txt`](../device-reports/20261121-131954-phaseF-D1-11f98015.txt).
+  This closes D-016's API 28 half.
 
 Still open:
 
-- **Run T10–T14 on D1.** Every D1 cell is pending; a 5.13.3 failure there reopens D-016 — record the
-  failing API and stack before changing versions.
-- **Finish the unrun D2 rows:** passphrase-protected key import, `pull`, and push/pull over an HTTPS
-  token including the assertion that the token never appears in a reply or a log.
-- **Record the test server setup** if T12/T13 are to be repeated: they ran against a local paramiko
-  SSH server on the host's LAN address, not a public host. That server is committed as
+- **Repeat runs / soak.** Every device result is one run per phone. A second consecutive full pass and
+  the 4 h soak belong to Task 29 (Phase H), not this phase.
+- **HTTPS-token push on a device.** Deliberately covered by `PhaseFHandlerTest` instead, because the
+  claim is about replies rather than transport; a live token-authenticated remote remains unexercised.
+- **Record the test server setup** if T12/T13 are to be repeated: the server is committed as
   [`scripts/test-ssh-git-server.py`](../../scripts/test-ssh-git-server.py) with setup steps in its
   header; the device's VPN must be off for any network row.
 - Record any deviation from the contract in `docs/bridge-contract.md` first, then in this report.

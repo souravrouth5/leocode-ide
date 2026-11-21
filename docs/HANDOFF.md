@@ -1,17 +1,19 @@
-# Handoff — LeoCode state at the end of the Phase F session (2026-11-15)
+# Handoff — LeoCode state after the Phase F D1 pass (updated 2026-11-21)
 
 Written for whoever picks this up next. It records what is done, what is open, how to reproduce
-the verification, and the traps that cost time this session. The task tracker (`PROGRESS.md`) and
+the verification, and the traps that cost time. The task tracker (`PROGRESS.md`) and
 [`reports/phase-f-verification.md`](reports/phase-f-verification.md) remain the source of truth;
-this file is the orientation layer.
+this file is the orientation layer. **Phase F is complete on both phones: Tasks 19–23 are closed,
+D-016 is settled, and Phase G (Python) is next.**
 
 ## Where the work is
 
 | Item | State |
 |---|---|
 | Branch | `v9-impl`, in `/home/sourav/Desktop/Apps/leocode` (the main worktree) |
-| Commits this session | `993d4ad`, `69de290`, `560a4aa`, `2c4a2ac`, `fb675a4`, `7449d6b`, `cad1450`, `05dae96`, `9469b5c` |
-| Remote | `origin/v9-impl` matches local `HEAD`; nothing outstanding to push |
+| Phase F | **Complete on both phones.** Tasks 19–23 are `[x]`; D1 (API 28) and D2 (Android 15) pass T10–T14 plus the extra Git/SSH rows. D-016 is settled. |
+| Commits this session | 2026-11-15: `993d4ad`, `69de290`, `560a4aa`, `2c4a2ac`, `fb675a4`, `7449d6b`, `cad1450`, `05dae96`, `9469b5c`; 2026-11-21: the D1-pass docs commit |
+| Remote | local `HEAD` is one docs commit ahead of `origin/v9-impl` (not pushed) |
 | Worktrees | `phase-f-core`, `phase-f-web`, `phase-f-docs` are **merged**; they still exist on disk and can be cleaned up |
 | Working tree | Clean |
 | Gates | Android 357 unit tests, `lintDebug`, `assembleDebug`; web 277 tests in 40 files, typecheck, lint, build |
@@ -19,7 +21,9 @@ this file is the orientation layer.
 ## What was actually done
 
 Phase F (Tasks 19–23: Git, SSH, secrets) was merged before this session but had never built. The
-work here was: make it build, then run it on a device, then fix what the device exposed.
+work here was: make it build, then run it on a device, then fix what the device exposed. The
+2026-11-21 D1 pass added no product code — it ran the same debug harness on the API 28 phone, recorded
+the evidence, and closed Tasks 19–23 and D-016.
 
 ### 1. The merged tree did not build (`993d4ad`)
 
@@ -56,10 +60,17 @@ Raw evidence:
 - [`device-reports/20261115-211717-phaseF-D2-e76846f.txt`](device-reports/20261115-211717-phaseF-D2-e76846f.txt)
 - [`device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt`](device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt)
 
-**D1 (Redmi Note 7S, Android 9 / API 28) — NEVER RAN.** This is the important gap. D1 is the
-compatibility gate for D-016, and it is the only API 28 hardware. Until T10–T14 run there, "JGit
-5.13.3 works on our oldest supported device" is an assumption, not a measurement. Every D1 cell in
-`test-matrix.md` is marked pending and must stay that way until someone actually runs it.
+**D1 (Redmi Note 7S, Android 9 / API 28) — PASS (2026-11-21).** D1 is the compatibility gate for
+D-016, and it is the only API 28 hardware. The current debug APK ran T10–T14 plus RSA keygen,
+passphrase-protected import, local Git/conflict, pinned-host reuse, changed-key rejection, pull and
+the logcat key-material check. All pass, so "JGit 5.13.3 works on our oldest supported device" is now
+a measurement. Raw evidence:
+- [`device-reports/20261121-131954-phaseF-D1-11f98015.txt`](device-reports/20261121-131954-phaseF-D1-11f98015.txt)
+
+D1 reached the SSH server through `adb reverse tcp:2222` as `127.0.0.1:2222` (host and phone were on
+different subnets). It has no VPN, so app-UID networking and the reverse-loopback socket both worked.
+The logcat main buffer on D1 is only 256 KB, so raise it (`adb logcat -G 16M`) before a long run or
+the early rows rotate out.
 
 **Not a device row, by decision:** the HTTPS-token push. It needs a token-authenticated remote,
 and its actual claim — that a token is stored but never returned — is a property of the replies,
@@ -70,7 +81,9 @@ field and confirming it failed.
 ## Reproducing a device run
 
 Prerequisites: a debug APK from `v9-impl`, a scratch workspace, the device **unlocked and awake**,
-and its **VPN off** (see traps). Never run destructive steps against a real project.
+and its **VPN off** (see traps). Never run destructive steps against a real project. If the host and
+phone are on different subnets, run `adb reverse tcp:2222 tcp:2222` on that device and pass
+`--es sshHost 127.0.0.1 --es sshPort 2222`; D1 was verified that way on 2026-11-21.
 
 The Phase F rows are driven by a debug-only harness because the WebView is a canvas with a single
 accessibility node and debug builds expose no DevTools socket — the tests therefore call the same
@@ -116,6 +129,11 @@ to the server's `authorized_keys` before running `T12`/`T13*`. Cross-check with 
 5. **Do not trust an error message from `GitEngine` alone.** `BridgeException` messages are
    deliberately generic ("The Git operation failed"). Use the `D10`/`D12`/`D13T` diagnostics, which
    run raw JGit and print the real exception chain.
+6. **A host and phone on different subnets cannot reach each other over the LAN.** The 2026-11-21
+   run had the host on `192.168.34.247` and D1 on `192.168.29.26`. Use
+   `adb reverse tcp:2222 tcp:2222` on that device and point the harness at `127.0.0.1:2222`.
+7. **D1's main logcat buffer is only 256 KB**, so a multi-row run rotates the early rows out.
+   Run `adb logcat -G 16M` first and capture one buffer for the whole sequence.
 
 ## Security issue to fix
 
@@ -131,18 +149,16 @@ decision for the owner.
 For the full list of what remains before a release, with each gate's measured status, see
 [`RELEASE-READINESS.md`](RELEASE-READINESS.md).
 
-1. **Run T10–T14 on D1.** This is the only thing blocking Tasks 21–23 from closing and D-016 from
-   being settled. If 5.13.3 fails there, reopen D-016 and record the failing API and stack *before*
-   changing versions.
-2. Close **Tasks 19 and 20** in `PROGRESS.md` if agreeable — nothing about them depends on D1
-   (D-016's decision is recorded, and the SecretStore round-trip is proven on D2).
-3. Clean up the merged worktrees (`phase-f-core`, `phase-f-web`, `phase-f-docs`).
-4. Then Phase G (Python, D-017) — per the tracker, Python is the primary language and was moved
-   ahead of Phases D–F, so it is the next substantial body of work.
+1. **Start Phase G (Python, D-017).** Tasks 19–23 are closed and D-016 is settled. Task 24 (CI
+   artifact) and Task 25 (safe installer) are the first pieces; nothing else in Phase G can be
+   tested until a runtime installs and launches on a device.
+2. **Clean up the merged worktrees** (`phase-f-core`, `phase-f-web`, `phase-f-docs`) when convenient.
+3. **Repeat runs and soak** belong to Phase H Task 29. Every Phase F PASS is one run per phone, not a
+   soak, and the HTTPS-token push remains a unit-test row rather than a device measurement.
 
 ## Honest caveats
 
-- Every D2 PASS is a **single-run measurement on one device**. Nothing here is a soak test.
+- Every PASS is a **single-run measurement per device** (D1 and D2). Nothing here is a soak test.
 - The SSH clone/push/pull rows ran against a **local test server**, not a public host. That
   exercises the same JGit transport path, but not GitHub's real server behaviour or TLS.
 - `pull` was verified on a fast-forward. A conflicting pull returning `E_CONFLICT` was not

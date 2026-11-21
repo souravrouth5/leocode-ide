@@ -3,9 +3,9 @@
 An Android coding IDE: file explorer, CodeMirror editor, terminal, Git/SSH, and
 on-demand language runtimes — running entirely on the phone, rooted or unrooted.
 
-> **Status: plan v9, Phase A complete (production restructure).** The IDE shell runs on Android 9
-> (D1) and Android 15 (D2). D2 is measured but currently **unrooted** (no `su`): root mode
-> (Phase E) waits for a root manager. Not production-grade yet: see the audit in plan v9 §3.
+> **Status: plan v9, Phases A–F complete; Phase G (Python) next.** The IDE shell runs on Android 9
+> (D1) and Android 15 (D2); both phones pass the Phase F Git/SSH rows. Both are currently **unrooted**
+> (no `su`), so root mode (Phase E) waits for a root manager. Not production-grade yet.
 > Live task list: [`PROGRESS.md`](PROGRESS.md) · Plan: [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md)
 > · Picking this up? Start with [`docs/HANDOFF.md`](docs/HANDOFF.md)
 > · How far from release: [`docs/RELEASE-READINESS.md`](docs/RELEASE-READINESS.md).

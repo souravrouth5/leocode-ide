@@ -6,7 +6,8 @@ auditable instead of a feeling. Update this file when a gate changes state.
 
 **Summary: the product is not release-ready, and the blocking work is concentrated in one
 place — the runtime/Python layer has never run on a device in its final form, and no release
-engineering exists yet.**
+engineering exists yet.** The Phase F API 28 gap closed on 2026-11-21: D1 passes T10–T14 and the
+extra Git/SSH rows, settling D-016.
 
 ## 1. Gate status at a glance
 
@@ -22,7 +23,7 @@ engineering exists yet.**
 | 8 | CI runs green on GitHub | **NOT VERIFIED** | Workflow exists; public API returns 404 for this repo, so no run could be confirmed |
 | 9 | Instrumented (on-device) tests | **ABSENT** | `android/app/src/androidTest` does not exist |
 | 10 | Device matrix: D2 (Android 15) | **PARTIAL** | Phases B–F verified; Phase G (Python) never run |
-| 11 | Device matrix: D1 (Android 9 / API 28) | **NOT RUN** | No D1 run in this session, including all of Phase F |
+| 11 | Device matrix: D1 (Android 9 / API 28) | **PARTIAL** | Phases B–F verified; Phase F T10–T14 plus the extra Git/SSH rows passed on 2026-11-21 (D-016 settled); Phase G never run |
 | 12 | Device matrix: Android 10–14 | **NO HARDWARE** | D-014 accepts the gap; it cannot be closed by effort alone |
 | 13 | Runtime/Python works on a device | **NOT STARTED** (final form) | Prototype rejected, P-01…P-10; Tasks 24–26, 30–33 open |
 | 14 | Release signing | **NOT DONE** | `signingConfig = signingConfigs.getByName("debug")` |
@@ -73,7 +74,8 @@ This is the most under-appreciated gap, and this session is the evidence for it:
 - Phase F was recorded as "merged" and looked complete. Built for the first time, it **did not
   compile**. Run for the first time, it produced **five defects**, three of them total
   showstoppers (keygen dead, no secret storable, every SSH connection failing).
-- Every device result anywhere in this repo is a **single run on one device**. No repeats, no soak.
+- Every device result anywhere in this repo is a **single run per device** (Phase F now has a run on
+  both D1 and D2). There are no repeats and no soak.
 - There are **zero instrumented tests**. All Android testing is JVM-level with fakes, which is
   exactly the layer that cannot catch the class of bug above — every one of the five Phase F
   defects was invisible to JVM tests by construction.
@@ -86,8 +88,9 @@ increase the chance of *finding* problems before they ship.
 
 1. **Confirm CI runs green on GitHub** (gate 8). Until then nothing else is protected by automation.
    Also settle whether the repo is private — the public API 404 suggests it may be.
-2. **Run the existing suite on D1** (gate 11). This is the API 28 compatibility gate for D-016 and
-   for Phases B–F. Cheap, and it is the only way to know how much is hiding on older devices.
+2. **Run the existing suite on D1** (gate 11). **Done for Phases B–F on 2026-11-21** — T10–T14 plus
+   the extra Git/SSH rows pass, so D-016 is settled. The remaining D1 work is the Phase G runtime
+   suite, which has not been built yet.
 3. **Run the D2 suite twice consecutively** (gate 20, minimum). Establishes whether results are
    reproducible or the suite is flaky. This is the cheapest possible soak.
 4. **Add instrumented tests for the device-only surfaces** (gate 9). The five Phase F defects show

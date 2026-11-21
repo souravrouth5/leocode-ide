@@ -112,30 +112,32 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 
 ## Phase 0D — Git / SSH (Tasks 19–23)
 
-> **D2 measured, D1 pending.** The Phase F worktrees merged on `v9-impl`, the Android and web gates are
-> green, and a debug APK (versionCode 2, targetSdk 28) was run on D2 against a scratch workspace:
-> T10, T11 and T14 pass. T12 and T13 are **pending** — the app UID could not complete a connection to
-> the local SSH test server. D1 was unavailable for the session, so every D1 cell reads
-> **pending (D1 unavailable)**. Fill one cell per device only after that device ran the check.
+> **D1 and D2 measured.** The Phase F worktrees merged on `v9-impl`, the Android and web gates are
+> green, and a debug APK (versionCode 2, targetSdk 28) ran on D2 (2026-11-15) and D1 (2026-11-21)
+> against scratch workspaces. Every Phase F row passes on both phones; the D1 run closes D-016's API 28
+> half. Evidence: [`20261115-211717-phaseF-D2-e76846f.txt`](device-reports/20261115-211717-phaseF-D2-e76846f.txt),
+> [`20261115-222841-phaseF-D2-e76846f-round2.txt`](device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt)
+> and [`20261121-131954-phaseF-D1-11f98015.txt`](device-reports/20261121-131954-phaseF-D1-11f98015.txt).
+> Fill one cell per device only after that device ran the check.
 
 | Test | D1 | D2 |
 |---|---|---|
-| T10 JGit HTTPS clone (public repo) | pending (D1 unavailable) | **PASS** — `https://github.com/octocat/Hello-World.git`, 3181 ms, 7 `git.progress` events, reply on finish, branch `master` head `7fd1a60`, tree `.git,README` |
-| T11 Ed25519 keygen (MINA + BC) | pending (D1 unavailable) | **PASS** — `id=115dc0c8-3eba-4326-b98d-6447d4be7dd4`, fingerprint `SHA256:DfJYcVRxlSyI4b1liTdws+EKLTztCn1GFwac0kgOWNc` matching `ssh-keygen -lf`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF+/yexV1AMqZ0Ox2W17Z4VZG+PsDiWACpPNuGPPJ/Lr leocode-harness`; private key stored as an 82-byte ciphertext blob |
-| T12 SSH clone | pending (D1 unavailable) | **PASS** — unknown host prompted once with `host=192.168.58.247`, `ssh-ed25519`, fingerprint `SHA256:fZbSQBKUY6xnK9glFydpKKFoAeFkEUJhC7R2G8iYd9o` matching the server's `ssh-keygen -lf`; `remember: true` wrote the valid line `[192.168.58.247]:2222 ssh-ed25519 …`; clone completed (`main`, head `1e5c57d`, 5 files) |
-| T13 push to test repo | pending (D1 unavailable) | **PASS** (SSH) — commit pushed, 12 `git.progress` events; verified with `git log` in the remote bare repo. HTTPS-token variant not run on a device (see the row below) |
-| T14 Keystore envelope round-trip (StrongBox: yes/no) | pending (D1 unavailable) | **PASS** — token round-trip matched; `LCS1` ciphertext blob, 57 bytes; `plaintextOnDisk=false`; survives force-stop + relaunch; log `LeoCodeSecrets: strongBox=false` (no StrongBox) |
-| JGit version used (D-016) | pending (D1 unavailable) | 5.13.3.202401111512-r |
-| status / add / commit | | **PASS** — untracked → `added:a.txt` → commit `266ec63` |
-| diff / log / branch | | **PASS** — 8-line diff, `log` newest-first, branches `[feature, main*]` |
-| pull / push over SSH | | **PASS** (both) — push see T13; pull fast-forwarded one working copy to a commit pushed by another (`30b287f` → `c93cbd1`) and the new file arrived intact |
-| pull / push over HTTPS token | | not run on a device (needs a token-authenticated remote). The security claim is covered in CI instead: `PhaseFHandlerTest.remote token is stored but only flagged in replies` asserts a token set through `git.remote.set` is stored, never returned by `git.remote.list`, and reported only as `hasToken` |
-| conflict detected + resolved | | **PASS** — conflict on `a.txt` with markers, `ours`/`theirs` parsed; `resolve` with `ours` cleared it |
-| RSA keygen | pending (D1 unavailable) | **PASS** — generated in the same run as T11, fingerprint `SHA256:RpJ6TZbbLRuwl4l8hrbs0hRHSEyUsx6Ge7sePeQk/7E` |
-| passphrase-protected key import | | **PASS** — imports a passphrase-protected PEM key, unlocks with the correct passphrase, and rejects both a wrong passphrase and no passphrase |
-| host-key prompt + fingerprint | pending (D1 unavailable) | **PASS** — see T12; a second clone with the pin in place prompted zero times |
-| changed host key rejected | pending (D1 unavailable) | **PASS** — after rotating the server host key the clone failed `E_HOSTKEY_CHANGED` with no prompt; restoring the key restored the clone |
-| no key material in logcat | pending (D1 unavailable) | **PASS** — `scripts/ssh-key-logcat.sh` exited 0, "clean: no private-key markers" |
+| T10 JGit HTTPS clone (public repo) | **PASS** — `https://github.com/octocat/Hello-World.git`, 4515 ms, 7 `git.progress` events, reply on finish, branch `master` head `7fd1a60`, tree `.git,README` | **PASS** — `https://github.com/octocat/Hello-World.git`, 3181 ms, 7 `git.progress` events, reply on finish, branch `master` head `7fd1a60`, tree `.git,README` |
+| T11 Ed25519 keygen (MINA + BC) | **PASS** — `id=91e826f9-3d78-4056-8b52-d1be73ad0e4b`, fingerprint `SHA256:Z19SOjjoc7W8yMAIUSMTFY7ak6OtNrXclpKfCeRbysM` matching `ssh-keygen -lf`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJuxz/bdyPLIQBZj2cGxUDk22vDLKF3+Dxw7vRGNVgZc leocode-harness`; private key stored as an 82-byte ciphertext blob | **PASS** — `id=115dc0c8-3eba-4326-b98d-6447d4be7dd4`, fingerprint `SHA256:DfJYcVRxlSyI4b1liTdws+EKLTztCn1GFwac0kgOWNc` matching `ssh-keygen -lf`, public line `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF+/yexV1AMqZ0Ox2W17Z4VZG+PsDiWACpPNuGPPJ/Lr leocode-harness`; private key stored as an 82-byte ciphertext blob |
+| T12 SSH clone | **PASS** — unknown host prompted once with `host=127.0.0.1`, `ssh-ed25519`, fingerprint `SHA256:EMcf7dnfZ/cYIa7iG4b6dkHIwt6esb4e8tE+DAFULH4` matching the server's `ssh-keygen -lf`; `remember: true` wrote the valid line `[127.0.0.1]:2222 ssh-ed25519 …`; clone completed (`main`, head `004e795`, 7 files) | **PASS** — unknown host prompted once with `host=192.168.58.247`, `ssh-ed25519`, fingerprint `SHA256:fZbSQBKUY6xnK9glFydpKKFoAeFkEUJhC7R2G8iYd9o` matching the server's `ssh-keygen -lf`; `remember: true` wrote the valid line `[192.168.58.247]:2222 ssh-ed25519 …`; clone completed (`main`, head `1e5c57d`, 5 files) |
+| T13 push to test repo | **PASS** (SSH) — commit `c361695`, 25 `git.progress` events; verified with `git log` in the remote bare repo. HTTPS-token variant not run on a device (see the row below) | **PASS** (SSH) — commit pushed, 12 `git.progress` events; verified with `git log` in the remote bare repo. HTTPS-token variant not run on a device (see the row below) |
+| T14 Keystore envelope round-trip (StrongBox: yes/no) | **PASS** — token round-trip matched; `LCS1` ciphertext blob, 58 bytes; `plaintextOnDisk=false`; a second T14 after force-stop + relaunch passed; log `LeoCodeSecrets: strongBox=false` (no StrongBox) | **PASS** — token round-trip matched; `LCS1` ciphertext blob, 57 bytes; `plaintextOnDisk=false`; survives force-stop + relaunch; log `LeoCodeSecrets: strongBox=false` (no StrongBox) |
+| JGit version used (D-016) | 5.13.3.202401111512-r | 5.13.3.202401111512-r |
+| status / add / commit | **PASS** — untracked → `added:a.txt` → commit `614da1f` | **PASS** — untracked → `added:a.txt` → commit `266ec63` |
+| diff / log / branch | **PASS** — 8-line diff, `log` newest-first, branches `[feature, main*]` | **PASS** — 8-line diff, `log` newest-first, branches `[feature, main*]` |
+| pull / push over SSH | **PASS** (both) — push see T13; pull fast-forwarded one working copy to a commit pushed by another (`004e795` → `45e8827`) and the new file arrived intact | **PASS** (both) — push see T13; pull fast-forwarded one working copy to a commit pushed by another (`30b287f` → `c93cbd1`) and the new file arrived intact |
+| pull / push over HTTPS token | not run on a device (needs a token-authenticated remote). The security claim is covered in CI instead: `PhaseFHandlerTest.remote token is stored but only flagged in replies` asserts a token set through `git.remote.set` is stored, never returned by `git.remote.list`, and reported only as `hasToken` | same |
+| conflict detected + resolved | **PASS** — conflict on `a.txt` with markers, `ours`/`theirs` parsed; `resolve` with `ours` cleared it; final content `one/two/main` | **PASS** — conflict on `a.txt` with markers, `ours`/`theirs` parsed; `resolve` with `ours` cleared it |
+| RSA keygen | **PASS** — generated in the same run as T11, fingerprint `SHA256:KDvWVDmjpyD04jJnqBjFSBxGyafvBL/8cpb/GJ0htMY` | **PASS** — generated in the same run as T11, fingerprint `SHA256:RpJ6TZbbLRuwl4l8hrbs0hRHSEyUsx6Ge7sePeQk/7E` |
+| passphrase-protected key import | **PASS** — imports a passphrase-protected PEM key, unlocks with the correct passphrase, and rejects both a wrong passphrase and no passphrase | **PASS** — imports a passphrase-protected PEM key, unlocks with the correct passphrase, and rejects both a wrong passphrase and no passphrase |
+| host-key prompt + fingerprint | **PASS** — see T12; a second clone with the pin in place prompted zero times | **PASS** — see T12; a second clone with the pin in place prompted zero times |
+| changed host key rejected | **PASS** — after rotating the server host key the clone failed `E_HOSTKEY_CHANGED` with no prompt (raw D12: `Server key did not validate`); restoring the key restored the clone | **PASS** — after rotating the server host key the clone failed `E_HOSTKEY_CHANGED` with no prompt; restoring the key restored the clone |
+| no key material in logcat | **PASS** — `scripts/ssh-key-logcat.sh 11f98015` exited 0, "clean: no private-key markers" | **PASS** — `scripts/ssh-key-logcat.sh` exited 0, "clean: no private-key markers" |
 
 The JVM and web gates behind these rows are recorded in
 [`reports/phase-f-verification.md`](reports/phase-f-verification.md): 357 Android unit tests, 277 web
@@ -167,14 +169,19 @@ notes.
    (exit 0 = clean, 1 = a private-key marker was found, 2 = adb/logcat error). Investigate any hit
    before recording PASS.
 7. **D-016 compatibility.** Test the build pinned to JGit 5.13.3.202401111512-r. D1 is the API 28 /
-   no-desugaring gate; a failure there reopens D-016. D2 covers Android 15. Do not copy a result
-   from one device to the other.
+   no-desugaring gate; it passed T10–T14 on 2026-11-21, so the pinned version is settled. D2 covers
+   Android 15. Do not copy a result from one device to the other; a future major bump needs a fresh D1
+   run.
 
 **Environment prerequisites.** Two device properties decide whether these rows mean anything:
 
 - **A third-party VPN on the phone blocks every app-UID socket.** With one (`free.vpnindia…turbo`)
   active, DNS failed (`UnknownHostException` for every name), as did loopback through `adb reverse`
   and LAN, while the `adb shell` UID was exempt. T10 and T13 require it to be off.
+- **Reaching the test server from D1.** When the host and phone are on different subnets (the
+  2026-11-21 run had the host on `192.168.34.247` and D1 on `192.168.29.26`), use
+  `adb reverse tcp:2222 tcp:2222` and pass `--es sshHost 127.0.0.1 --es sshPort 2222`. With no VPN
+  active the app UID can use that reverse-loopback socket. D2 used the host's LAN address.
 - **MINA needs `user.home` on Android.** MINA's `PathUtils` reads `System.getProperty("user.home")`,
   which Android never sets, so every SSH transport failed with `ExceptionInInitializerError`. `LeoApp`
   now sets it to the app's `filesDir/home` (the same `$HOME` the shells get) before MINA initialises.
