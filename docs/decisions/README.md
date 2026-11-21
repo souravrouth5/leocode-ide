@@ -89,7 +89,7 @@ Decisions added by plan v9 (2026-11-11).
 ## D-012 — CPython from the official python.org Android build
 
 **Context** CPython supports Android as a tier-3 platform (PEP 738) and python.org publishes Android builds designed for embedding (`libpython3.x.so` + stdlib). cibuildwheel can build Android wheels. Maintaining our own OpenSSL/libffi/expat/CPython cross-build (`scripts/build-python.sh`) costs time we do not need to spend.
-**Decision** CI downloads the official `aarch64` Android build (pinned version + sha256), adds a small NDK-built `python3` launcher calling `Py_BytesMain`, the certifi CA bundle and pip, checks 16 KB alignment, and publishes a signed package. Native wheels come from cibuildwheel. The prefix is computed from `filesDir` at runtime. `scripts/build-python.sh` is retired in Task 24. Amends D-006.
+**Decision** CI verifies the official `aarch64` Android build (pinned version + sha256), checks its layout and 16 KB alignment, mirrors it, and publishes a signed manifest. The app adds the NDK-built `python3` launcher calling `Py_BytesMain`, the certifi CA bundle and pip at install time, so the upstream tarball is not repackaged. Native wheels are built with the NDK by `runtime-packaging/build_android_wheel.py` from pinned recipes (cibuildwheel remains an option). The prefix is computed from `filesDir` at runtime. `scripts/build-python.sh` was retired on 2026-11-21. Amends D-006.
 **Alternatives** Keep the custom build (rejected: more maintenance, older 3.11); Chaquopy (rejected: build-time only); Termux packages (rejected: GPL prefix/userspace track, C1).
 **Reopen if** the official build cannot run as a standalone interpreter, lacks a needed module, or its libraries are not 16 KB aligned.
 

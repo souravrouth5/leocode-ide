@@ -99,7 +99,7 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 |---|---|---|---|
 | `libleocodepty.so` all `LOAD` align ≥ `2**14` | **PASS** (`scripts/check-elf-alignment.sh`: `0x4000`; CI run 44884113986) | n/a (device uses 4 KB pages; static check only) | n/a (device uses 4 KB pages; static check only) |
 | `zipalign -c -P 16 -v 4` on APK | **PASS** (local + CI run 44884113986) | — | — |
-| Python package `.so` files aligned | | — | — |
+| Python package `.so` files aligned | **PASS** (80 ELFs from the 3.14.10 artifact; `scripts/check-runtime-artifact.py` in the `python-runtime` CI job) | n/a (static check only) | n/a (static check only) |
 | PTY library loads (T6) | — | **PASS** | **PASS** |
 | Device page size | — | 4096 | **4096** |
 
@@ -110,16 +110,28 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 > [`device-reports/20261121-task25-D1-D2.txt`](device-reports/20261121-task25-D1-D2.txt).
 > T25 installs the signed python.org 3.14.10 artifact, T25L reads the catalog,
 > and T25C cancels mid-download without touching the installed tree.
+>
+> **Task 24 CI evidence (2026-11-21).** The `python-runtime` job verifies the
+> pinned artifact (`sha256 423c80b9…`, 23 027 305 bytes), the safe tar layout,
+> the pruned size (42 190 285 ≤ 47 185 920 bytes) and all 80 ELFs for 16 KB
+> alignment, then checks the Ed25519 signature and builds the `markupsafe`
+> wheel (`cp314-cp314-android_24_arm64_v8a`). The signed release/publish job is
+> gated on the protected `python-runtime` environment; the on-device wheel
+> install/import rows wait for Task 26.
 
 | Test | D1 | D2 |
 |---|---|---|
 | `/system/bin/sh` available | **PASS** | **PASS** |
 | toybox applets: ls/cat/grep/find/sed/tar | **PASS** (no unzip) | **PASS** (unzip present) |
+| Runtime artifact sha256/size + safe tar layout | **PASS** (CI) | **PASS** (CI) |
 | Runtime install (download, verify, extract, health check) | **PASS** (74 s) | **PASS** (497 s fresh, 333 s resumed) |
 | Install resumes after network loss | N/A (Wi-Fi-only ADB; turning the radio off drops the test transport) | **PASS** (`E_OFFLINE` at 3 307 954 B, resumed from the same offset; second `E_OFFLINE` at 6 011 314 B, final retry completed) |
 | CPython `--version` | **PASS** (`Python 3.14.10`) | **PASS** (`Python 3.14.10`) |
 | run script | | |
 | `pip --version` | **PASS** (`pip 26.2.2`) | **PASS** (`pip 26.2.2`) |
+| `markupsafe` Android wheel builds | **PASS** (CI, 16 KB aligned) | **PASS** (CI, 16 KB aligned) |
+| `markupsafe` wheel installs + imports | | |
+| PyPI Android wheel accepted by pip | | (probe blocked by DNS on 2026-11-21) |
 | `venv` create + activate | | |
 | T15 `venv` + `pip install requests` + import `markupsafe` | | |
 | console script shebang | | |

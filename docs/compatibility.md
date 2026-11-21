@@ -6,15 +6,15 @@ Filled in during Tasks 24–26 (plan v9). One row per package, per device. Never
 
 | Item | Value |
 |---|---|
-| CPython version | TBD — latest stable with an official python.org Android package (D-012) |
-| Build | Official python.org `aarch64` Android build + LeoCode `python3` launcher (NDK r28), 16 KB aligned |
+| CPython version | **3.14.10** (official python.org `aarch64-linux-android` build, `sha256 423c80b9…`) |
+| Build | Official python.org build + LeoCode `python3` launcher (NDK 28.2.13676358), 16 KB aligned (80 ELFs checked in CI) |
 | Prefix | `<filesDir>/usr`, computed at runtime (user 0: `/data/user/0/dev.leocode/files/usr`) |
 | libc | Bionic |
-| pip | bundled |
+| pip | `ensurepip` (26.2.2 observed on D1 and D2) |
 | CA bundle | certifi, via `SSL_CERT_FILE` |
 | venv | `python -m venv`, internal storage only |
 | Compiler on device | **none** (MVP) |
-| Native packages | Android wheels: LeoCode CI (cibuildwheel) and, if pip accepts them, PyPI Android wheels |
+| Native packages | LeoCode Android wheels (`cp314-cp314-android_24_arm64_v8a`), built by `runtime-packaging/build_android_wheel.py`; PyPI Android wheels are checked on-device |
 
 ## Results
 
@@ -23,8 +23,8 @@ Filled in during Tasks 24–26 (plan v9). One row per package, per device. Never
 | requests | pure | | | |
 | flask | pure | | | |
 | rich | pure | | | |
-| markupsafe | native | | | cibuildwheel wheel |
-| ujson | native | | | cibuildwheel wheel |
+| markupsafe | native | | | `build_android_wheel.py` wheel (`cp314-cp314-android_24_arm64_v8a`); built and aligned in CI, on-device install pending Task 26 |
+| ujson | native | | | recipe to add with `build_android_wheel.py` |
 | numpy | native | | | check for a PyPI Android wheel; else unsupported |
 | cryptography | native | | | needs OpenSSL linkage |
 
@@ -40,16 +40,26 @@ Filled in during Tasks 24–26 (plan v9). One row per package, per device. Never
 
 ## Wheel index
 
-The CI job (Task 24) produces:
+The `python-runtime` CI job (Task 24) builds `markupsafe` 3.0.2 with the NDK
+against the runtime's headers and publishes a static PEP 503 index:
 
 ```
 index/
-  android-aarch64/
-    cp3XX/
-      markupsafe-<ver>-cp3XX-cp3XX-android_<api>_arm64_v8a.whl
   index.html
+  markupsafe/
+    index.html
+  wheels/
+    markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
 ```
 
-Published as a signed static site; `pip` is pointed at it with `--extra-index-url` and
-`--only-binary=:all:` for native packages. Exact wheel tag format follows cibuildwheel's Android
-output.
+The tag comes from the official build's `sysconfig.get_platform()`
+(`android-24-arm64_v8a`); pip on Android 9/15 advertises the same tag family and
+accepts the wheel. `pip` is pointed at the index with `--extra-index-url` and
+`--only-binary=:all:` for native packages. The release also carries a
+`SHA256SUMS` file; the artifact, manifest and signature are published to the
+`python-runtime` prerelease.
+
+The on-device install/import row is still pending (Task 26): the wheel is built
+and alignment-checked in CI, but it has not been installed on D1/D2 yet. PyPI
+Android wheels are checked in the same pass; a PyPI wheel that matches the
+device tags would not need our index.

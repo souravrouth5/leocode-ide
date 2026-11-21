@@ -18,17 +18,24 @@ so replacing the asset inside a modified APK does not help an attacker.
 
 ## Signing
 
-The public key is embedded in the APK (`docs/decisions/README.md`, D-009-adjacent).
-Private key lives offline and is never in CI. Release procedure:
+The public key is embedded in the APK (`docs/decisions/README.md`, D-009-adjacent)
+and committed as [`docs/keys/manifest-public.pem`](../docs/keys/manifest-public.pem).
+The private key lives in the protected `python-runtime` GitHub environment as
+`RUNTIME_SIGNING_KEY`; the release job writes it to a temporary file, signs,
+verifies, and removes it. Developers sign offline with
+`~/.config/leocode/runtime-signing.pem`. Release procedure:
 
 ```bash
-scripts/sign-manifest.sh runtime-manifests/versions/python-3.11.9.json
-scripts/verify-manifest.sh runtime-manifests/versions/python-3.11.9.json docs/keys/manifest-public.pem
+scripts/sign-manifest.sh runtime-manifests/versions/python-3.14.10.json
+scripts/verify-manifest.sh runtime-manifests/versions/python-3.14.10.json docs/keys/manifest-public.pem
 ```
 
 The signature covers the exact manifest bytes and is stored as base64 in `<manifest>.sig`.
 `sign-manifest.sh` also prints the raw public key and its SPKI SHA-256, which must match
-`RuntimeKeys.PYTHON` and `RuntimeKeys.FINGERPRINT`.
+`RuntimeKeys.PYTHON` and `RuntimeKeys.FINGERPRINT`. The `python-runtime` CI job
+re-signs the manifest with the protected key and publishes the tarball,
+manifest, signature, `markupsafe` wheel and `SHA256SUMS` to the `python-runtime`
+prerelease.
 
 Rollback protection: `versionCode` must be strictly greater than the installed one; the app
 refuses older manifests even if correctly signed.

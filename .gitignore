@@ -26,3 +26,7 @@ runtime-manifests/private-key*
 # os / editor
 .DS_Store
 *.swp
+
+# Python bytecode from packaging scripts
+__pycache__/
+*.pyc
