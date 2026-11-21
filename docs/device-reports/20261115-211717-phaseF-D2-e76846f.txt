@@ -1,0 +1,166 @@
+Phase F device pass — D2 (POCO F1, LineageOS, Android 15 / API 35)
+serial: e76846f (USB)
+captured: 2026-11-15T21:17:17+05:30
+jgit: 5.13.3.202401111512-r
+ssh server: local paramiko test server at 192.168.58.247:2222
+note: T11 generates a fresh key each run; that public key was added to the
+      server's authorized_keys before T12/T13, which is why it appears here.
+
+--- harness output ---
+--------- beginning of main
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:14:24.209 12737 12737 I LeoCodeHarness: native pty : loaded
+11-15 21:14:24.619 12737 12737 I LeoCodeHarness: ▶ T11 — Ed25519 keygen + sealed private key
+11-15 21:14:24.632 12737 13457 I LeoCodeSecrets: strongBox=false
+11-15 21:14:27.111 12737 12737 I LeoCodeHarness:   id=b75100c2-40e9-438d-921b-9222c765553d
+11-15 21:14:27.111 12737 12737 I LeoCodeHarness:   type=ed25519 fingerprint=SHA256:KOwv3YrDS8NGTtAnuAEgV3kqFrvaS+c0G39SqrGYBro
+11-15 21:14:27.111 12737 12737 I LeoCodeHarness:   publicKey=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHW1s/oFOMemC3YacuBLZBIVCwCjGRklqkXZgo2IakqR leocode-harness
+11-15 21:14:27.111 12737 12737 I LeoCodeHarness:   rsa=rsa SHA256:Ejo81eBQc6MdTFcl1M1FpcYfmBrRjq3ehTxaQ0dMCDg
+11-15 21:14:27.111 12737 12737 I LeoCodeHarness:   ciphertextBlob=7373682d6b65793a62373531303063322d343065392d343338642d393231622d393232326337363535353364.bin bytes=82
+11-15 21:14:27.111 12737 12737 I LeoCodeHarness:   PASS
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:14:59.278 12738 12738 I LeoCodeHarness: native pty : loaded
+11-15 21:14:59.689 12738 12738 I LeoCodeHarness: ▶ T10 — Git HTTPS clone (JGit, reply on finish)
+11-15 21:14:59.718 12738 13667 I LeoCodeSecrets: strongBox=false
+11-15 21:15:04.332 12738 12738 I LeoCodeHarness:   url=https://github.com/octocat/Hello-World.git
+11-15 21:15:04.332 12738 12738 I LeoCodeHarness:   initialized=true branch=master head=7fd1a60 clean=true
+11-15 21:15:04.332 12738 12738 I LeoCodeHarness:   files=.git,README
+11-15 21:15:04.332 12738 12738 I LeoCodeHarness:   progressEvents=7 firstTask=
+11-15 21:15:04.332 12738 12738 I LeoCodeHarness:   duration=4627ms
+11-15 21:15:04.332 12738 12738 I LeoCodeHarness:   PASS
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:15:12.572 12739 12739 I LeoCodeHarness: native pty : loaded
+11-15 21:15:12.984 12739 12739 I LeoCodeHarness: ▶ T12 — SSH clone with host-key prompt
+11-15 21:15:13.011 12739 13724 I LeoCodeSecrets: strongBox=false
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   url=ssh://git@192.168.58.247:2222/t12.git
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   promptEvents=1 pendingAfter=0
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   prompt host=192.168.58.247 port=2222 type=ssh-ed25519 changed=false
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   promptFingerprint=SHA256:fZbSQBKUY6xnK9glFydpKKFoAeFkEUJhC7R2G8iYd9o
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   pinnedKeys=1 knownHostsToken=[192.168.58.247]:2222
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   files=5
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   result=OK branch=main head=1e5c57d
+11-15 21:15:16.285 12739 12739 I LeoCodeHarness:   PASS
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:15:25.912 13084 13084 I LeoCodeHarness: native pty : loaded
+11-15 21:15:26.325 13084 13084 I LeoCodeHarness: ▶ T12B — pinned host connects without a prompt
+11-15 21:15:27.549 13084 13794 I LeoCodeSecrets: strongBox=false
+11-15 21:15:29.723 13084 13084 I LeoCodeHarness:   url=ssh://git@192.168.58.247:2222/t12.git (host already pinned)
+11-15 21:15:29.723 13084 13084 I LeoCodeHarness:   promptEvents=0 (expected 0)
+11-15 21:15:29.723 13084 13084 I LeoCodeHarness:   initialized=true branch=main head=1e5c57d files=5
+11-15 21:15:29.723 13084 13084 I LeoCodeHarness:   PASS — pinned key trusted without a prompt
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:15:39.164 13085 13085 I LeoCodeHarness: native pty : loaded
+11-15 21:15:39.580 13085 13085 I LeoCodeHarness: ▶ T13 — commit + push over SSH
+11-15 21:15:39.613 13085 13852 I LeoCodeSecrets: strongBox=false
+11-15 21:15:44.337 13085 13085 I LeoCodeHarness:   commit=dca9b80
+11-15 21:15:44.337 13085 13085 I LeoCodeHarness:   push branch=main ahead=0 behind=0 message=Pushed to origin
+11-15 21:15:44.337 13085 13085 I LeoCodeHarness:   progressEvents=23 lastTask=Writing objects
+11-15 21:15:44.337 13085 13085 I LeoCodeHarness:   PASS — push returned without error
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:15:52.181 13086 13086 I LeoCodeHarness: native pty : loaded
+11-15 21:15:52.596 13086 13086 I LeoCodeHarness: ▶ T14 — Keystore envelope round-trip
+11-15 21:15:52.608 13086 13927 I LeoCodeSecrets: strongBox=false
+11-15 21:15:52.679 13086 13086 I LeoCodeHarness:   id=token:harness.test
+11-15 21:15:52.679 13086 13086 I LeoCodeHarness:   roundTrip=match
+11-15 21:15:52.679 13086 13086 I LeoCodeHarness:   blob=746f6b656e3a6861726e6573732e74657374.bin bytes=57 magic=LCS1
+11-15 21:15:52.679 13086 13086 I LeoCodeHarness:   plaintextOnDisk=false
+11-15 21:15:52.679 13086 13086 I LeoCodeHarness:   tokenHosts=[harness.test]
+11-15 21:15:52.679 13086 13086 I LeoCodeHarness:   PASS
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: LeoCode Phase 0B harness
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: device     : Xiaomi POCO F1
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: android    : 15 (sdk 35, patch 2025-09-01)
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: abis       : arm64-v8a, armeabi-v7a, armeabi
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: 64-bit abis: arm64-v8a
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: abi (main) : arm64-v8a
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: webview    : com.google.android.webview 156.0.8078.47
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: page size  : 4096 bytes (native)
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: storage    : 100423 MB free / 115797 MB total
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: heap       : max 256 MB
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: workspace  : /data/user/0/dev.leocode/files/workspaces/default
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: prefix     : /data/user/0/dev.leocode/files/usr
+11-15 21:16:05.369 13087 13087 I LeoCodeHarness: native pty : loaded
+11-15 21:16:05.783 13087 13087 I LeoCodeHarness: ▶ T21 — local Git: status/add/commit/diff/branch/conflict
+11-15 21:16:05.825 13087 13969 I LeoCodeSecrets: strongBox=false
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   init branch=main initialized=true
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   untracked=[a.txt]
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   staged=[added:a.txt]
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   commit=6f81b12
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   diff=8 line(s) binary=false truncated=false
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   mergeConflicted=true
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   conflicts=[a.txt]
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   conflictMarkers=true ours=true theirs=true
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   resolvedConflicts=0
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   log=[main change, second, first]
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   branches=[feature, main*]
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   finalContent=one|two|main
+11-15 21:16:07.010 13087 13087 I LeoCodeHarness:   PASS
+
+--- scripts/ssh-key-logcat.sh e76846f ---
+clean: no private-key markers in logcat
+exit=0

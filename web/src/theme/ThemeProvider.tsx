@@ -4,12 +4,18 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from "react"
 import type { Bridge, ThemeState } from "../bridge"
-import { isThemeMode } from "../bridge/types"
+import { AppError, isThemeMode } from "../bridge/types"
 import type { EffectiveTheme, ThemeMode } from "../bridge/types"
+import { createBackgroundErrorReporter } from "../errors/background"
+import { errorMessage } from "../errors/redact"
+
+export const THEME_READ_FAILED = "The app's color theme could not be read"
+export const THEME_WRITE_FAILED = "The color theme was not saved to the app"
 
 const STORAGE_KEY = "leocode.theme"
 
@@ -46,13 +52,37 @@ function applyTheme(effective: EffectiveTheme) {
 interface Props {
   bridge: Bridge | null
   initial?: ThemeState | null
+  /**
+   * Fire-and-forget theme failures, reported once per burst (W-23). A theme that
+   * never reached the host is a visible problem, not a silent one.
+   */
+  onError?: (error: unknown, context: string) => void
   children: ReactNode
 }
 
-export function ThemeProvider({ bridge, initial, children }: Props) {
+export function ThemeProvider({ bridge, initial, onError, children }: Props) {
   const [mode, setModeState] = useState<ThemeMode>(() => initial?.mode ?? storedMode())
   const [systemDark, setSystemDark] = useState(() =>
     initial ? initial.effective === "dark" : systemPrefersDark()
+  )
+
+  // Reporter identity is stable; the callback behind it is always the latest.
+  const onErrorRef = useRef(onError)
+  useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+  const background = useMemo(
+    () =>
+      createBackgroundErrorReporter((error, context) => {
+        // Keep the typed code for routing and say what the user lost, like the
+        // bridge does for terminal input (W-23).
+        const code = error instanceof AppError ? error.code : "E_INTERNAL"
+        onErrorRef.current?.(
+          new AppError(code, `${context} (${errorMessage(error)})`),
+          context
+        )
+      }),
+    []
   )
 
   const effective = resolve(mode, systemDark)
@@ -82,7 +112,10 @@ export function ThemeProvider({ bridge, initial, children }: Props) {
         if (isThemeMode(state.mode)) setModeState(state.mode)
         setSystemDark(state.effective === "dark")
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        // The page keeps the stored/OS theme, but the user is told once (W-23).
+        background(error, THEME_READ_FAILED)
+      })
     const unsubscribe = bridge.onThemeChanged((state) => {
       if (isThemeMode(state.mode)) setModeState(state.mode)
       setSystemDark(state.effective === "dark")
@@ -91,7 +124,7 @@ export function ThemeProvider({ bridge, initial, children }: Props) {
       active = false
       unsubscribe()
     }
-  }, [bridge])
+  }, [bridge, background])
 
   const setMode = useCallback(
     (next: ThemeMode) => {
@@ -99,9 +132,11 @@ export function ThemeProvider({ bridge, initial, children }: Props) {
       localStorage.setItem(STORAGE_KEY, next)
       if (next === "system") setSystemDark(systemPrefersDark())
       // Android persists the choice and updates the system bars.
-      void bridge?.setTheme(next).catch(() => {})
+      void bridge?.setTheme(next).catch((error: unknown) => {
+        background(error, THEME_WRITE_FAILED)
+      })
     },
-    [bridge]
+    [bridge, background]
   )
 
   const value = useMemo(

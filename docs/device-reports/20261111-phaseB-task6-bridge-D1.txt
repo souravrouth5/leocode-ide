@@ -1,0 +1,81 @@
+# Phase B Task 6 — proc/term/saf/storage/runtime on the typed bridge (D1)
+
+date     : 2026-11-11
+device   : Redmi Note 7S, Android 9 (SDK 28), serial 192.168.29.26:5555
+apk      : app-debug.apk, targetSdk 28, `BridgeHost` + `ProcessSupervisor` + `EventSink`
+method   : WebView CDP `Runtime.evaluate` against the injected `LeoCodeAndroid` channel
+commands : adb -s 192.168.29.26:5555 forward tcp:9230 localabstract:webview_devtools_remote_<pid>
+           node cdp-eval.mjs task6-probe.js  http://127.0.0.1:9230/json
+           node cdp-eval.mjs task6-credit.js http://127.0.0.1:9230/json
+           node cdp-eval.mjs t6b-async.js    http://127.0.0.1:9230/json
+           node cdp-eval.mjs t6b-open.js / t6b-save.js / t6b-read.js
+
+## proc.*
+
+proc.run `/system/bin/sh -c "printf 'h\303\251llo\360\237\231\202'; printf bad >&2; exit 7"`
+  reply : { jobId: "68cef2c7-…", pid: 15526 }
+  stdout: "héllo🙂"   (a multi-byte character split across reads is re-joined)
+  stderr: "bad"
+  exit  : 7
+
+proc.run `sleep 60`, then proc.cancel {jobId}
+  reply    : { cancelled: true }
+  exit     : 143 (SIGTERM to the process group, not SIGKILL)
+  leftover : none
+
+## term.* backpressure
+
+term.open `cwd "."`, write `yes\n`, no `term.ack` for 2 s
+  t1 (1.2 s): 255 756 bytes / 32 chunks
+  t2 (2.0 s): 262 144 bytes / 33 chunks  ← exactly the 256 KB credit, no more
+  term.ack 262 144 bytes
+  t3 (2.6 s): 389 064 bytes / 50 chunks  ← resumed
+  term.close: { closed: true }
+  leftover   : no `yes`, `sleep` or `sh` processes
+
+term.open + `yes\n` with the web client acking every chunk
+  bytes 44 037 in 10 chunks
+  max JS timer delay while flooded: 1 ms (delays 1,0,0,1,1)
+  term.close: { closed: true }
+  UI       : explorer still renders after the flood
+
+## async handlers (SafHandler / RuntimeHandler)
+
+storage.info
+  -> { hasPermission: true, internalStorage: "/storage/emulated/0",
+       downloads: "/storage/emulated/0/Download",
+       documents: "/storage/emulated/0/Documents",
+       workspace: "/data/user/0/dev.leocode/files/workspaces/default" }
+
+runtime.install { id: "no-such-runtime" }
+  -> error E_UNSUPPORTED "no installable package is bundled for no-such-runtime"
+runtime.cancel { id: "no-such-runtime" }
+  -> { cancelling: false }   (checked again 1 s later: still false)
+runtime.install {}
+  -> error E_BAD_ENVELOPE "id is required"
+
+saf.open { mime: "text/plain" }, picker cancelled with BACK
+  -> { ok: true, payload: null }   (reply arrives later, exactly once)
+saf.save { name: "leocode-t6b.txt", content: "task-6b" }, picker cancelled
+  -> { ok: true, payload: null }
+
+The D1 image has no default document provider, so the system shows a
+"Complete action using Material Files / Files" chooser before the picker; BACK
+on the chooser produces the same cancel result. A successful pick was not
+automated on D1.
+
+## build gates
+
+- `./gradlew testDebugUnitTest` : 86 tests, 0 failures
+- `./gradlew lintDebug assembleDebug assembleRelease` : BUILD SUCCESSFUL
+- web: `npm run lint && npm test && npm run typecheck && npm run build` pass;
+  `scripts/sync-web.sh` refreshed the hashed assets
+
+Verdict: PASS. All bridge methods now go through `BridgeRouter`; the legacy
+monolith is gone. The remaining calls are the same JSON shapes as before.
+
+## D2
+
+D2 (POCO F1, Android 15) was still `offline` at the ADB transport level during
+this run (`10.8.0.70:38151` offline, no USB), so the same probes are pending
+there. The debug APK is already installed.

@@ -26,11 +26,14 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
         onClick={onClose}
         aria-hidden={!open}
       />
+      {/* A closed sheet is off-screen but still mounted; hide it from assistive
+          tech (and role queries) so its live regions stay inert. */}
       <section
         className={"sheet" + (open ? " is-open" : "")}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-hidden={!open}
       >
         <div className="sheet-grip" />
         {title && (

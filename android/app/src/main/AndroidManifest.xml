@@ -4,10 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <application
+        android:name=".LeoApp"
         android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
@@ -17,10 +19,18 @@
         android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
+        <!--
+            configChanges covers every change that must not reload the WebView
+            (L-10): a Bluetooth/USB keyboard (keyboard|navigation), a font-size
+            change (fontScale), a display-size change (density), a language
+            change (locale|layoutDirection) and dark/light (uiMode|colorMode).
+            MainActivity.onConfigurationChanged re-applies the theme, the WebView
+            background and the insets for all of them.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|fontScale|density|locale|layoutDirection|uiMode|colorMode"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -28,14 +38,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Phase 0 device harness. Debug builds only in spirit: it executes fixed
-             test commands and must not ship in a release. Remove before 0.1. -->
         <activity
-            android:name=".HarnessActivity"
-            android:exported="true"
-            android:label="LeoCode Harness"
+            android:name=".RecoveryActivity"
+            android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
-            android:windowSoftInputMode="adjustResize" />
+            android:label="@string/app_name" />
+
+        <service
+            android:name=".SessionService"
+            android:exported="false"
+            android:stopWithTask="false" />
 
     </application>
 </manifest>

@@ -1,0 +1,25 @@
+# LeoCode smoke test
+generated: 2026-11-11T11:17:33Z
+serial:    e76846f
+model:     POCO F1
+api:       35
+apk:       /home/sourav/Desktop/Apps/leocode/android/app/build/outputs/apk/debug/app-debug.apk
+
+## window focus
+mCurrentFocus:   mCurrentFocus=Window{c7ed5e3 u0 dev.leocode/dev.leocode.MainActivity}
+old-target-SDK warning dialog: manual observation
+  heuristic from focus: app has focus; no system dialog visible in focus
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: dev.leocode/.MainActivity
+TotalTime: 829
+WaitTime: 837
+Complete
+
+## verdict
+pid:        6332
+
+## logcat

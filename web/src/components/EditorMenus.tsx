@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { useSheetRegistration } from "../features/shell/useSheetRegistration"
 import {
   CodeIcon,
   EditIcon,
@@ -43,7 +44,8 @@ interface EditMenuProps {
 }
 
 interface OverflowMenuProps {
-  onSearch: () => void
+  onFindReplace: () => void
+  onSearchWorkspace: () => void
   onGotoLine: () => void
   onSelectSyntax: () => void
   onOpenSettings: () => void
@@ -65,6 +67,10 @@ function Dropdown({
 }) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const menuId = useId()
+
+  // Back closes an open menu before it closes the view behind it (W-12).
+  useSheetRegistration(`menu-${menuId}`, open, () => setOpen(false))
 
   useEffect(() => {
     if (!open) return
@@ -221,7 +227,8 @@ export function EditMenu({
 }
 
 export function OverflowMenu({
-  onSearch,
+  onFindReplace,
+  onSearchWorkspace,
   onGotoLine,
   onSelectSyntax,
   onOpenSettings,
@@ -242,9 +249,13 @@ export function OverflowMenu({
     >
       {() => (
         <div className="menu-items">
-          <button className="menu-item" onClick={onSearch}>
+          <button className="menu-item" onClick={onFindReplace}>
             <SearchIcon size={16} />
             <span>Find & Replace</span>
+          </button>
+          <button className="menu-item" onClick={onSearchWorkspace}>
+            <SearchIcon size={16} />
+            <span>Search in Workspace</span>
           </button>
           <button className="menu-item" onClick={onGotoLine}>
             <span>Goto Line…</span>

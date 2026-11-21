@@ -1,18 +1,17 @@
 import { useState } from "react"
-import {
-  FONT_FAMILIES,
-  FONT_SIZES,
-  type UserSettings
-} from "../settings/userSettings"
+import type { StorageInfo } from "../bridge"
+import { FONT_FAMILIES, type UserSettings } from "../settings/userSettings"
 import {
   EDITOR_THEMES,
   type EditorThemeId
 } from "./editorThemes"
 import {
   CpuIcon,
+  GitIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
+  SmartphoneIcon,
   SunIcon,
   TypeIcon
 } from "./Icons"
@@ -26,6 +25,18 @@ interface Props {
   bridgeMode: string
   version: string
   onOpenRuntimes: () => void
+  /** Shared-storage status, so the permission can be granted from Settings (W-27). */
+  storage?: StorageInfo | null
+  onRequestStoragePermission?: () => void
+  /** Task 14: folder import and zip backup/restore. */
+  onImportFolder?: () => void
+  onExportBackup?: () => void
+  onRestoreBackup?: () => void
+  backupBusy?: boolean
+  backupStatus?: string | null
+  /** Phase F: open the Git/SSH sheets from Settings. */
+  onOpenSshKeys?: () => void
+  onOpenRemotes?: () => void
 }
 
 export function SettingsDialog({
@@ -35,9 +46,18 @@ export function SettingsDialog({
   onUpdate,
   bridgeMode,
   version,
-  onOpenRuntimes
+  onOpenRuntimes,
+  storage,
+  onRequestStoragePermission,
+  onImportFolder,
+  onExportBackup,
+  onRestoreBackup,
+  backupBusy = false,
+  backupStatus = null,
+  onOpenSshKeys,
+  onOpenRemotes
 }: Props) {
-  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "about">("editor")
+  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about">("editor")
 
   const changeFontSize = (delta: number) => {
     const current = settings.fontSize
@@ -68,6 +88,13 @@ export function SettingsDialog({
           >
             <PaletteIcon size={16} />
             <span>Appearance</span>
+          </button>
+          <button
+            className={"settings-nav-btn" + (activeTab === "git" ? " active" : "")}
+            onClick={() => setActiveTab("git")}
+          >
+            <GitIcon size={16} />
+            <span>Git</span>
           </button>
           <button
             className={"settings-nav-btn" + (activeTab === "about" ? " active" : "")}
@@ -266,8 +293,116 @@ export function SettingsDialog({
           </div>
         )}
 
+        {activeTab === "git" && (
+          <div className="settings-panel">
+            <div className="settings-card">
+              <label className="settings-card-label">Commit identity</label>
+              <p className="guide-intro">
+                Used for new commits. Leave both empty to let the host fall back to the
+                repository configuration.
+              </p>
+              <label className="git-field">
+                <span>Name</span>
+                <input
+                  value={settings.gitName}
+                  placeholder="Your name"
+                  onChange={(event) => onUpdate({ gitName: event.target.value })}
+                />
+              </label>
+              <label className="git-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={settings.gitEmail}
+                  placeholder="you@example.com"
+                  onChange={(event) => onUpdate({ gitEmail: event.target.value })}
+                />
+              </label>
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Remotes and credentials</label>
+              <p className="guide-intro">
+                A token is sealed with the device keystore and is never shown again.
+                SSH private keys stay in the keystore; only the public key leaves it.
+              </p>
+              {onOpenRemotes && (
+                <button className="btn ghost full-width" onClick={onOpenRemotes}>
+                  <GitIcon size={18} />
+                  <span>Manage remotes</span>
+                </button>
+              )}
+              {onOpenSshKeys && (
+                <button className="btn ghost full-width" onClick={onOpenSshKeys}>
+                  <span>Manage SSH keys and known hosts</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === "about" && (
           <div className="settings-panel">
+            <div className="settings-card">
+              <label className="settings-card-label">Shared storage</label>
+              <p className="guide-intro">
+                {storage === null || storage === undefined
+                  ? "Storage access has not been checked yet."
+                  : storage.hasPermission
+                    ? "LeoCode can read and write shared storage (Downloads, Documents, SD cards)."
+                    : "LeoCode cannot read shared storage yet. Grant access to open Downloads, Documents and bookmarks outside the app workspace."}
+              </p>
+              {onRequestStoragePermission && (
+                <button
+                  className="btn primary full-width"
+                  onClick={onRequestStoragePermission}
+                  disabled={Boolean(storage?.hasPermission)}
+                >
+                  <SmartphoneIcon size={18} />
+                  <span>{storage?.hasPermission ? "Storage access granted" : "Grant storage access"}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Backup & Import</label>
+              <p className="guide-intro">
+                A backup is a zip of the active workspace. Restoring merges the archive
+                into it; existing files with the same name are replaced. Import copies a
+                folder from the system picker without overwriting existing names.
+              </p>
+              <div className="settings-backup-actions">
+                <button className="btn ghost full-width" onClick={onImportFolder} disabled={backupBusy}>
+                  <span>Import folder…</span>
+                </button>
+                <button className="btn ghost full-width" onClick={onExportBackup} disabled={backupBusy}>
+                  <span>Export workspace backup…</span>
+                </button>
+                <button
+                  className="btn ghost full-width danger"
+                  onClick={onRestoreBackup}
+                  disabled={backupBusy}
+                >
+                  <span>Restore from backup…</span>
+                </button>
+              </div>
+              {backupStatus && <p className="guide-intro">{backupStatus}</p>}
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Before uninstalling</label>
+              <p className="guide-intro">
+                Uninstalling LeoCode deletes app-private files, including every workspace,
+                draft and backup kept inside the app. Export a workspace backup to
+                Downloads or another provider first; Android does not keep app storage
+                when the package is removed.
+              </p>
+            </div>
+
             <div className="settings-card">
               <label className="settings-card-label">Runtime Toolchains</label>
               <button
@@ -292,6 +427,31 @@ export function SettingsDialog({
                 <dt>Target SDK</dt>
                 <dd>28 (Unrooted Process Exec)</dd>
               </dl>
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Background survival</label>
+              <p className="guide-intro">
+                A notification reports running terminals and jobs, with a{" "}
+                <strong>Stop all</strong> action. Some vendors still kill background
+                processes aggressively.
+              </p>
+              <ul className="guide">
+                <li>
+                  <strong>MIUI / HyperOS:</strong> Settings → Apps → LeoCode → Autostart
+                  on; Battery saver → No restrictions.
+                </li>
+                <li>
+                  <strong>Android 12+ phantom-process killer:</strong> Settings →
+                  Developer options → Disable child process restrictions. Some builds
+                  call it “Don't keep activities” nearby; leave that off.
+                </li>
+                <li>
+                  <strong>Rooted phones:</strong> keep more background children with
+                  <code>device_config put activity_manager max_phantom_processes 2147483647</code>
+                  (reverts on reboot).
+                </li>
+              </ul>
             </div>
           </div>
         )}

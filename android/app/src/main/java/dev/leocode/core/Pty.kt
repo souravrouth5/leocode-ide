@@ -48,13 +48,37 @@ object NativePty {
     external fun waitFor(pid: Int): Int
     external fun killGroup(pid: Int, signal: Int): Int
     external fun pageSize(): Int
+
+    /** Harness T8: child has exactly the supplied environment (execve envp). */
+    external fun probeEnvironment(envPairs: Array<String>): String
+
+    /** Harness T9: child reports how many fds above stderr survived setup. */
+    external fun probeFds(envPairs: Array<String>): String
+}
+
+/**
+ * The small surface [TerminalRegistry] needs from a PTY. Keeping it an interface
+ * lets the registry's attach/scrollback logic run on the JVM with a fake process
+ * (Task 10 tests).
+ */
+interface PtyProcess {
+    val pid: Int
+    val isClosed: Boolean
+    fun write(bytes: ByteArray): Int
+    fun readBlocking(maxBytes: Int = 16 * 1024): ByteArray?
+    fun resize(rows: Int, cols: Int)
+    fun waitFor(): Int
+    fun destroy()
 }
 
 class PtySession private constructor(
     private val descriptor: ParcelFileDescriptor,
-    val pid: Int
-) {
+    override val pid: Int
+) : PtyProcess {
     companion object {
+        private const val DESTROY_GRACE_MS = 1_500L
+        private const val DESTROY_POLL_MS = 25L
+
         /** Opens an interactive `/system/bin/sh -i` in a new session/process group. */
         fun openShell(cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? =
             open("exec /system/bin/sh -i", cwd, env, rows, cols)
@@ -75,18 +99,29 @@ class PtySession private constructor(
 
     private val fd: FileDescriptor = descriptor.fileDescriptor
 
-    fun write(bytes: ByteArray): Int = try {
-        Os.write(fd, bytes, 0, bytes.size)
-    } catch (e: ErrnoException) {
-        -1
+    /** Set by [destroy]; write/resize/read become no-ops afterwards (Task 9). */
+    @Volatile
+    private var closed = false
+
+    override val isClosed: Boolean get() = closed
+
+    override fun write(bytes: ByteArray): Int {
+        if (closed) return -1
+        if (bytes.isEmpty()) return 0
+        return try {
+            Os.write(fd, bytes, 0, bytes.size)
+        } catch (e: ErrnoException) {
+            -1
+        }
     }
 
     /**
      * Blocking single read. Returns null on EOF/EIO (which is what a PTY master
-     * reports when the child exits). Intended for a dedicated reader thread.
+     * reports when the child exits) or after [destroy]. Intended for a dedicated
+     * reader thread.
      */
-    fun readBlocking(maxBytes: Int = 16 * 1024): ByteArray? {
-        if (maxBytes <= 0) return null
+    override fun readBlocking(maxBytes: Int): ByteArray? {
+        if (closed || maxBytes <= 0) return null
         val buf = ByteArray(maxBytes)
         val n = try {
             Os.read(fd, buf, 0, maxBytes)
@@ -105,22 +140,40 @@ class PtySession private constructor(
         val out = ByteArrayOutputStream()
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline && out.size() < maxBytes) {
-            val chunk = readBlocking() ?: break
+            val chunk = readBlocking(16 * 1024) ?: break
             out.write(chunk)
         }
         return out.toString("UTF-8")
     }
 
-    fun resize(rows: Int, cols: Int) {
-        NativePty.setWindowSize(descriptor.fd, rows, cols)
+    override fun resize(rows: Int, cols: Int) {
+        if (closed) return
+        // The fd can be closed between the flag check and the ioctl (L-18).
+        runCatching { NativePty.setWindowSize(descriptor.fd, rows, cols) }
     }
 
-    fun waitFor(): Int = NativePty.waitFor(pid)
+    override fun waitFor(): Int = NativePty.waitFor(pid)
 
-    fun destroy() {
-        // Kill the group first: that closes the slave side and unblocks any reader.
+    override fun destroy() {
+        if (closed) return
+        closed = true
+        // SIGTERM first, then a short grace period; SIGKILL only for a child that
+        // ignores it (L-17). Called on the pump thread after waitFor() the pid is
+        // already gone, so this normally returns immediately.
         NativePty.killGroup(pid, OsConstants.SIGTERM)
-        NativePty.killGroup(pid, OsConstants.SIGKILL)
+        var waited = 0L
+        while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
+            try {
+                Thread.sleep(DESTROY_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+            waited += DESTROY_POLL_MS
+        }
+        if (ProcessStartTime.read(pid) != null) {
+            NativePty.killGroup(pid, OsConstants.SIGKILL)
+        }
         runCatching { descriptor.close() }
     }
 }

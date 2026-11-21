@@ -1,5 +1,7 @@
 # LeoCode — Implementation Plan v8
 
+> **Superseded by [v9](LeoCode_Implementation_Plan_v9.md) (2026-11-11).** Kept as history. Decisions D-001…D-010 still apply except where v9 amends them; every item below is mapped to a v9 task or marked deferred in v9 §18.
+
 Android coding IDE. Supersedes v7.
 
 **Status:** scope, architecture and Phase-0 decisions are frozen. Runtime feasibility is still unproven and is gated by Phase 0. Sprint tracking lives in [`PROGRESS.md`](../PROGRESS.md).

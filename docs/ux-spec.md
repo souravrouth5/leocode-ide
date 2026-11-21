@@ -70,14 +70,90 @@ the nav or the active input: every view observes `visualViewport` and resizes it
   without a wheel), disk space check, resumable progress, cancel.
 - After install: health check runs automatically with a visible result; failure offers Repair.
 
-## Onboarding (3 screens, skippable)
+## Onboarding (3 screens, skippable except where noted)
 
-1. **How files work** — projects live inside LeoCode; import/export via the system picker; uninstall
-   deletes them (export first).
-2. **Battery** — MIUI/Android 12+: set battery to "No restrictions", enable autostart. Buttons deep-link
-   where Android allows.
+1. **How files work** — projects live inside LeoCode; shared storage can be browsed when the storage
+   permission is granted; import/export via the system picker; uninstall deletes private projects
+   (export or back up first).
+2. **Keep sessions alive** — Android 12+ and MIUI kill background processes:
+   - MIUI: Battery → No restrictions; Security → Autostart on (deep-link where Android allows).
+   - Android 12+ phantom-process killer: explain that long jobs may be stopped when LeoCode is in the
+     background; the foreground notification reduces this.
+   - Rooted phones only, behind a button: "Disable the background process limit" (runs
+     `device_config put activity_manager max_phantom_processes 2147483647` after a confirmation).
 3. **Trust model** — code you run has the same access as LeoCode itself. Only run projects you trust.
-   This is the D-008 warning and cannot be skipped silently.
+   This is the D-008 warning and cannot be skipped silently (requires "I understand").
+
+Root mode is **not** part of onboarding; it is never mentioned to users whose device has no `su`.
+
+## Root mode (D-011)
+
+- **Location:** Settings › Advanced › Root mode. On devices without `su` the row reads
+  "Root not available on this device" and is disabled.
+- **Enabling:** toggle → warning sheet ("Commands run as root can change or break your system.
+  LeoCode cannot undo them.") with **Enable root mode** / Cancel → system `su` grant dialog.
+  Denied → sheet with `E_ROOT_DENIED` copy and **Try again**.
+- **Root terminal:** terminal session chip menu gains "New root session". Root tabs use a red-tinted
+  chip and a **ROOT** badge; the prompt shows `#`.
+- **Run as root:** a toggle on the run sheet, off by default, reset per run. When on, the Run button
+  label becomes "Run as root".
+- **Status bar:** a ROOT badge is visible while any root process is alive.
+- **Revoked grant:** the session ends, a banner says "Root access was revoked. The root session was
+  closed." with **Open settings**.
+- **Never:** prompt at startup, browse files as root, or remember "Run as root" across runs.
+
+## Error surfaces
+
+Inline, actionable, never a raw stack trace. Every error code maps to one surface and one copy
+entry in `web/src/errors/catalog.ts`. Look: Material 3 (rounded 16 dp sheets, 12 dp banners,
+elevation only on snackbars), theme-aware tokens, error colour only on the icon and primary
+destructive action, never full red backgrounds.
+
+### Which surface
+
+| Severity | Surface | Behaviour | Use for |
+|---|---|---|---|
+| Info / transient | **Snackbar** | Bottom, above the nav and keyboard; 4 s (8 s with an action); one action max; queued, never stacked | Done actions, cancellations, undo ("Moved to trash · Undo") |
+| Recoverable | **Inline banner** | Top of the affected pane; stays until resolved or dismissed; up to two actions | Missing runtime, file changed on disk, offline, restored after a crash, large-file mode |
+| Blocking | **Error sheet** | Bottom sheet; icon, title, one-paragraph explanation, one primary action, secondary "Copy details", Close | Save failed, auth failed, permission needed, host key changed |
+| Fatal (pane) | **Pane error boundary** | Replaces only the broken pane: "This panel stopped working" · **Reload panel** · Copy details; other panes keep working | React render crash in editor, terminal, Git, etc. |
+| Fatal (app, web) | **CrashScreen** | Full screen inside the WebView: **Reload app** · Copy details | Crash in the shell itself |
+| Fatal (host) | **RecoveryActivity** | Native screen, works without the WebView: "LeoCode closed unexpectedly" · **Restart** · Share diagnostics; offers draft recovery on restart | Uncaught Kotlin exception, repeated renderer loss |
+
+Blocking errors never use a snackbar. Transient information never opens a sheet.
+`E_CANCELLED` shows nothing unless the user would otherwise think the action is still running.
+
+### Copy rules
+
+- **Title:** what failed, in the user's terms ("Couldn't save main.py"), not the code.
+- **Explanation:** why, in one or two plain sentences ("Your phone's storage is full.").
+- **Primary action:** exactly one, a verb: Retry, Open settings, Grant, Install, Free space,
+  Reload, Update credentials.
+- No exception names, no stack traces, no paths outside the workspace / shared-storage roots,
+  no blame ("You did…").
+- Same code → same wording everywhere.
+
+### Copy details
+
+Copied as plain text, always redacted:
+
+```
+LeoCode error E_IO (corr c-7f3a2e)
+Action: fs.write · 2026-11-11 14:02:11
+App 0.1.0 (12) · Android 15 (API 35) · WebView 137 · arm64-v8a · root: enabled
+Summary: write failed: no space left on device
+```
+
+Excludes tokens, keys, passphrases, environment values, URL credentials and outside paths
+(replaced by `<outside>`).
+
+### Recovery after a crash
+
+- Renderer loss: WebView is recreated silently, then the banner "Restored after a problem" with
+  **Details**. Two losses within a minute → RecoveryActivity.
+- On the next launch after a host crash: RecoveryActivity first, then the workspace with the
+  "Restore unsaved changes (N files)" prompt (drafts, Task 15).
+- Share diagnostics uses the Android share sheet; nothing is sent automatically (D-013).
 
 ## Accessibility and performance
 
@@ -85,9 +161,3 @@ the nav or the active input: every view observes `visualViewport` and resizes it
 - Contrast ≥ 4.5:1 for text, ≥ 3:1 for UI.
 - Budgets: cold start < 2.5 s, keystroke-to-glyph < 50 ms, editor RSS < 120 MB, terminal scroll < 16 ms/frame
   on the Redmi Note 7S.
-
-## Error surfaces
-
-- Inline, actionable, never a raw stack trace: what failed, why, and one primary action
-  (Retry / Open settings / Copy details).
-- Clipboard copy of diagnostics excludes secrets and paths outside the workspace.

@@ -1,0 +1,24 @@
+# Phase B Task 4 — path jail + file safety demo (D1)
+date        : 2026-11-11
+device      : Redmi Note 7S, Android 9 (SDK 28), serial 192.168.29.26:5555
+apk         : app-debug.apk, versionCode 2, targetSdk 28 (PathJail/AtomicWriter/Trash)
+method      : WebView CDP `Runtime.evaluate` against the injected `LeoCodeAndroid` channel
+commands    : adb -s 192.168.29.26:5555 forward tcp:9223 localabstract:webview_devtools_remote_<pid>
+              node cdp-eval.mjs jail-probe.js http://127.0.0.1:9223/json
+
+## result
+fs.read "/system/build.prop"                 -> ok=false E_PATH_OUTSIDE_ROOT
+fs.read "/sdcard/.."                         -> ok=false E_PATH_OUTSIDE_ROOT
+fs.list "."                                  -> ok=true, 3 entries (workspace)
+fs.list "/storage/emulated/0/Download"       -> ok=true, 43 entries (shared storage)
+fs.write "phase-b-jail-test.txt" (15 B)      -> ok=true
+fs.read  "phase-b-jail-test.txt"             -> ok=true, content=atomic-write-ok
+fs.delete "phase-b-jail-test.txt"            -> ok=true
+fs.read after delete                         -> ok=false E_NOT_FOUND
+
+## trash (delete is recoverable, not permanent)
+$ adb -s 192.168.29.26:5555 shell run-as dev.leocode ls -la files/.trash
+-rw------- 1 u0_a90 u0_a90 15 ... 1794400257901-...-phase-b-jail-test.txt
+
+Verdict: PASS. Workspace and shared-storage operations still work; paths outside every
+allowed root are rejected with E_PATH_OUTSIDE_ROOT; delete lands in the trash.

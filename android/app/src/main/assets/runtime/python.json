@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "python",
+  "version": "3.14.10",
+  "versionCode": 31410,
+  "abi": ["arm64-v8a"],
+  "minAndroid": 28,
+  "artifact": {
+    "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-aarch64-linux-android.tar.gz",
+    "sha256": "423c80b957330cf0ebb92b9b20f2294c292144a441bdb0ceb8c69d14928e569b",
+    "size": 23027305
+  },
+  "install": {
+    "layout": "prefix",
+    "strip": 1,
+    "executables": ["bin/python3"]
+  },
+  "env": {
+    "PYTHONHOME": "{{prefix}}",
+    "LD_LIBRARY_PATH": "{{prefix}}/lib",
+    "SSL_CERT_FILE": "{{prefix}}/etc/ca-certificates.pem",
+    "PATH": "{{prefix}}/bin:/system/bin:/system/xbin",
+    "TMPDIR": "{{tmp}}"
+  },
+  "healthCheck": {
+    "argv": ["bin/python3", "-c", "import sys, ssl, sqlite3, zlib, hashlib; print(sys.version.split()[0])"],
+    "timeoutMs": 30000
+  },
+  "limitations": [
+    "no compiler on device: source-only packages cannot build",
+    "manylinux/musllinux wheels do not run on Android Bionic",
+    "native packages need an android_aarch64 wheel"
+  ]
+}

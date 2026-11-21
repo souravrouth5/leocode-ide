@@ -1,0 +1,77 @@
+--------- beginning of main
+--------- beginning of system
+--------- beginning of crash
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 15446 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+════ RUN ALL ════
+
+▶ T1 — /system/bin/sh
+  pid=2295 exit=0 time=271ms timedOut=false truncated=false
+  stdout: hello-from-android
+          uid=10090(u0_a90) gid=10090(u0_a90) groups=10090(u0_a90),3003(inet),9997(everybody),20090(u0_a90_cache),50090(all_a90),99909997(u999_everybody) context=u:r:untrusted_app:s0:c90,c256,c512,c768
+          /data/user/0/dev.leocode/files/workspaces/default
+          PATH=/data/user/0/dev.leocode/files/usr/bin:/system/bin:/system/xbin
+  PASS
+
+▶ T2 — exec binary from app data (W^X gate)
+  pid=2303 exit=0 time=144ms timedOut=false truncated=false
+  stdout: exec-from-data-ok
+          arg0=/data/user/0/dev.leocode/files/workspaces/default/t2/probe-sh
+  canExecute=true
+  PASS
+
+▶ T3 — process-group kill via setsid
+  pid=2306 killGroup=0 exited=yes
+  PASS
+
+▶ T4 — exit code + stderr capture
+  pid=2371 exit=42 time=959ms timedOut=false truncated=false
+  stdout: to-stdout
+  stderr: to-stderr
+  PASS
+
+▶ T5 — output flood, bounded buffer
+  exit=0 time=138861ms captured=262144B truncated=true timedOut=false rate=180KB/s
+  PASS — bounded and completed
+
+▶ T6 — native PTY smoke test
+  pageSize=4096
+  output=pty-ok | cols=80
+  exit=7 (expected 7)
+  PASS
+
+▶ T7 — system shell applet inventory
+  pid=3059 exit=0 time=106ms timedOut=false truncated=false
+  stdout: --- tools ---
+          yes setsid
+          yes tar
+          yes gzip
+          no  unzip
+          yes sed
+          yes awk
+          yes grep
+          yes find
+          yes xxd
+          yes curl
+          no  git
+          no  python
+
+▶ S1 — shared storage with legacy permissions
+  root=/storage/emulated/0 entries=56
+  read=true write=true writeTest=true
+  probe=/storage/emulated/0/Download/leocode-s1-1794393998658.txt
+  PASS — legacy shared storage usable
+
+════ RUN ALL COMPLETE ════

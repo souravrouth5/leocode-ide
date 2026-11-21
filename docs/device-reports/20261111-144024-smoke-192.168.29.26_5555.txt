@@ -1,0 +1,29 @@
+# LeoCode smoke test
+generated: 2026-11-11T09:11:35Z
+serial:    192.168.29.26:5555
+model:     Redmi Note 7S
+api:       28
+apk:       /home/sourav/Desktop/Apps/leocode/android/app/build/outputs/apk/debug/app-debug.apk
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+Activity: dev.leocode/.MainActivity
+ThisTime: 3309
+TotalTime: 3309
+WaitTime: 3478
+Complete
+
+## verdict
+pid:        15626
+
+## logcat
+--------- beginning of main
+--------- beginning of system
+--------- beginning of crash
+11-11 14:41:27.327 E/libc    (15522): Access denied finding property "ro.vendor.at_library"
+11-11 14:41:32.163 E/libc    (15626): Access denied finding property "vendor.camera.aux.packagelist"
+11-11 14:41:32.163 E/libc    (15626): Access denied finding property "vendor.camera.aux.packagelist"
+11-11 14:41:32.163 E/libc    (15626): Access denied finding property "vendor.camera.aux.packagelist"
+11-11 14:41:32.164 E/libc    (15626): Access denied finding property "vendor.camera.aux.packagelist"
+11-11 14:41:32.165 E/libc    (15626): Access denied finding property "vendor.camera.aux.packagelist"

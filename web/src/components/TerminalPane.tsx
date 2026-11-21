@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import type { Bridge, TerminalHandle } from "../bridge"
+import { AppError, type Bridge, type TerminalHandle } from "../bridge"
+import {
+  clearSessionId,
+  readSessionId,
+  sanitizeTerminalTitle,
+  writeSessionId
+} from "../features/terminal/session"
 
 interface Props {
   bridge: Bridge
@@ -11,6 +17,8 @@ interface Props {
   dark: boolean
   fontSize?: number
   fontFamily?: string
+  /** A non-recoverable attach/lifecycle failure, for the shared error surfaces. */
+  onError?: (error: unknown) => void
 }
 
 function palette(dark: boolean) {
@@ -61,7 +69,8 @@ export function TerminalPane({
   active,
   dark,
   fontSize = 13,
-  fontFamily = "'JetBrains Mono', monospace"
+  fontFamily = "'JetBrains Mono', monospace",
+  onError
 }: Props) {
   const host = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -72,6 +81,8 @@ export function TerminalPane({
   )
   const [exited, setExited] = useState<number | null>(null)
   const [generation, setGeneration] = useState(0)
+  /** OSC 0/2 title, sanitised; "workspace" until the shell sends one. */
+  const [title, setTitle] = useState("")
 
   // -------------------------------------------------------- terminal instance
   useEffect(() => {
@@ -92,6 +103,16 @@ export function TerminalPane({
     term.open(host.current)
     termRef.current = term
     fitRef.current = fit
+
+    // Titles are untrusted PTY output: sanitise them before rendering. OSC 52
+    // would let a program write the device clipboard; swallow it (Task 13).
+    const onTitle = (data: string) => {
+      setTitle(sanitizeTerminalTitle(data))
+      return true
+    }
+    const oscTitle = term.parser.registerOscHandler(0, onTitle)
+    const oscTitle2 = term.parser.registerOscHandler(2, onTitle)
+    const oscClipboard = term.parser.registerOscHandler(52, () => true)
 
     let disposed = false
     let polling: number | null = null
@@ -132,26 +153,74 @@ export function TerminalPane({
     }
 
     void (async () => {
-      try {
+      const onExit = (code: number) => {
+        if (disposed) return
+        term.write(`\r\n\x1b[90m[session ended, exit ${code}]\x1b[0m\r\n`)
+        handleRef.current = null
+        clearSessionId()
+        setExited(code)
+        setStatus("closed")
+      }
+
+      const tryAttach = async (): Promise<boolean> => {
+        const saved = readSessionId()
+        if (!saved || !bridge.attachTerminal) return false
+        try {
+          const attached = await bridge.attachTerminal(saved, {
+            onData: (bytes, done) => term.write(bytes, done),
+            onExit
+          })
+          if (disposed) {
+            attached?.handle.detach()
+            return true
+          }
+          if (!attached) {
+            // The PTY is gone (process restarted or user pressed Stop all).
+            clearSessionId()
+            return false
+          }
+          if (!attached.alive) {
+            attached.handle.detach()
+            handleRef.current = null
+            clearSessionId()
+            setExited(attached.exitCode)
+            setStatus("closed")
+            return true
+          }
+          handleRef.current = attached.handle
+          setStatus("pty")
+          // The PTY kept its old geometry while detached (W-21).
+          attached.handle.resize(size.cols, size.rows)
+          term.onData((data) => attached.handle.write(encoder.encode(data)))
+          term.focus()
+          return true
+        } catch (error) {
+          // Only a missing session falls back to a new shell. A timeout or a
+          // disconnect must not spawn a second PTY behind the user's back (W-22).
+          if (error instanceof AppError && error.code === "E_NOT_FOUND") return false
+          onError?.(error)
+          setExited(null)
+          setStatus("closed")
+          return true
+        }
+      }
+
+      const startPty = async () => {
         const handle = await bridge.openTerminal({
           cwd,
           cols: size.cols,
           rows: size.rows,
-          onData: (bytes) => term.write(bytes),
-          onExit: (code) => {
-            if (disposed) return
-            term.write(`\r\n\x1b[90m[session ended, exit ${code}]\x1b[0m\r\n`)
-            handleRef.current = null
-            setExited(code)
-            setStatus("closed")
-          }
+          onData: (bytes, done) => term.write(bytes, done),
+          onExit
         })
         if (disposed) {
-          handle?.close()
+          handle?.detach()
           return
         }
         if (handle) {
           handleRef.current = handle
+          writeSessionId(handle.sessionId)
+          if (!handle.alive) return
           setStatus("pty")
           term.onData((data) => handle.write(encoder.encode(data)))
           term.write("\x1b[2J\x1b[H")
@@ -182,8 +251,13 @@ export function TerminalPane({
             }
           })
         }
+      }
+
+      try {
+        if (!(await tryAttach())) await startPty()
       } catch (error) {
         if (disposed) return
+        onError?.(error)
         setStatus("fallback")
         term.write(`\r\n\x1b[31m${(error as Error).message}\x1b[0m\r\n`)
         fallbackPrompt()
@@ -205,8 +279,13 @@ export function TerminalPane({
       disposed = true
       observer.disconnect()
       if (polling !== null) window.cancelAnimationFrame(polling)
-      handleRef.current?.close()
+      // Keep the PTY alive: background survival is the point of Task 10. The
+      // session id stays in localStorage and a later mount calls term.attach.
+      handleRef.current?.detach()
       handleRef.current = null
+      oscTitle.dispose()
+      oscTitle2.dispose()
+      oscClipboard.dispose()
       term.dispose()
       termRef.current = null
     }
@@ -273,7 +352,9 @@ export function TerminalPane({
                 ? `exited${exited === null ? "" : " " + exited}`
                 : "starting"}
         </span>
-        <span className="terminal-cwd">{cwd === "." ? "workspace" : cwd}</span>
+        <span className="terminal-cwd" title={title || undefined}>
+          {title || (cwd === "." ? "workspace" : cwd)}
+        </span>
         {status === "closed" ? (
           <button
             className="btn tiny"

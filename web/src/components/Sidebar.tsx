@@ -56,6 +56,8 @@ interface Props {
   onOpenSettings: () => void
   onOpenTerminal: () => void
   onOpenRuntimes: () => void
+  /** Ask Android for shared-storage access (W-27). */
+  onRequestStoragePermission?: () => void
   version: string
 }
 
@@ -83,6 +85,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenTerminal,
   onOpenRuntimes,
+  onRequestStoragePermission,
   version
 }: Props) {
   const [locationsCollapsed, setLocationsCollapsed] = useState(false)
@@ -135,6 +138,20 @@ export function Sidebar({
 
             {!locationsCollapsed && (
               <div className="sidebar-locations-list">
+                {storageInfo && !storageInfo.hasPermission && onRequestStoragePermission && (
+                  <button
+                    className="sidebar-nav-item saf-highlight"
+                    onClick={onRequestStoragePermission}
+                  >
+                    <SmartphoneIcon size={17} className="sidebar-item-icon saf" />
+                    <div className="sidebar-item-info">
+                      <span className="sidebar-item-title">Grant storage access</span>
+                      <span className="sidebar-item-sub">
+                        Needed for Downloads, Documents and SD cards
+                      </span>
+                    </div>
+                  </button>
+                )}
                 <button
                   className={"sidebar-nav-item" + (cwd === "/storage/emulated/0" ? " active" : "")}
                   onClick={() => {

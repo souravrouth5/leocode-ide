@@ -1,64 +1,142 @@
 #!/usr/bin/env bash
-# Phase 0A: capture a device report. Run with one phone connected.
-#   scripts/collect-device-report.sh [output-file]
-set -uo pipefail
+# Capture a device report (plan v9 Task 3).
+#
+#   scripts/collect-device-report.sh [serial] [output-file]
+#
+# With two phones connected always pass the serial (or set LEO_D1 / LEO_D2);
+# scripts/devices.sh prints the serials and the matching exports.
+set -euo pipefail
 
-OUT="${1:-docs/device-reports/$(date +%Y%m%d-%H%M%S)-device.txt}"
-mkdir -p "$(dirname "$OUT")"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+adb="${ADB:-adb}"
 
-if ! adb get-state >/dev/null 2>&1; then
-  echo "No device. Enable USB debugging and check 'adb devices -l'." >&2
+serial="${1:-}"
+
+# Fallback: prefer a connected LEO_D1 or LEO_D2, then the only attached device.
+if [ -z "$serial" ]; then
+  for candidate in "${LEO_D1:-}" "${LEO_D2:-}"; do
+    if [ -n "$candidate" ] && "$adb" -s "$candidate" get-state >/dev/null 2>&1; then
+      serial="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$serial" ]; then
+  mapfile -t connected < <("$adb" devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+  if [ ${#connected[@]} -eq 1 ]; then
+    serial="${connected[0]}"
+  elif [ ${#connected[@]} -eq 0 ]; then
+    echo "No device. Enable USB debugging and check 'adb devices -l'." >&2
+    exit 1
+  else
+    echo "Several devices connected. Pass a serial:" >&2
+    printf '  %s\n' "${connected[@]}" >&2
+    exit 2
+  fi
+fi
+
+if ! "$adb" -s "$serial" get-state >/dev/null 2>&1; then
+  echo "error: device '$serial' is not connected" >&2
   exit 1
 fi
 
+OUT="${2:-$root/docs/device-reports/$(date +%Y%m%d-%H%M%S)-device.txt}"
+mkdir -p "$(dirname "$OUT")"
+
+run() { "$adb" -s "$serial" shell "$@" 2>/dev/null | tr -d '\r' || true; }
+
 props() {
   for p in "$@"; do
-    printf '%-28s %s\n' "$p" "$(adb shell getprop "$p" 2>/dev/null | tr -d '\r')"
+    printf '%-30s %s\n' "$p" "$(run getprop "$p")"
   done
 }
 
 {
   echo "# LeoCode device report"
   echo "generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "serial:    $serial"
   echo
   echo "## identity"
   props ro.product.manufacturer ro.product.model ro.product.device \
         ro.build.version.release ro.build.version.sdk ro.build.version.security_patch \
-        ro.boot.selinux ro.miui.ui.version.name ro.miui.ui.version.code
+        ro.build.display.id ro.build.flavor ro.boot.selinux \
+        ro.miui.ui.version.name ro.miui.ui.version.code
 
   echo
   echo "## cpu / abi"
-  props ro.product.cpu.abi ro.product.cpu.abilist ro.product.cpu.abilist32 \
-        ro.product.cpu.abilist64 ro.build.version.sdk_int
+  props ro.board.platform ro.hardware ro.product.cpu.abi ro.product.cpu.abilist \
+        ro.product.cpu.abilist32 ro.product.cpu.abilist64
 
   echo
   echo "## memory / storage"
-  adb shell cat /proc/meminfo | head -5
+  run cat /proc/meminfo | head -5 || true
   echo
-  adb shell df -h /data | tail -2
+  run df -h /data | tail -2 || true
 
   echo
   echo "## page size"
-  adb shell getconf PAGE_SIZE 2>/dev/null || echo "getconf unavailable (use native helper)"
+  run getconf PAGE_SIZE
+  auxv_hex="$(run 'od -An -tx8 -v /proc/self/auxv | tr -s " " "\n" | awk "p{print; exit} /^0*6\$/{p=1}"' | tr -d ' ')"
+  case "$auxv_hex" in
+    *[!0-9a-fA-F]*) auxv_hex="" ;;
+  esac
+  if [ -n "$auxv_hex" ]; then
+    echo "auxv AT_PAGESZ: $((16#$auxv_hex))"
+  fi
 
   echo
   echo "## webview"
-  adb shell dumpsys webviewupdate 2>/dev/null | sed -n '1,24p'
-  adb shell dumpsys package com.google.android.webview 2>/dev/null \
-    | grep -iE 'versionName|versionCode' | head -4
+  run dumpsys webviewupdate | sed -n '1,24p' || true
+  for pkg in com.google.android.webview com.android.webview com.google.android.trichromelibrary; do
+    line="$(run dumpsys package "$pkg" | grep -m1 -E 'versionName=' || true)"
+    printf '%-34s %s\n' "$pkg" "${line:-<not installed>}"
+  done
+
+  echo
+  echo "## app"
+  run dumpsys package dev.leocode | grep -E 'versionName|versionCode|targetSdk|minSdk' | head -8 || true
+
+  echo
+  echo "## root (read-only facts; su is never executed)"
+  su_path="$(run 'command -v su')"
+  printf '%-30s %s\n' "su binary" "${su_path:-<none>}"
+  for d in /data/adb/magisk /data/adb/ksu; do
+    if [ -n "$(run "ls -d $d 2>/dev/null")" ]; then
+      printf '%-30s %s\n' "dir $d" "present"
+    else
+      printf '%-30s %s\n' "dir $d" "absent (or unreadable by shell)"
+    fi
+  done
+  for pkg in com.topjohnwu.magisk me.weishu.kernelsu me.bmax.apatch; do
+    if [ -n "$(run pm list packages "$pkg")" ]; then
+      printf '%-30s %s\n' "package $pkg" "present"
+    else
+      printf '%-30s %s\n' "package $pkg" "absent"
+    fi
+  done
+  if [ -n "$su_path" ]; then
+    echo "root: su present (not tested)"
+  else
+    echo "root: no su"
+  fi
+
+  echo
+  echo "## storage permission state"
+  run dumpsys package dev.leocode | grep -E 'READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE' | head -8 || true
 
   echo
   echo "## system shell"
-  adb shell ls /system/bin | tr '\n' ' ' | fold -s -w 100 | head -8
+  run ls /system/bin | tr '\n' ' ' | fold -s -w 100 | head -8 || true
   echo
-  for t in setsid tar gzip unzip sed awk grep find xxd curl git python; do
-    if adb shell "command -v $t" >/dev/null 2>&1; then echo "yes $t"; else echo "no  $t"; fi
+  for t in setsid tar gzip unzip sed awk grep find xxd curl git python su; do
+    if [ -n "$(run "command -v $t")" ]; then echo "yes $t"; else echo "no  $t"; fi
   done
 
   echo
   echo "## adb"
-  adb devices -l
+  "$adb" devices -l | tr -d '\r'
 } | tee "$OUT"
 
 echo
-echo "written: $OUT"
+echo "written: ${OUT#$root/}"

@@ -1,0 +1,22 @@
+# LeoCode device report: task10-final
+generated: 2026-11-14T10:30:36Z
+serial:    192.168.29.151:40037
+model:     POCO F1
+api:       35
+apk:           versionName=0.1.0
+
+## focus
+
+## foreground service
+  * ServiceRecord{72c68c9 u0 dev.leocode/.SessionService c:dev.leocode}
+    isForeground=true foregroundId=24149 types=0x00000000 foregroundNoti=Notification(channel=leocode.sessions shortcut=null contentView=null vibrate=null sound=null defaults=0 flags=ONGOING_EVENT|ONLY_ALERT_ONCE|FOREGROUND_SERVICE color=0x00000000 actions=1 vis=PRIVATE)
+  * ServiceRecord{5ab572c u0 dev.leocode/org.chromium.content.app.SandboxedProcessService0:0 c:dev.leocode}
+
+## notification
+
+## app processes
+u0_a554       6708   964   40898876 259096 0                   0 S dev.leocode
+u0_a554      10225  6708   10813600   3388 0                   0 S sh
+u0_a554      10225  6708   10813600   3388 0                   0 S sh
+
+## logcat (100)
