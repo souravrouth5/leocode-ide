@@ -217,6 +217,21 @@ class TerminalRegistryTest {
     }
 
     @Test
+    fun `closeAll reports an exit to an attached listener`() {
+        val fake = FakePty()
+        val registry = TerminalRegistry(spawn = { _, _, _, _ -> fake })
+        val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
+        val collector = Collector()
+        registry.attach(sessionId, collector)!!.start()
+
+        registry.closeAll()
+
+        awaitUntil { collector.exits.isNotEmpty() }
+        assertEquals(TerminalRegistry.EXIT_STOPPED, collector.exits.single())
+        assertEquals(0, registry.activeCount())
+    }
+
+    @Test
     fun `clamps rows and cols to a sane range`() {
         val sizes = CopyOnWriteArrayList<Pair<Int, Int>>()
         val fake = FakePty()

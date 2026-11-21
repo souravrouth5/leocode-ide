@@ -35,6 +35,13 @@ class TerminalRegistry(
         const val MAX_CREDIT = 4L * 1024 * 1024
         const val SCROLLBACK_BYTES = 256 * 1024
 
+        /**
+         * Exit code reported to the page when **Stop all** terminates a session.
+         * `PtySession.destroy()` sends SIGTERM first (143); the page only needs
+         * to know the session is gone so it can offer Restart.
+         */
+        const val EXIT_STOPPED = 143
+
         /** Rows/cols are clamped to something a terminal can represent. */
         const val MAX_DIMENSION = 1000
         /** Exited sessions are kept for reattach, but not without bound. */
@@ -137,7 +144,9 @@ class TerminalRegistry(
         for (id in sessions.keys.toList()) {
             val session = sessions.remove(id) ?: continue
             removed = true
-            session.close()
+            // Tell an attached page the session is gone; otherwise the terminal
+            // keeps showing "pty" for a shell that no longer exists.
+            session.close(notifyExit = true)
             pidFiles?.remove(id)
         }
         if (removed) notifyCount()
@@ -387,10 +396,12 @@ class TerminalRegistry(
             if (deliver && target != null) runCatching { target.exit(code) }
         }
 
-        fun close() {
+        fun close(notifyExit: Boolean = false) {
             val wasAlive: Boolean
+            val target: Listener?
             synchronized(lock) {
                 wasAlive = alive
+                target = if (notifyExit && alive) listener else null
                 alive = false
                 listener = null
                 paused = false
@@ -399,6 +410,9 @@ class TerminalRegistry(
                 pendingExit = null
                 lock.notifyAll()
             }
+            // Deliver before destroy(): the PTY teardown may wait out its SIGTERM
+            // grace period, and the page should flip to "exited" immediately.
+            if (target != null) runCatching { target.exit(EXIT_STOPPED) }
             if (wasAlive) runCatching { pty.destroy() }
         }
     }
