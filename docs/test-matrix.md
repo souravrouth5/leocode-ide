@@ -111,13 +111,16 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 > T25 installs the signed python.org 3.14.10 artifact, T25L reads the catalog,
 > and T25C cancels mid-download without touching the installed tree.
 >
-> **Task 24 CI evidence (2026-11-21).** The `python-runtime` job verifies the
-> pinned artifact (`sha256 423c80b9…`, 23 027 305 bytes), the safe tar layout,
-> the pruned size (42 190 285 ≤ 47 185 920 bytes) and all 80 ELFs for 16 KB
-> alignment, then checks the Ed25519 signature and builds the `markupsafe`
-> wheel (`cp314-cp314-android_24_arm64_v8a`). The signed release/publish job is
-> gated on the protected `python-runtime` environment; the on-device wheel
-> install/import rows wait for Task 26.
+> **Task 24 CI evidence (2026-11-21, run
+> [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602)).**
+> The `python-runtime` job verifies the pinned artifact (`sha256 423c80b9…`,
+> 23 027 305 bytes), the safe tar layout, the pruned size (42 190 285 ≤
+> 47 185 920 bytes) and all 80 ELFs for 16 KB alignment, then checks the
+> Ed25519 signature and builds the `markupsafe` wheel
+> (`cp314-cp314-android_24_arm64_v8a`, `sha256 2fb50c46…`). The signed
+> release/publish job is gated on the protected `python-runtime` environment;
+> the on-device wheel install/import rows wait for Task 26. Details:
+> [`reports/task24-verification.md`](reports/task24-verification.md).
 
 | Test | D1 | D2 |
 |---|---|---|

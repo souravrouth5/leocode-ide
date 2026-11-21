@@ -151,9 +151,13 @@ decision for the owner.
 For the full list of what remains before a release, with each gate's measured status, see
 [`RELEASE-READINESS.md`](RELEASE-READINESS.md).
 
-1. **Start Phase G (Python, D-017).** Tasks 19–23 are closed and D-016 is settled. Task 24 (CI
-   artifact) and Task 25 (safe installer) are the first pieces; nothing else in Phase G can be
-   tested until a runtime installs and launches on a device.
+1. **Continue Phase G (Python, D-017).** Task 24 (CI artifact + wheel, run
+   [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602)) and
+   Task 25 (safe installer, device-verified on D1/D2) are done. The one Task 24 loose end is the
+   signed release: create the protected `python-runtime` environment and upload
+   `RUNTIME_SIGNING_KEY` (the current PAT gets 403 on environment APIs), then re-run
+   `workflow_dispatch` so the release job publishes. Task 26 (on-device wheel install/import,
+   `venv`, PyPI probe) is next.
 2. **Clean up the merged worktrees** (`phase-f-core`, `phase-f-web`, `phase-f-docs`) when convenient.
 3. **Repeat runs and soak** belong to Phase H Task 29. Every Phase F PASS is one run per phone, not a
    soak, and the HTTPS-token push remains a unit-test row rather than a device measurement.
