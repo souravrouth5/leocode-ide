@@ -10,13 +10,13 @@ D-016 is settled, and Phase G (Python) is next.**
 
 | Item | State |
 |---|---|
-| Branch | `v9-impl`, in `/home/sourav/Desktop/Apps/leocode` (the main worktree) |
+| Branch | `main` after PR **#1** merged; Phase G starts on a new branch off `main` |
 | Phase F | **Complete on both phones.** Tasks 19–23 are `[x]`; D1 (API 28) and D2 (Android 15) pass T10–T14 plus the extra Git/SSH rows. D-016 is settled. |
-| Commits this session | 2026-11-15: `993d4ad`, `69de290`, `560a4aa`, `2c4a2ac`, `fb675a4`, `7449d6b`, `cad1450`, `05dae96`, `9469b5c`; 2026-11-21: the D1-pass docs commit |
-| Remote | `origin/v9-impl` matches local `HEAD`; PR **#1** (`v9-impl` → `main`) is open |
+| Commits this session | 2026-11-15: `993d4ad`, `69de290`, `560a4aa`, `2c4a2ac`, `fb675a4`, `7449d6b`, `cad1450`, `05dae96`, `9469b5c`; 2026-11-21: `7e62c71` (D1 pass), `be6e902` (Stop-all exit), `53274ea` (Phase B device evidence) |
+| Remote | PR **#1** (`v9-impl` → `main`) merged on 2026-11-21; `main` is the release branch |
 | Worktrees | Only the main tree remains; the merged `phase-f-*` worktrees were removed on 2026-11-21 |
-| Working tree | Clean (before the Task 6/8/9 documentation pass) |
-| Gates | Android 358 unit tests, `lintDebug`, `assembleDebug`; web 277 tests in 40 files, typecheck, lint, build; **CI green once** — run [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) on `v9-impl` |
+| Working tree | Clean |
+| Gates | Android 358 unit tests, `lintDebug`, `assembleDebug`; web 277 tests in 40 files, typecheck, lint, build; **CI green twice** — [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) (dispatch) and [44888183932](https://github.com/souravrouth5/leocode-ide/actions/runs/44888183932) (PR, `53274ea`) |
 
 ## What was actually done
 

@@ -20,7 +20,7 @@ extra Git/SSH rows, settling D-016.
 | 5 | Web typecheck / lint / build | **PASS** | `tsc --noEmit`, ESLint, Vite build |
 | 6 | Bridge type drift | **PASS** | `generateBridgeTypes` + coverage test; CI drift step passed in run 44884113986 |
 | 7 | 16 KB page alignment | **PASS** (static) | `scripts/check-elf-alignment.sh`, passed locally and in CI run 44884113986 |
-| 8 | CI runs green on GitHub | **PASS** (first run) | Run [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) on `v9-impl` (commit `7e62c71`): `web` + `android` green, artifacts uploaded |
+| 8 | CI runs green on GitHub | **PASS** (two runs) | Runs [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) (dispatch, `7e62c71`) and [44888183932](https://github.com/souravrouth5/leocode-ide/actions/runs/44888183932) (PR, `53274ea`): `web` + `android` green, artifacts uploaded |
 | 9 | Instrumented (on-device) tests | **ABSENT** | `android/app/src/androidTest` does not exist |
 | 10 | Device matrix: D2 (Android 15) | **PARTIAL** | Phases B–F verified; Phase G (Python) never run |
 | 11 | Device matrix: D1 (Android 9 / API 28) | **PARTIAL** | Phases B–F verified; Phase F T10–T14 plus the extra Git/SSH rows passed on 2026-11-21 (D-016 settled); Phase G never run |
@@ -79,18 +79,18 @@ This is the most under-appreciated gap, and this session is the evidence for it:
 - There are **zero instrumented tests**. All Android testing is JVM-level with fakes, which is
   exactly the layer that cannot catch the class of bug above — every one of the five Phase F
   defects was invisible to JVM tests by construction.
-- CI is green **once** (run 44884113986). The workflow does not trigger on `v9-impl` pushes, so
-  coverage depends on opening a PR or dispatching it manually. Treat one run as a smoke test, not a
-  regression net.
+- CI is green **twice** (runs 44884113986 and 44888183932). The workflow does not trigger on
+  `v9-impl` pushes, so coverage depends on opening a PR or dispatching it manually. Two runs are
+  still a smoke test, not a regression net.
 
 ## 3. Ordering that actually reduces risk
 
 The instinct is to finish features. The evidence from this session says the higher-value move is to
 increase the chance of *finding* problems before they ship.
 
-1. **Keep CI running on every change** (gate 8). The first green run is done; either add `v9-impl`
-   to the `push` branches or keep every change flowing through PR #1 so the `pull_request` trigger
-   covers it.
+1. **Keep CI running on every change** (gate 8). Two green runs are done; either add the Phase G
+   branch to the `push` branches or keep every change flowing through a PR so the `pull_request`
+   trigger covers it.
 2. **Run the existing suite on D1** (gate 11). **Done for Phases B–F on 2026-11-21** — T10–T14 plus
    the extra Git/SSH rows pass, so D-016 is settled. The remaining D1 work is the Phase G runtime
    suite, which has not been built yet.
