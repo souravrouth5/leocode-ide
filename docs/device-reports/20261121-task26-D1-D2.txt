@@ -1,0 +1,178 @@
+LeoCode — Task 26 Python integration, device verification (compatibility rows)
+Date: 2026-11-21
+Branch: feat/phase-g (HEAD fe28a04; runtime installed by Task 25)
+Runtime: python.org Android build 3.14.10, pip 26.2.2
+Harness: debug app data dir via `adb shell run-as dev.leocode` (raw probes; the
+  production T15 harness is added with the Task 26 code).
+
+Devices
+  D1  192.168.29.26:5555  Redmi Note 7S   Android 9  (SDK 28)  arm64-v8a
+  D2  e76846f (USB)       POCO F1         Android 15 (SDK 35)  arm64-v8a
+      (the earlier Wi-Fi address 192.168.29.68:5555 also worked)
+
+Network note
+  The LAN has no direct internet: devices resolve names but TCP to PyPI times
+  out, and only the authenticated proxy 192.168.34.181:8080 works. The host ran
+  a local CONNECT proxy on 127.0.0.1:18080 and exposed it with
+  `adb reverse tcp:18080 tcp:18080`; pip used `--proxy http://127.0.0.1:18080`
+  and requests used `https_proxy`/`http_proxy`. This is test plumbing only; the
+  app itself does not depend on a proxy. The proxy was flaky for large reads
+  (PyPI simple pages), which is why the D1 request install output was cut off
+  at the transport level even though the install completed (verified with
+  `pip show`).
+
+════════════════════════════════════════════════════════════════════
+D1 — Redmi Note 7S (Android 9 / API 28)
+════════════════════════════════════════════════════════════════════
+
+▶ supported pip tags (420 total; android subset)
+  cp314-cp314-android_28_arm64_v8a; cp314-cp314-android_27_arm64_v8a; ...
+  cp314-cp314-android_24_arm64_v8a; ... cp314-cp314-android_16_arm64_v8a
+  (minAndroid 28 is the top Android tag; the wheel's android_24 tag is
+  compatible and was selected below)
+
+▶ PyPI probe — markupsafe==3.0.2 binary only
+  ERROR: Could not find a version that satisfies the requirement markupsafe==3.0.2
+  (from versions: 3.0.4)
+  ERROR: No matching distribution found for markupsafe==3.0.2
+  (PyPI publishes no Android wheel for markupsafe; pip correctly refuses the
+  manylinux/musllinux wheels)
+
+▶ venv create
+  bin/python -> python3
+  bin/python3 -> /data/data/dev.leocode/files/usr/bin/python3
+  pyvenv.cfg:
+    home = /data/data/dev.leocode/files/usr/bin
+    include-system-site-packages = false
+    version = 3.14.10
+  bin/pip shebang: #!/data/data/dev.leocode/files/tmp/t26/venv/bin/python3
+  venv python with PYTHONHOME set:   prefix .../tmp/t26/venv
+  venv python with PYTHONHOME unset: prefix .../tmp/t26/venv
+  (both work; the inherited PYTHONHOME does not override the venv prefix)
+
+▶ activate
+  VIRTUAL_ENV=/data/data/dev.leocode/files/tmp/t26/venv
+  Python 3.14.10
+  pip 26.2.2 from .../venv/lib/python3.14/site-packages/pip (python 3.14)
+
+▶ local markupsafe wheel
+  Processing ./files/tmp/t26/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
+  Successfully installed markupsafe-3.0.2
+  version 3.0.2
+  escape &lt;b&gt;
+  so .../site-packages/markupsafe/_speedups.cpython-314-aarch64-linux-android.so
+
+▶ requests from PyPI (through the proxy)
+  The install completed, but the ADB transport dropped while pip was printing.
+  Verified afterwards:
+  Name: requests            Version: 2.34.2
+  Name: charset-normalizer  Version: 3.5.2
+  Location: /data/data/dev.leocode/files/tmp/t26/venv/lib/python3.14/site-packages
+  The dependency wheels were then re-downloaded from the device's pip cache into
+  files/tmp/wheelhouse and reused offline on this device.
+
+▶ PyPI Android wheel accepted by pip
+  charset_normalizer-3.5.2-cp314-cp314-android_24_arm64_v8a.whl
+  charset 3.5.2 .../charset_normalizer/md.cpython-314-aarch64-linux-android.so
+  (pip selected a real PyPI Android wheel for a native dependency)
+
+▶ run a script that fetches a URL
+  https://example.com 200 577
+  (PyPI simple / files.pythonhosted.org reads failed with reset/chunked errors
+  from the flaky proxy; example.com is a clean end-to-end requests + TLS test)
+
+▶ console script
+  #!/data/data/dev.leocode/files/tmp/t26/venv/bin/python3
+  Pygments version 2.21.0, (c) 2006-present by Georg Brandl, ...
+
+▶ requirements.txt
+  Requirement already satisfied: requests ... (from -r requirements2.txt)
+  Requirement already satisfied: pygments ... (from -r requirements2.txt)
+
+▶ peak RSS of `python3 -c` (ru_maxrss, KB)
+  8548
+
+D1 verdict: venv create/activate PASS; markupsafe wheel install/import PASS;
+requests install PASS (verified by pip show); requests fetch PASS; console
+script PASS; symlinks PASS; PyPI Android wheel PASS; RSS 8548 KB.
+
+════════════════════════════════════════════════════════════════════
+D2 — POCO F1 (Android 15 / API 35)
+════════════════════════════════════════════════════════════════════
+
+▶ supported pip tags (637 total; android subset)
+  cp314-cp314-android_35_arm64_v8a; cp314-cp314-android_34_arm64_v8a; ...
+  cp314-cp314-android_24_arm64_v8a; ... cp314-cp314-android_16_arm64_v8a
+
+▶ PyPI probe — markupsafe==3.0.2 binary only
+  ERROR: Could not find a version that satisfies the requirement markupsafe==3.0.2
+  (from versions: none)
+  ERROR: No matching distribution found for markupsafe==3.0.2
+
+▶ venv create
+  bin/python -> python3
+  bin/python3 -> /data/user/0/dev.leocode/files/usr/bin/python3
+  pyvenv.cfg:
+    home = /data/user/0/dev.leocode/files/usr/bin
+    include-system-site-packages = false
+    version = 3.14.10
+  bin/pip shebang: #!/data/user/0/dev.leocode/files/tmp/t26/venv/bin/python3
+  venv python with PYTHONHOME set:   prefix .../tmp/t26/venv
+  venv python with PYTHONHOME unset: prefix .../tmp/t26/venv
+
+▶ activate
+  VIRTUAL_ENV=/data/user/0/dev.leocode/files/tmp/t26/venv
+  Python 3.14.10
+  pip 26.2.2 from .../venv/lib/python3.14/site-packages/pip (python 3.14)
+
+▶ local markupsafe wheel
+  Processing ./files/tmp/t26/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
+  Successfully installed markupsafe-3.0.2
+  version 3.0.2
+  escape &lt;b&gt;
+  so .../site-packages/markupsafe/_speedups.cpython-314-aarch64-linux-android.so
+
+▶ requests from PyPI
+  Successfully installed certifi-2026.11.20 charset_normalizer-3.5.2
+  idna-3.20 requests-2.34.2 urllib3-2.8.0
+
+▶ PyPI Android wheel accepted by pip
+  charset_normalizer-3.5.2-cp314-cp314-android_24_arm64_v8a.whl
+  charset 3.5.2 .../charset_normalizer/md.cpython-314-aarch64-linux-android.so
+
+▶ run a script that fetches a URL
+  https://example.com 200 577
+  (pypi.org simple pages and files.pythonhosted.org timed out through the same
+  proxy after the install; example.com is a clean requests + TLS test)
+
+▶ console script
+  #!/data/user/0/dev.leocode/files/tmp/t26/venv/bin/python3
+  Pygments version 2.21.0, (c) 2006-present by Georg Brandl, ...
+
+▶ requirements.txt
+  Requirement already satisfied: certifi ... (from requests->-r requirements.txt)
+  (and the rest of the requests dependency set)
+
+▶ peak RSS of `python3 -c` (ru_maxrss, KB)
+  11064
+
+D2 verdict: venv create/activate PASS; markupsafe wheel install/import PASS;
+requests install PASS; requests fetch PASS; console script PASS; symlinks PASS;
+PyPI Android wheel PASS; RSS 11064 KB.
+
+════════════════════════════════════════════════════════════════════
+Summary
+════════════════════════════════════════════════════════════════════
+Row                                      D1        D2
+venv create + activate                   PASS      PASS
+markupsafe Android wheel install/import  PASS      PASS
+requests from PyPI + import              PASS      PASS
+PyPI Android wheel accepted by pip       PASS      PASS
+run a script that fetches a URL          PASS      PASS
+console script shebang                   PASS      PASS
+venv symlinks on internal storage        PASS      PASS
+peak RSS (`python3 -c`)                  8548 KB   11064 KB
+
+Not covered here (Task 26 production code): per-project venv create/select in
+the app, requirements.txt one-tap install, trust prompts, and `python`/`pip`
+aliases in the terminal. The raw probes used `python3`/`pip3` from the runtime.

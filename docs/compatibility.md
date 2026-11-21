@@ -14,16 +14,18 @@ Filled in during Tasks 24–26 (plan v9). One row per package, per device. Never
 | CA bundle | certifi, via `SSL_CERT_FILE` |
 | venv | `python -m venv`, internal storage only |
 | Compiler on device | **none** (MVP) |
-| Native packages | LeoCode Android wheels (`cp314-cp314-android_24_arm64_v8a`), built by `runtime-packaging/build_android_wheel.py`; PyPI Android wheels are checked on-device |
+| Native packages | LeoCode Android wheels (`cp314-cp314-android_24_arm64_v8a`), built by `runtime-packaging/build_android_wheel.py`; PyPI Android wheels are accepted when the tag matches (proved with `charset-normalizer`) |
 
 ## Results
 
 | Package | Type | D1 (A9) | D2 (A15) | Notes |
 |---|---|---|---|---|
-| requests | pure | | | |
+| requests | pure | **PASS** | **PASS** | 2.34.2 from PyPI; `https://example.com` returned `200` |
 | flask | pure | | | |
 | rich | pure | | | |
-| markupsafe | native | | | `build_android_wheel.py` wheel (`cp314-cp314-android_24_arm64_v8a`); built and aligned in CI, on-device install pending Task 26 |
+| pygments | pure | **PASS** | **PASS** | 2.21.0; `bin/pygmentize` shebang points at the venv python |
+| markupsafe | native | **PASS** | **PASS** | 3.0.2 from the LeoCode wheel; `_speedups` imports; PyPI has no Android wheel |
+| charset-normalizer | native | **PASS** | **PASS** | 3.5.2 from PyPI; pip selected `cp314-cp314-android_24_arm64_v8a` and `md...so` imports |
 | ujson | native | | | recipe to add with `build_android_wheel.py` |
 | numpy | native | | | check for a PyPI Android wheel; else unsupported |
 | cryptography | native | | | needs OpenSSL linkage |

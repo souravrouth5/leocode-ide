@@ -118,9 +118,14 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 > 47 185 920 bytes) and all 80 ELFs for 16 KB alignment, then checks the
 > Ed25519 signature and builds the `markupsafe` wheel
 > (`cp314-cp314-android_24_arm64_v8a`, `sha256 2fb50c46…`). The signed
-> release/publish job is gated on the protected `python-runtime` environment;
-> the on-device wheel install/import rows wait for Task 26. Details:
-> [`reports/task24-verification.md`](reports/task24-verification.md).
+> release/publish job is gated on the protected `python-runtime` environment.
+> Details: [`reports/task24-verification.md`](reports/task24-verification.md).
+>
+> **Task 26 device evidence (2026-11-21).** Raw probes on both phones through
+> `run-as` (the production T15 harness lands with the Task 26 code). The LAN
+> needs an authenticated proxy, so the host forwarded one with
+> `adb reverse tcp:18080`; that is test plumbing, not app behaviour. Logs:
+> [`device-reports/20261121-task26-D1-D2.txt`](device-reports/20261121-task26-D1-D2.txt).
 
 | Test | D1 | D2 |
 |---|---|---|
@@ -130,16 +135,16 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 | Runtime install (download, verify, extract, health check) | **PASS** (74 s) | **PASS** (497 s fresh, 333 s resumed) |
 | Install resumes after network loss | N/A (Wi-Fi-only ADB; turning the radio off drops the test transport) | **PASS** (`E_OFFLINE` at 3 307 954 B, resumed from the same offset; second `E_OFFLINE` at 6 011 314 B, final retry completed) |
 | CPython `--version` | **PASS** (`Python 3.14.10`) | **PASS** (`Python 3.14.10`) |
-| run script | | |
+| run script (fetch `https://example.com`) | **PASS** (`200`, 577 bytes) | **PASS** (`200`, 577 bytes) |
 | `pip --version` | **PASS** (`pip 26.2.2`) | **PASS** (`pip 26.2.2`) |
 | `markupsafe` Android wheel builds | **PASS** (CI, 16 KB aligned) | **PASS** (CI, 16 KB aligned) |
-| `markupsafe` wheel installs + imports | | |
-| PyPI Android wheel accepted by pip | | (probe blocked by DNS on 2026-11-21) |
-| `venv` create + activate | | |
-| T15 `venv` + `pip install requests` + import `markupsafe` | | |
-| console script shebang | | |
-| venv symlinks on internal storage | | |
-| peak RSS of `python -c pass` | | |
+| `markupsafe` wheel installs + imports | **PASS** (`_speedups` loaded) | **PASS** (`_speedups` loaded) |
+| PyPI Android wheel accepted by pip | **PASS** (`charset-normalizer` 3.5.2) | **PASS** (`charset-normalizer` 3.5.2) |
+| `venv` create + activate | **PASS** | **PASS** |
+| T15 `venv` + `pip install requests` + import `markupsafe` | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) |
+| console script shebang | **PASS** (`pygments` → venv python) | **PASS** (`pygments` → venv python) |
+| venv symlinks on internal storage | **PASS** (`python` → `python3` → `usr/bin/python3`) | **PASS** (`python` → `python3` → `usr/bin/python3`) |
+| peak RSS of `python -c pass` | **8548 KB** | **11064 KB** |
 
 ## Phase 0D — Git / SSH (Tasks 19–23)
 
