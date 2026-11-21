@@ -19,8 +19,8 @@ measured. D-014/Phase E expect root on D2: install a root manager (Magisk or Ker
 it here before Task 17. Until then root-mode rows stay blocked, and unrooted Android 15 is exactly
 the state Task 3 needs.
 
-**D2 page size.** 4096 B, so 16 KB hardware behaviour is not measurable here. The local APK check
-(`scripts/check-elf-alignment.sh`; CI has not run yet) covers static alignment.
+**D2 page size.** 4096 B, so 16 KB hardware behaviour is not measurable here. The local and CI APK
+check (`scripts/check-elf-alignment.sh`, CI run 44884113986) covers static alignment.
 
 **Connection:** D2 on USB, D1 on Wi-Fi ADB (plan v9 §12). Record the serial used in each run's notes.
 **Unrooted Android 15:** measured on D2 with `su` denied to LeoCode; mark such cells `PASS (su denied)`.
@@ -44,8 +44,8 @@ The harness lives in the debug source set only; release builds do not contain it
 | T5 output flood, bounded | **PASS** — 138.8 s, `180KB/s` | **PASS** — 25 MB in 312 ms, 262 144 B captured | D2 312 ms, `rate=80128KB/s` (`docs/device-reports/20261111-harness-D2-e76846f.txt:38`); D1 138 861 ms, `180KB/s` (`docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:46`). Timings vary per run |
 | T6 native PTY (`fork`/`setsid`/`TIOCSCTTY`) | **PASS** | **PASS** — `pty-ok`, `cols=80`, exit 7 | page size 4096 on both |
 | T7 shell applet inventory | **INFO** | **INFO** | D2 has `unzip` and `curl`; **no** git/python/su (D1 also lacks unzip) |
-| T8 PTY child env contains only allowlisted keys | pending | pending | Task 9: `probeEnvironment` execs `/system/bin/env` with the `ChildEnv` envp; run pending (no device attached 2026-11-14) |
-| T9 PTY child has no fds > 2 | pending | pending | Task 9: `probeFds` runs after `dup2` + `close_inherited_fds`; run pending |
+| T8 PTY child env contains only allowlisted keys | **PASS** — child env exactly `HOME,LANG,LD_LIBRARY_PATH,PATH,PWD,PYTHONHOME,SSL_CERT_FILE,TERM,TMP,TMPDIR`; `unexpected=[] missing=[]` | **PASS** — same exact set, `unexpected=[] missing=[]` | Task 9: `probeEnvironment` execs `/system/bin/env` with the `ChildEnv` envp |
+| T9 PTY child has no fds > 2 | **PASS** — `open_above_2=0` | **PASS** — `open_above_2=0` | Task 9: `probeFds` runs after `dup2` + `close_inherited_fds` |
 
 > Renumbering note: v8's "T8 control build" is now **T2c**. T8–T15 are the v9 harness tests.
 
@@ -55,6 +55,16 @@ The harness lives in the debug source set only; release builds do not contain it
 > [`device-reports/20261111-harness-final-D2-e76846f.txt`](device-reports/20261111-harness-final-D2-e76846f.txt),
 > [`device-reports/20261111-harness-final-D1-192.168.29.26_5555.txt`](device-reports/20261111-harness-final-D1-192.168.29.26_5555.txt).
 > The values in the table above stay tied to the earlier logs they cite; timings vary per run.
+
+> **Post-restructure re-run (2026-11-21).** The current APK (versionCode 2, targetSdk 28) ran
+> T1–T9 and S1 on both phones through the `ProcessSupervisor` path, closing the Task 6/9 device
+> re-run. T1 174 ms (D1); T2 `exec-from-data-ok` with `canExecute=true`; T3 `cancelled=true
+> exited=yes exit=143 groupGone=true`; T4 `exit=42` with stderr captured; T5 `truncated=true
+> timedOut=false` (D1 6.0 s / `4139KB/s`, D2 307 ms / `81433KB/s`); T6 `pty-ok`, exit 7; T7
+> inventory (D1 has no `unzip`, D2 does; neither has `git`/`python`); T8 the exact allowlist with no
+> extras or missing keys; T9 `open_above_2=0`; S1 read/write/writeTest true. Raw logs:
+> [D1](device-reports/20261121-135916-phaseB-rerun-D1-11f98015.txt),
+> [D2](device-reports/20261121-135924-phaseB-rerun-D2-192_168_29_85_39941.txt).
 
 **Throughput finding.** `yes | head -c` moves 0.5–4 MB/s through the system shell on D1
 (cold 50 MB: 69 s; 25 MB: 46 s cold, 13 s, then 6 s warm). Real compiler/test output is far
@@ -87,8 +97,8 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 
 | Check | CI | D1 | D2 |
 |---|---|---|---|
-| `libleocodepty.so` all `LOAD` align ≥ `2**14` | **PASS** (local `scripts/check-elf-alignment.sh`: `0x4000`; CI not yet run) | n/a (device uses 4 KB pages; static check only) | n/a (device uses 4 KB pages; static check only) |
-| `zipalign -c -P 16 -v 4` on APK | **PASS** (local static check) | — | — |
+| `libleocodepty.so` all `LOAD` align ≥ `2**14` | **PASS** (`scripts/check-elf-alignment.sh`: `0x4000`; CI run 44884113986) | n/a (device uses 4 KB pages; static check only) | n/a (device uses 4 KB pages; static check only) |
+| `zipalign -c -P 16 -v 4` on APK | **PASS** (local + CI run 44884113986) | — | — |
 | Python package `.so` files aligned | | — | — |
 | PTY library loads (T6) | — | **PASS** | **PASS** |
 | Device page size | — | 4096 | **4096** |
@@ -236,7 +246,7 @@ screenshots are optional but useful for the host-key prompt.
 
 | Test | D1 | D2 |
 |---|---|---|
-| Foreground notification "N processes running" + Stop all | **PASS** — `isForeground=true`, notification `1 process running` with the Stop-all action (`docs/device-reports/20261114-160039-devicectl-*`) | **PASS** — same dump (`docs/device-reports/20261114-160036-devicectl-*`) |
+| Foreground notification "N processes running" + Stop all | **PASS** — `isForeground=true`, notification `1 process running` with the Stop-all action (`docs/device-reports/20261114-160039-devicectl-*`); Stop all now reports `exited 143` + Restart and leaves no child (`20261121-task6-yes-stop-D1-D2.txt`) | **PASS** — same dump (`docs/device-reports/20261114-160036-devicectl-*`); same 2026-11-21 Stop-all result |
 | Notification permission prompt (A13+, targetSdk ≤ 32 behaviour) | N/A | **PASS** — dialog shown on the first job, then remembered; app importance not measured |
 | `sleep 600; echo done` survives 10 min in background | **PASS** — the shell (pid 7638) stayed alive through rotation and a forced Activity recreation; adb `input text` duplicates characters on this WebView, so the typed line is garbled (see report) | **PASS** — typed at 15:22, backgrounded >10 min, returned at 15:34: `done` plus a fresh prompt, no new banner |
 | Terminal reattaches with scrollback (`term.attach`) | **PASS** — same pid before/after recreation, scrollback replayed (`...-155805-d1-reattach-fresh-*.png`) | **PASS** — reattached from background (`...-153434-task10-done-*.png`) |
@@ -252,13 +262,14 @@ screenshots are optional but useful for the host-key prompt.
 
 | Test | D1 | D2 |
 |---|---|---|
-| Renderer killed (debug intent) → WebView recreated + banner | | |
-| Forced host crash → RecoveryActivity → Restart | | |
-| Share diagnostics contains no outside paths / secrets | | |
-| Cancelled SAF picker → snackbar | | |
-| Disk full on save → error sheet | | |
-| Bridge timeout → banner, no endless spinner | | |
-| Back: sheets → Files → exit | **PASS** (Phase 1) | |
+| Renderer killed (debug intent) → WebView recreated + banner | **PASS** — `escalate=false REBUILD_NOW`, page returned, banner “Restored after a problem” (`docs/device-reports/20261121-task8-demo-D1-D2.txt`) | **PASS** — same log line, banner in `20261121-task8-renderer-banner-D2.png` |
+| Second kill inside 60 s → `RecoveryActivity` | **PASS** — `escalate=true RECOVER_NOW`, native screen, Restart returns to the editor | **PASS** — same |
+| Forced host crash → RecoveryActivity → Restart | **PASS** — `--ez forceCrash true`, `files/crash/last-crash.json`, RecoveryActivity, Restart → `MainActivity` | **PASS** — same (bounds tap on Restart) |
+| Share diagnostics contains no outside paths / secrets | **PASS** — chooser opens with the redacted report; `Redactor` + `security.test.ts` cover the payload | not re-measured |
+| Cancelled SAF picker → snackbar | pending | pending |
+| Disk full on save → error sheet | pending | pending |
+| Bridge timeout → banner, no endless spinner | pending | pending |
+| Back: sheets → Files → exit | **PASS** (Phase 1); 2026-11-21 order is drawer → Settings → Terminal → app | **PASS** (2026-11-21) |
 
 ## Phase 1 — IDE shell (WebView + bridge)
 

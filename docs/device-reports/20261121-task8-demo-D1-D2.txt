@@ -1,0 +1,80 @@
+LeoCode Task 8 device demo — activity modernisation and crash recovery
+Date: 2026-11-21
+APK: app-debug.apk, versionCode 2, targetSdk 28 (built 2026-11-15)
+Devices: D1 = 11f98015 (Redmi Note 7S, Android 9 / API 28)
+         D2 = 192.168.29.85:39941 (POCO F1, Android 15 / API 35)
+Driver: adb (am start, input keyevent, screencap), WebView CDP for Page.crash
+
+============================================================
+D1 — renderer kill once, then again inside 60 s
+============================================================
+14:02:04.101 13782 E LeoCode: WebView renderer gone (crash=true, escalate=false, action=REBUILD_NOW)
+  - CDP page target returned after the rebuild.
+  - document.getElementById('leocode-restored-banner') => present.
+  - Screenshot: 20261121-task8-renderer-banner-D1.png (banner + usable editor, "No file open").
+14:02:11.901 13782 E LeoCode: WebView renderer gone (crash=true, escalate=true, action=RECOVER_NOW)
+  - topResumedActivity = dev.leocode/.RecoveryActivity
+  - Screenshot: 20261121-task8-renderer-escalation-D1.png
+    ("Restored after a problem — The web view stopped twice in under a minute.")
+  - Restart LeoCode tapped -> mResumedActivity = dev.leocode/.MainActivity.
+
+============================================================
+D1 — forced crash and RecoveryActivity
+============================================================
+  am start -n dev.leocode/.MainActivity --ez forceCrash true
+  files/crash/last-crash.json:
+    timestamp 1795249979160, thread main, java.lang.RuntimeException,
+    "IllegalStateException: LeoCode debug forced crash", MainActivity.kt:381,
+    appVersion 0.1.0, sdk 28, model Redmi Note 7S.
+  Relaunch -> topResumedActivity = dev.leocode/.RecoveryActivity
+  Screenshot: 20261121-task8-forced-crash-D1.png ("LeoCode closed unexpectedly" + stack).
+  Share diagnostics -> topResumedActivity = android/com.android.internal.app.ChooserActivity
+  Screenshot: 20261121-task8-share-diagnostics-D1.png
+  Restart LeoCode -> dev.leocode/.MainActivity.
+
+============================================================
+D1 — back order
+============================================================
+State before: view=Terminal, sidebar=true, openSheets=[Settings]
+Back 1 -> view=Terminal, sidebar=false, openSheets=[Settings]
+Back 2 -> view=Terminal, sidebar=false, openSheets=[]
+Back 3 -> view=Editor,  sidebar=false, openSheets=[]
+Back 4 -> launcher resumed (app left)
+
+============================================================
+D2 — renderer kill once, then again inside 60 s
+============================================================
+14:08:10.244 13602 E LeoCode: WebView renderer gone (crash=true, escalate=false, action=REBUILD_NOW)
+  - CDP target returned; banner visible in 20261121-task8-renderer-banner-D2.png.
+14:08:18.912 13602 E LeoCode: WebView renderer gone (crash=true, escalate=true, action=RECOVER_NOW)
+  - topResumedActivity = dev.leocode/.RecoveryActivity
+  - Screenshot: 20261121-task8-renderer-escalation-D2.png
+
+============================================================
+D2 — forced crash and RecoveryActivity
+============================================================
+  files/crash/last-crash.json:
+    timestamp 1795250338117, java.lang.RuntimeException,
+    "IllegalStateException: LeoCode debug forced crash", MainActivity.kt:381, sdk 35.
+  FATAL EXCEPTION: main at 14:08:58.115 (pid 13604).
+  Relaunch -> topResumedActivity = dev.leocode/.RecoveryActivity
+  Screenshot: 20261121-task8-forced-crash-D2.png
+  Restart LeoCode (bounds [66,1512][1014,1644]) -> dev.leocode/.MainActivity.
+
+============================================================
+D2 — back order
+============================================================
+State before: view=Terminal, sidebar=true, openSheets=[Settings]
+Back 1 -> view=Terminal, sidebar=false, openSheets=[Settings]
+Back 2 -> view=Terminal, sidebar=false, openSheets=[]
+Back 3 -> view=Editor,  sidebar=false, openSheets=[]
+Back 4 -> launcher resumed (app left)
+
+============================================================
+Notes
+============================================================
+- Measured order matches web/src/features/shell/back.ts and back.test.ts: local action
+  sheets close before the drawer; the Settings sheet closes after the drawer. The
+  procedure text in task8-verification.md previously listed Settings before the drawer;
+  that expectation was wrong and has been corrected.
+- Insets were not re-measured in this pass; the Phase B/C evidence stands.

@@ -1,0 +1,187 @@
+LeoCode Phase B re-run — Task 6/9 (T2-T9, S1)
+Device: D1 (11f98015)
+Date: 2026-11-21T13:59:16+05:30
+APK: versionCode 2, targetSdk 28
+Driver: adb shell am start -n dev.leocode/.HarnessActivity --es run <id>, one process per row
+Logcat tag: LeoCodeHarness
+-----
+--------- beginning of main
+--------- beginning of system
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9971 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T2 — exec binary from app data (W^X gate)
+  pid=12263 exit=0 time=194ms timedOut=false truncated=false
+  stdout: exec-from-data-ok
+          arg0=/data/user/0/dev.leocode/files/workspaces/default/t2/probe-sh
+  canExecute=true
+  PASS
+--------- beginning of crash
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9969 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T3 — process-group kill via setsid
+  pid=12481 cancelled=true exited=yes exit=143 groupGone=true
+  PASS
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9967 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T4 — exit code + stderr capture
+  pid=12546 exit=42 time=108ms timedOut=false truncated=false
+  stdout: to-stdout
+  stderr: to-stderr
+  PASS
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9965 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T5 — output flood, bounded buffer
+  exit=0 time=6039ms captured=262180B truncated=true timedOut=false rate=4139KB/s
+  PASS — bounded and completed
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9951 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T6 — native PTY smoke test
+  pageSize=4096
+  output=pty-ok | cols=80
+  exit=7 (expected 7)
+  PASS
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9979 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T7 — system shell applet inventory
+  pid=12753 exit=0 time=106ms timedOut=false truncated=false
+  stdout: --- tools ---
+          yes setsid
+          yes tar
+          yes gzip
+          no  unzip
+          yes sed
+          yes awk
+          yes grep
+          yes find
+          yes xxd
+          yes curl
+          no  git
+          no  python
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9976 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T8 — PTY child environment is allowlisted
+  allowed=HOME,LANG,LD_LIBRARY_PATH,PATH,PWD,PYTHONHOME,SSL_CERT_FILE,TERM,TMP,TMPDIR
+  child=HOME,LANG,LD_LIBRARY_PATH,PATH,PWD,PYTHONHOME,SSL_CERT_FILE,TERM,TMP,TMPDIR
+  unexpected=[] missing=[]
+  PWD=/data/user/0/dev.leocode/files/workspaces/default
+  PASS
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9974 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ T9 — PTY child has no fds above stderr
+  open_above_2=0
+  PASS
+LeoCode Phase 0B harness
+device     : Xiaomi Redmi Note 7S
+android    : 9 (sdk 28, patch 2020-02-05)
+abis       : arm64-v8a, armeabi-v7a, armeabi
+64-bit abis: arm64-v8a
+abi (main) : arm64-v8a
+webview    : com.android.chrome 137.0.7151.115
+page size  : 4096 bytes (native)
+storage    : 9972 MB free / 51205 MB total
+heap       : max 256 MB
+workspace  : /data/user/0/dev.leocode/files/workspaces/default
+prefix     : /data/user/0/dev.leocode/files/usr
+native pty : loaded
+
+▶ S1 — shared storage with legacy permissions
+  root=/storage/emulated/0 entries=58
+  read=true write=true writeTest=true
+  probe=/storage/emulated/0/Download/leocode-s1-1795249695001.txt
+  PASS — legacy shared storage usable

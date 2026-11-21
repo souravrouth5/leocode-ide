@@ -1,6 +1,6 @@
 # Task 8 verification — activity modernisation and crash recovery
 
-**Date:** 2026-11-14 · **Branch:** `v9-impl` · **Plan:** [v9 §15](../LeoCode_Implementation_Plan_v9.md) Task 8
+**Date:** 2026-11-14 · **Device demo:** 2026-11-21 · **Branch:** `v9-impl` · **Plan:** [v9 §15](../LeoCode_Implementation_Plan_v9.md) Task 8
 
 ## What changed
 
@@ -32,10 +32,23 @@
 | No remote origins in `index.html` | **PASS** (`security.test.ts`) |
 | `Redactor` tests | **PASS**: 6 cases (paths, query credentials, assignments, bearer/basic, ordinary text, idempotence) |
 
-## Device demo procedure
+## Device demo
 
-Both phones were unreachable during this session (`adb devices` empty; D1 Wi-Fi ADB
-`192.168.29.26:5555` returned “No route to host”). Run the following when they return.
+**Result: PASS on D1 (Android 9 / API 28) and D2 (Android 15 / API 35), 2026-11-21.** Both phones ran
+the current `app-debug.apk` (versionCode 2, targetSdk 28). Evidence, including screenshots and the
+exact logcat lines, is in
+[`device-reports/20261121-task8-demo-D1-D2.txt`](../device-reports/20261121-task8-demo-D1-D2.txt).
+
+| Flow | D1 | D2 |
+|---|---|---|
+| One renderer kill | `escalate=false`, `REBUILD_NOW`; page returned, banner "Restored after a problem", editor usable | same |
+| Second kill inside 60 s | `escalate=true`, `RECOVER_NOW`; native `RecoveryActivity` | same |
+| `--ez forceCrash true` | `files/crash/last-crash.json` written; next launch opens `RecoveryActivity`; Share diagnostics opens the chooser; Restart returns to `MainActivity` | same (Share diagnostics not re-opened) |
+| Back order | drawer → Settings → editor → leave | same |
+
+The measured back order is drawer first, then the Settings sheet, because `back.ts` treats Settings as
+a late layer (after the run sheet) and `back.test.ts` pins that. The procedure below previously said
+the sheet closes first; that expectation was wrong and is corrected here.
 
 ### 1. Renderer kill recovers once, escalates on the second kill
 
@@ -71,10 +84,10 @@ Release builds ignore `forceCrash` (`BuildConfig.DEBUG` guard).
 
 ### 3. Back order
 
-Open the sidebar, then a sheet (Settings), then switch to Terminal, then:
+Open the sidebar, open the overflow menu and Settings, and switch to Terminal. Then:
 
-1. Back closes the sheet.
-2. Back closes the sidebar.
+1. Back closes the sidebar.
+2. Back closes the Settings sheet.
 3. Back returns from Terminal to the editor.
 4. Back exits the app.
 
@@ -85,9 +98,9 @@ overlap content; the tab bar rises above the keyboard. `--inset-top`,
 `--inset-bottom`, `--ime-bottom` are visible in `chrome://inspect` or via CDP
 `Runtime.evaluate`.
 
-## Why this is not marked done
+## Status
 
-The code, unit tests, lint, APK builds and web checks pass, but the plan's Task 8
-demo is a device demo. It stays `[-]` in `PROGRESS.md` until the three device
-flows above are recorded on D1 and D2. CI has still not observed a GitHub run
-(the token cannot read Actions), as with Tasks 6 and 7.
+The code, unit tests, lint, APK builds and web checks pass, and the three device flows now pass on
+D1 and D2 (2026-11-21), so Task 8 is `[x]` in `PROGRESS.md`. Insets were not re-measured in this
+pass; the Phase B/C evidence stands. The first green GitHub CI run is recorded in
+[`ci-first-run.md`](ci-first-run.md).

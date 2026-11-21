@@ -9,6 +9,7 @@
 | [`test-matrix.md`](test-matrix.md) | Per-device results: D1 (Android 9, unrooted) and D2 (Android 15, unrooted until the owner roots it) |
 | [`phase0-runbook.md`](phase0-runbook.md) | Device preparation (incl. Wi-Fi ADB for two phones on one cable), install, harness, failure playbook |
 | [`compatibility.md`](compatibility.md) | Python package support matrix (fill in Tasks 24–26) |
+| [`reports/ci-first-run.md`](reports/ci-first-run.md) | First green GitHub CI run (44884113986): jobs, steps, artifacts, trigger caveat |
 | [`reports/phase-a-analysis.md`](reports/phase-a-analysis.md) | **Phase A review**: verdict, findings A-01…A-19 and P-01…P-10, evidence index, exit checklist, hand-off prompt |
 | [`LeoCode_Implementation_Plan_v8.md`](LeoCode_Implementation_Plan_v8.md) | History. Superseded by v9; mapping in v9 §18 |
 | [`../PROGRESS.md`](../PROGRESS.md) | Live task tracker (v9 Tasks 1–33) |

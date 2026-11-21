@@ -14,13 +14,13 @@ extra Git/SSH rows, settling D-016.
 | # | Gate | Status | Evidence |
 |---|---|---|---|
 | 1 | Debug build produces an installable APK | **PASS** | `app-debug.apk`, 40,307,170 bytes, installs on D2 |
-| 2 | Android unit tests | **PASS** | 357 tests, `testDebugUnitTest` |
+| 2 | Android unit tests | **PASS** | 358 tests, `testDebugUnitTest` |
 | 3 | Android lint | **PASS** (baseline) | `lintDebug`; 21 findings suppressed in `lint-baseline.xml` |
 | 4 | Web unit tests | **PASS** | 277 tests in 40 files |
 | 5 | Web typecheck / lint / build | **PASS** | `tsc --noEmit`, ESLint, Vite build |
-| 6 | Bridge type drift | **PASS** (locally) | `generateBridgeTypes` + coverage test; CI step unverified |
-| 7 | 16 KB page alignment | **PASS** (locally) | `scripts/check-elf-alignment.sh` |
-| 8 | CI runs green on GitHub | **NOT VERIFIED** | Workflow exists; public API returns 404 for this repo, so no run could be confirmed |
+| 6 | Bridge type drift | **PASS** | `generateBridgeTypes` + coverage test; CI drift step passed in run 44884113986 |
+| 7 | 16 KB page alignment | **PASS** (static) | `scripts/check-elf-alignment.sh`, passed locally and in CI run 44884113986 |
+| 8 | CI runs green on GitHub | **PASS** (first run) | Run [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) on `v9-impl` (commit `7e62c71`): `web` + `android` green, artifacts uploaded |
 | 9 | Instrumented (on-device) tests | **ABSENT** | `android/app/src/androidTest` does not exist |
 | 10 | Device matrix: D2 (Android 15) | **PARTIAL** | Phases B–F verified; Phase G (Python) never run |
 | 11 | Device matrix: D1 (Android 9 / API 28) | **PARTIAL** | Phases B–F verified; Phase F T10–T14 plus the extra Git/SSH rows passed on 2026-11-21 (D-016 settled); Phase G never run |
@@ -35,7 +35,7 @@ extra Git/SSH rows, settling D-016.
 | 20 | Soak / long-run stability | **NOT DONE** | Every device PASS is a single run |
 | 21 | Self-update | **NOT DONE** | Task 28 |
 | 22 | Root mode (Tasks 17–18) | **BLOCKED** | D2 has no `su`; needs a rooted device |
-| 23 | Crash recovery / redaction | **PASS** (code) | `CrashStore` + `Redactor` + `RecoveryActivity`; device demo done in Phase B |
+| 23 | Crash recovery / redaction | **PASS** | `CrashStore` + `Redactor` + `RecoveryActivity`; device demo on D1 and D2 2026-11-21 (renderer loss, escalation, forced crash, back order) |
 | 24 | Secrets never reach the WebView | **PASS** | `PhaseFHandlerTest` asserts token stored-but-never-returned; `ssh-key-logcat.sh` clean on D2 |
 
 ## 2. What "production grade" actually requires here
@@ -79,15 +79,18 @@ This is the most under-appreciated gap, and this session is the evidence for it:
 - There are **zero instrumented tests**. All Android testing is JVM-level with fakes, which is
   exactly the layer that cannot catch the class of bug above — every one of the five Phase F
   defects was invisible to JVM tests by construction.
-- CI has never been confirmed to run. A workflow that has never executed is a config file.
+- CI is green **once** (run 44884113986). The workflow does not trigger on `v9-impl` pushes, so
+  coverage depends on opening a PR or dispatching it manually. Treat one run as a smoke test, not a
+  regression net.
 
 ## 3. Ordering that actually reduces risk
 
 The instinct is to finish features. The evidence from this session says the higher-value move is to
 increase the chance of *finding* problems before they ship.
 
-1. **Confirm CI runs green on GitHub** (gate 8). Until then nothing else is protected by automation.
-   Also settle whether the repo is private — the public API 404 suggests it may be.
+1. **Keep CI running on every change** (gate 8). The first green run is done; either add `v9-impl`
+   to the `push` branches or keep every change flowing through PR #1 so the `pull_request` trigger
+   covers it.
 2. **Run the existing suite on D1** (gate 11). **Done for Phases B–F on 2026-11-21** — T10–T14 plus
    the extra Git/SSH rows pass, so D-016 is settled. The remaining D1 work is the Phase G runtime
    suite, which has not been built yet.

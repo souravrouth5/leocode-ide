@@ -13,8 +13,9 @@
 | Web typecheck / lint / test / build | **PASS**, 6 web tests | this run |
 | Web bundle in APK assets matches `web/dist` | **PASS** | `scripts/sync-web.sh` + `diff -rq` |
 | Type-drift demo (rename a DTO field) | **PASS**, typecheck breaks until web code is updated, reverted cleanly | §3 |
-| CI drift step (`types.gen.ts` regenerated and compared) | Added to `ci.yml`; **not run on GitHub** (branch not pushed) | §4 |
-| Device re-run of harness T1–T7, S1 on D1 and D2 | **PENDING**: both phones unreachable during this session (§5) | — |
+| CI drift step (`types.gen.ts` regenerated and compared) | **PASS** on GitHub, run [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) | §4 |
+| Device re-run of harness T1–T7, S1 on D1 and D2 | **PASS** 2026-11-21, T1–T9 + S1 (§5) | [`20261121-135916-phaseB-rerun-D1-11f98015.txt`](../device-reports/20261121-135916-phaseB-rerun-D1-11f98015.txt), D2 log |
+| `yes` / Stop all demo on D1 and D2 | **PASS** 2026-11-21 (§5) | [`20261121-task6-yes-stop-D1-D2.txt`](../device-reports/20261121-task6-yes-stop-D1-D2.txt) |
 
 ## 1. Task 6 changes in this pass
 
@@ -73,16 +74,30 @@ Added to `.github/workflows/ci.yml`, android job, after the unit tests:
 
 Not verified on GitHub. Verification that the step passes: once the branch is pushed, the next run must show it green. Locally, after the regenerated file is committed, `git status --porcelain` for that path is empty (checked in §6 after commit).
 
-## 5. Device status: pending
+## 5. Device runs: PASS (2026-11-21)
 
-During this session neither phone was reachable:
-- D1 (`192.168.29.26:5555`, Wi-Fi ADB): `adb connect` returned "Network is unreachable".
-- D2 (POCO F1, USB): not visible on `lsusb`.
+Both phones ran the current APK (versionCode 2, targetSdk 28).
 
-Still to run once the phones are back, on the final APK:
-1. `adb -s <D1> install -r` and `adb -s <D2> install -r` of `android/app/build/outputs/apk/debug/app-debug.apk`.
-2. Harness `--es run all` on both (T1–T7 and S1; S1 needs `pm grant` of the storage permissions first). Save logs under `docs/device-reports/`.
-3. Task 6 demo on D1: `yes` in the terminal keeps the UI responsive; Stop leaves no child processes (`ps` check). The earlier D1 evidence (`20261111-phaseB-task6-bridge-D1.txt`) was recorded before the harness migration; it covers the bridge, not the harness.
+1. Harness rows, run one id at a time (`--es run T1` … `T9`, `S1`) on D1 and D2.
+   T1–T9 and S1 all pass on both; the Phase F network rows were not part of this
+   run. Raw logs:
+   [`20261121-135916-phaseB-rerun-D1-11f98015.txt`](../device-reports/20261121-135916-phaseB-rerun-D1-11f98015.txt)
+   and the matching `-D2-192_168_29_85_39941` file.
+2. Task 6 demo on both phones: `yes` in the terminal keeps the UI responsive
+   (three CDP round-trips in 0.20–0.26 s while the flood ran), Stop all leaves
+   only the app process (`ps` filtered by uid), and Restart gives a working shell.
+   Evidence: [`20261121-task6-yes-stop-D1-D2.txt`](../device-reports/20261121-task6-yes-stop-D1-D2.txt).
+
+The demo exposed a stale-state bug: Stop all killed the PTY but an attached page
+kept showing `pty`, because `TerminalRegistry.closeAll()` dropped the listener
+without an exit event. `Session.close(notifyExit = true)` now delivers
+`Listener.exit(143)` before `pty.destroy()`; the page shows `exited 143` and the
+Restart button. Covered by `TerminalRegistryTest."closeAll reports an exit to an
+attached listener"`. `term.close` (the page disposing its own session) still
+closes silently.
+
+Still outstanding: `RuntimeInstaller` keeps its own process launcher and
+environment until Task 25 (P-07/P-09 in the Phase A report).
 
 ## 6. Environment note
 

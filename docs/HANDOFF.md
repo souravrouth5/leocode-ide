@@ -13,10 +13,10 @@ D-016 is settled, and Phase G (Python) is next.**
 | Branch | `v9-impl`, in `/home/sourav/Desktop/Apps/leocode` (the main worktree) |
 | Phase F | **Complete on both phones.** Tasks 19–23 are `[x]`; D1 (API 28) and D2 (Android 15) pass T10–T14 plus the extra Git/SSH rows. D-016 is settled. |
 | Commits this session | 2026-11-15: `993d4ad`, `69de290`, `560a4aa`, `2c4a2ac`, `fb675a4`, `7449d6b`, `cad1450`, `05dae96`, `9469b5c`; 2026-11-21: the D1-pass docs commit |
-| Remote | local `HEAD` is one docs commit ahead of `origin/v9-impl` (not pushed) |
-| Worktrees | `phase-f-core`, `phase-f-web`, `phase-f-docs` are **merged**; they still exist on disk and can be cleaned up |
-| Working tree | Clean |
-| Gates | Android 357 unit tests, `lintDebug`, `assembleDebug`; web 277 tests in 40 files, typecheck, lint, build |
+| Remote | `origin/v9-impl` matches local `HEAD`; PR **#1** (`v9-impl` → `main`) is open |
+| Worktrees | Only the main tree remains; the merged `phase-f-*` worktrees were removed on 2026-11-21 |
+| Working tree | Clean (before the Task 6/8/9 documentation pass) |
+| Gates | Android 358 unit tests, `lintDebug`, `assembleDebug`; web 277 tests in 40 files, typecheck, lint, build; **CI green once** — run [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) on `v9-impl` |
 
 ## What was actually done
 
@@ -134,6 +134,8 @@ to the server's `authorized_keys` before running `T12`/`T13*`. Cross-check with 
    `adb reverse tcp:2222 tcp:2222` on that device and point the harness at `127.0.0.1:2222`.
 7. **D1's main logcat buffer is only 256 KB**, so a multi-row run rotates the early rows out.
    Run `adb logcat -G 16M` first and capture one buffer for the whole sequence.
+8. **CI does not run on a `v9-impl` push.** `ci.yml` triggers only on `main` pushes, PRs and manual
+   dispatch, so a pushed branch looks untested. Open/update PR #1 or dispatch the workflow by hand.
 
 ## Security issue to fix
 

@@ -1,0 +1,78 @@
+LeoCode Task 6 demo — `yes` flood, Stop all, no orphans
+Date: 2026-11-21
+APK: app-debug.apk rebuilt after the TerminalRegistry fix (versionCode 2, targetSdk 28)
+Devices: D1 = 11f98015 (Redmi Note 7S, Android 9 / API 28)
+         D2 = 192.168.29.85:39941 (POCO F1, Android 15 / API 35)
+Driver: adb + WebView CDP (Runtime.evaluate / Input.insertText)
+
+The Stop action was invoked exactly as the notification does it:
+
+  adb shell run-as dev.leocode am startservice --user 0 \
+    -a dev.leocode.SESSION_STOP_ALL -n dev.leocode/.SessionService
+
+============================================================
+D1
+============================================================
+Terminal opened: status "pty", cwd "workspace".
+Typed `yes` into the xterm textarea (CDP Input.insertText + Enter).
+
+14:2x:xx  ps -A -o PID,PPID,NAME
+  18422 18397 yes              <- flooding
+  (shell 18397 is the app's child)
+
+UI responsiveness while `yes` ran (3 CDP round-trips, includes node start-up):
+  "pty" 0.24 s
+  "pty" 0.20 s
+  "pty" 0.20 s
+The xterm viewport stayed full of `y` lines; no freeze, no dropped input.
+
+Stop all:
+  Starting service: Intent { act=dev.leocode.SESSION_STOP_ALL ... }
+  status -> "exited 143"
+  Restart button -> present
+  ps -A -o PID,PPID,NAME,USER, filter uid u0_a90:
+    18228 1252 dev.leocode u0_a90    <- app process only
+  no `yes`, no `sh` child left
+
+Restart -> status "pty"; `echo restarted-ok` printed
+  ".../workspaces/default $ echo restarted-ok"
+  "restarted-ok"
+
+============================================================
+D2
+============================================================
+Terminal opened: status "pty".
+Typed `yes`:
+  20232 20230 yes
+
+UI responsiveness:
+  "pty" 0.26 s
+  "pty" 0.23 s
+  "pty" 0.22 s
+
+Stop all:
+  status -> "exited 143"
+  Restart button -> present
+  ps -A -o PID,NAME | grep -E " (yes|sh)$"  -> empty
+  app process 14317 (u0_a554) is the only dev.leocode entry
+
+Restart -> status "pty"; `echo restarted-ok` printed.
+
+============================================================
+Fix found by this demo
+============================================================
+Before the fix, Stop all killed the PTYs but an attached page kept showing
+"pty" for a shell that no longer existed (writes were silently dropped).
+
+TerminalRegistry now reports the stop to the attached listener:
+
+  companion object { const val EXIT_STOPPED = 143 }
+  closeAll() -> session.close(notifyExit = true)
+  Session.close(notifyExit) delivers Listener.exit(EXIT_STOPPED) before
+  pty.destroy() (which sends SIGTERM, then SIGKILL after the grace period).
+
+143 is SIGTERM, the first signal destroy() sends. `term.close` (the page
+disposing its own session) still closes silently, as before.
+
+Unit test: TerminalRegistryTest."closeAll reports an exit to an attached
+listener" (exit code 143, activeCount 0).
