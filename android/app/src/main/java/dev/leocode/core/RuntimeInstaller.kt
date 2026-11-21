@@ -4,46 +4,41 @@ import android.content.Context
 import android.os.Build
 import android.os.StatFs
 import dev.leocode.BuildConfig
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.InputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.file.Files
-import java.nio.file.Paths
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /** A user-facing install failure with a bridge error code. */
 class RuntimeInstallException(val code: String, override val message: String) : Exception(message)
 
 /**
- * Installs a runtime package described by `assets/runtime/<id>.json`.
+ * Installs a runtime package described by a signed `assets/runtime/<id>.json`.
  *
- * Pipeline: resumable download -> SHA-256 -> safe tar.gz extraction -> bundled
- * launcher + CA bundle -> ensurepip -> health check -> atomic swap into
- * `files/usr`. Progress is reported as (phase, bytes, total, message); cancel
- * is polled between chunks so a long download stops promptly.
+ * Pipeline (Task 25): verify the manifest signature and rollback counter ->
+ * check device/space -> resumable download -> SHA-256 -> [SafeExtractor] into
+ * `usr.staging` -> launcher + CA + pip -> atomic swap -> health check on the
+ * **installed** tree -> keep `usr.old` until the health check passes.
  *
- * Artifacts are pinned by URL + SHA-256 in the app-shipped manifest. Manifest
- * signatures (Task 24) are not implemented yet, so this trusts the APK: never
- * install a manifest that did not ship inside a signed build.
+ * Every phase polls [isCancelled]; a cancel during `configure` or `health`
+ * destroys the child process instead of waiting out its timeout.
  */
 class RuntimeInstaller(
     private val context: Context,
     private val workspace: Workspace,
+    private val state: RuntimeStateStore = RuntimeStateStore(
+        File(context.filesDir, "runtime-state.properties")
+    ),
+    private val publicKeys: Map<String, ByteArray> = mapOf("python" to RuntimeKeys.PYTHON),
     private val json: Json = Json { ignoreUnknownKeys = true }
 ) {
 
@@ -52,6 +47,16 @@ class RuntimeInstaller(
         val bytes: Long,
         val total: Long,
         val message: String
+    )
+
+    /** What `runtime.catalog` reports for one bundled runtime. */
+    data class Status(
+        val id: String,
+        val version: String,
+        val versionCode: Int,
+        val installed: Boolean,
+        val healthy: Boolean,
+        val installedVersionCode: Int?
     )
 
     fun install(
@@ -63,16 +68,20 @@ class RuntimeInstaller(
             throw RuntimeInstallException("E_BAD_ENVELOPE", "invalid runtime id: $id")
         }
 
-        val manifest = loadManifest(id)
+        val manifest = loadVerifiedManifest(id)
         checkDevice(manifest)
-        val prefix = workspace.usr
+        checkRollback(manifest)
         checkSpace(manifest)
+        val previousVersion = state.installedVersion(manifest.id)
 
+        val prefix = workspace.usr
         val downloadDir = File(context.cacheDir, "runtime-download").apply { mkdirs() }
         val artifact = File(downloadDir, "${manifest.id}-${manifest.version}.tar.gz")
         val staging = File(workspace.root, "usr.staging")
         val backup = File(workspace.root, "usr.old")
 
+        var activated = false
+        var hadPrevious = false
         try {
             staging.deleteRecursively()
             backup.deleteRecursively()
@@ -82,92 +91,144 @@ class RuntimeInstaller(
             verify(manifest, artifact, onProgress, isCancelled)
 
             staging.mkdirs()
-            extract(manifest, artifact, staging, onProgress, isCancelled)
+            emit(onProgress, "extract", 0, 0, "Extracting package")
+            SafeExtractor().extract(
+                artifact,
+                staging,
+                manifest,
+                onProgress = { bytes, files ->
+                    emit(
+                        onProgress,
+                        "extract",
+                        bytes,
+                        manifest.installedSize,
+                        "Extracted ${mb(bytes)} in $files files"
+                    )
+                },
+                isCancelled = isCancelled
+            )
             configure(manifest, staging, onProgress, isCancelled)
-            healthCheck(manifest, staging, onProgress, isCancelled)
-            activate(staging, backup)
+            verifyExecutables(manifest, staging)
             artifact.delete()
 
-            onProgress(Progress("done", 0, 0, "${manifest.id} ${manifest.version} installed"))
+            hadPrevious = activate(staging, backup)
+            activated = true
+            healthCheck(manifest, prefix, onProgress, isCancelled)
+            backup.deleteRecursively()
+            state.record(manifest.id, manifest.versionCode)
+            emit(onProgress, "done", 0, 0, "${manifest.id} ${manifest.version} installed")
         } catch (e: Throwable) {
             staging.deleteRecursively()
+            if (activated) {
+                // The health check failed: put the previous tree back rather than
+                // leaving a runtime that cannot start.
+                prefix.deleteRecursively()
+                if (hadPrevious && backup.renameTo(prefix)) {
+                    if (previousVersion != null) {
+                        state.record(manifest.id, previousVersion)
+                    } else {
+                        state.clear(manifest.id)
+                    }
+                } else {
+                    state.clear(manifest.id)
+                }
+            }
             throw e
         }
     }
 
-    // ---------------------------------------------------------------- manifest
-
-    private data class Manifest(
-        val id: String,
-        val version: String,
-        val versionCode: Int,
-        val abi: List<String>,
-        val minAndroid: Int,
-        val url: String,
-        val sha256: String,
-        val size: Long,
-        val layout: String,
-        val strip: Int,
-        val env: Map<String, String>,
-        val healthArgv: List<String>,
-        val healthTimeoutMs: Long
-    )
-
-    private fun loadManifest(id: String): Manifest {
-        val text = try {
-            context.assets.open("runtime/$id.json").bufferedReader().use { it.readText() }
-        } catch (_: Exception) {
-            throw RuntimeInstallException("E_UNSUPPORTED", "no installable package is bundled for $id")
+    /** Remove the installed tree, but only if it belongs to [id]. */
+    fun uninstall(id: String) {
+        val prefix = workspace.usr
+        val marker = readMarker(prefix)
+        if (marker?.id != id) {
+            throw RuntimeInstallException(
+                "E_NOT_FOUND",
+                "the ${id} runtime is not installed"
+            )
         }
-        val root = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull()
-            ?: throw RuntimeInstallException("E_BAD_MANIFEST", "runtime manifest is not valid JSON")
-
-        fun str(key: String): String =
-            root[key]?.jsonPrimitive?.contentOrNull
-                ?: throw RuntimeInstallException("E_BAD_MANIFEST", "manifest is missing $key")
-
-        val artifact = root["artifact"] as? JsonObject
-            ?: throw RuntimeInstallException("E_BAD_MANIFEST", "manifest is missing artifact")
-        val install = root["install"] as? JsonObject
-            ?: throw RuntimeInstallException("E_BAD_MANIFEST", "manifest is missing install")
-        val envObj = root["env"] as? JsonObject ?: JsonObject(emptyMap())
-        val health = root["healthCheck"] as? JsonObject
-
-        val abi = (root["abi"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-        val healthArgv = (health?.get("argv") as? JsonArray)
-            ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-
-        return Manifest(
-            id = str("id"),
-            version = str("version"),
-            versionCode = root["versionCode"]?.jsonPrimitive?.intOrNull ?: 1,
-            abi = abi,
-            minAndroid = root["minAndroid"]?.jsonPrimitive?.intOrNull ?: 28,
-            url = artifact["url"]?.jsonPrimitive?.contentOrNull ?: "",
-            sha256 = artifact["sha256"]?.jsonPrimitive?.contentOrNull ?: "",
-            size = artifact["size"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0,
-            layout = install["layout"]?.jsonPrimitive?.contentOrNull ?: "prefix",
-            strip = install["strip"]?.jsonPrimitive?.intOrNull ?: 0,
-            env = envObj.mapValues { it.value.jsonPrimitive.contentOrNull ?: "" },
-            healthArgv = healthArgv,
-            healthTimeoutMs = health?.get("timeoutMs")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 30_000
-        ).also {
-            if (it.id != id) {
-                throw RuntimeInstallException("E_BAD_MANIFEST", "manifest id mismatch: $id vs ${it.id}")
-            }
-            if (!it.url.startsWith("https://")) {
-                throw RuntimeInstallException("E_BAD_MANIFEST", "artifact URL must be https")
-            }
-            if (!SHA256_PATTERN.matches(it.sha256)) {
-                throw RuntimeInstallException("E_BAD_MANIFEST", "artifact sha256 is missing or malformed")
-            }
-            if (it.size <= 0) {
-                throw RuntimeInstallException("E_BAD_MANIFEST", "artifact size is missing")
-            }
+        if (prefix.exists() && !prefix.deleteRecursively()) {
+            throw RuntimeInstallException("E_IO", "cannot remove the installed runtime")
         }
+        state.clear(id)
+        File(context.cacheDir, "runtime-download").deleteRecursively()
     }
 
-    private fun checkDevice(manifest: Manifest) {
+    /** Reinstall from scratch; the current tree stays until the new one is healthy. */
+    fun repair(
+        id: String,
+        onProgress: (Progress) -> Unit,
+        isCancelled: () -> Boolean
+    ) {
+        val marker = readMarker(workspace.usr)
+        if (marker?.id == id) {
+            // Do not lower the rollback counter for a repair of the same version.
+            state.record(id, marker.versionCode)
+        }
+        install(id, onProgress, isCancelled)
+    }
+
+    fun catalog(): List<Status> = listIds().map { id ->
+        val manifest = runCatching { loadVerifiedManifest(id) }.getOrNull()
+        val marker = readMarker(workspace.usr)
+        val installed = manifest != null && marker?.id == id
+        val healthy = installed && manifest!!.executables.all { relative ->
+            val file = File(workspace.usr, relative)
+            file.isFile && file.canExecute()
+        }
+        Status(
+            id = id,
+            version = manifest?.version ?: marker?.version ?: "",
+            versionCode = manifest?.versionCode ?: marker?.versionCode ?: 0,
+            installed = installed,
+            healthy = healthy,
+            installedVersionCode = state.installedVersion(id)
+        )
+    }
+
+    // ---------------------------------------------------------------- manifest
+
+    private data class Marker(val id: String, val version: String, val versionCode: Int)
+
+    private fun listIds(): List<String> {
+        val assets = runCatching { context.assets.list("runtime") }.getOrNull() ?: emptyArray()
+        return assets
+            .filter { it.endsWith(".json") }
+            .map { it.removeSuffix(".json") }
+            .filter { ID_PATTERN.matches(it) }
+            .sorted()
+    }
+
+    private fun loadVerifiedManifest(id: String): RuntimeManifest {
+        val bytes = readAsset("runtime/$id.json")
+            ?: throw RuntimeInstallException(
+                "E_UNSUPPORTED",
+                "no installable package is bundled for $id"
+            )
+        val signature = readAsset("runtime/$id.json.sig")?.toString(Charsets.UTF_8)
+            ?: throw RuntimeInstallException(
+                "E_BAD_MANIFEST",
+                "the runtime manifest is not signed"
+            )
+        val key = publicKeys[id]
+            ?: throw RuntimeInstallException(
+                "E_UNSUPPORTED",
+                "no signing key is configured for $id"
+            )
+        if (!ManifestVerifier(key).verify(bytes, signature)) {
+            throw RuntimeInstallException(
+                "E_BAD_MANIFEST",
+                "the runtime manifest signature is not valid"
+            )
+        }
+        return RuntimeManifest.parse(bytes.toString(Charsets.UTF_8), id)
+    }
+
+    private fun readAsset(path: String): ByteArray? = runCatching {
+        context.assets.open(path).use { it.readBytes() }
+    }.getOrNull()
+
+    private fun checkDevice(manifest: RuntimeManifest) {
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: ""
         if (manifest.abi.isNotEmpty() && abi !in manifest.abi) {
             throw RuntimeInstallException(
@@ -183,9 +244,24 @@ class RuntimeInstaller(
         }
     }
 
-    private fun checkSpace(manifest: Manifest) {
-        val needed = manifest.size + EXTRACT_HEADROOM
-        val free = StatFs(workspace.root.absolutePath).availableBytes
+    private fun checkRollback(manifest: RuntimeManifest) {
+        val installed = state.installedVersion(manifest.id) ?: return
+        if (manifest.versionCode < installed) {
+            throw RuntimeInstallException(
+                "E_INTEGRITY",
+                "this package is older than the installed ${manifest.id}"
+            )
+        }
+    }
+
+    private fun checkSpace(manifest: RuntimeManifest) {
+        // The download, the staging tree and the previous tree coexist until the
+        // health check passes (P-06).
+        val needed = manifest.size + manifest.installedSize + EXTRACT_HEADROOM
+        val free = minOf(
+            StatFs(workspace.root.absolutePath).availableBytes,
+            StatFs(context.cacheDir.absolutePath).availableBytes
+        )
         if (free < needed) {
             throw RuntimeInstallException(
                 "E_DISK_FULL",
@@ -197,7 +273,7 @@ class RuntimeInstaller(
     // ---------------------------------------------------------------- download
 
     private fun download(
-        manifest: Manifest,
+        manifest: RuntimeManifest,
         target: File,
         onProgress: (Progress) -> Unit,
         isCancelled: () -> Boolean
@@ -212,22 +288,75 @@ class RuntimeInstaller(
             return
         }
 
+        var lastError: Exception? = null
+        for (attempt in 1..DOWNLOAD_ATTEMPTS) {
+            if (isCancelled()) throw RuntimeInstallException("E_CANCELLED", "install cancelled")
+            try {
+                downloadAttempt(manifest, target, onProgress, isCancelled)
+                return
+            } catch (e: RuntimeInstallException) {
+                // A checksum/size violation will not improve on retry.
+                if (e.code == "E_CANCELLED" || e.code == "E_INTEGRITY") throw e
+                lastError = e
+            } catch (e: IOException) {
+                lastError = e
+            }
+            if (attempt < DOWNLOAD_ATTEMPTS) {
+                emit(
+                    onProgress,
+                    "download",
+                    target.length(),
+                    manifest.size,
+                    "Connection lost; resuming (attempt ${attempt + 1} of $DOWNLOAD_ATTEMPTS)"
+                )
+                runCatching { Thread.sleep(RETRY_DELAY_MS) }
+            }
+        }
+        throw RuntimeInstallException(
+            "E_OFFLINE",
+            "the download was interrupted: ${lastError?.message ?: "unknown error"}. Retry to resume."
+        )
+    }
+
+    /**
+     * One HTTP request. A partial [target] is resumed with `Range`; the caller
+     * retries after a timeout or a dropped connection, which is why the bytes
+     * are flushed to the file as they arrive.
+     */
+    private fun downloadAttempt(
+        manifest: RuntimeManifest,
+        target: File,
+        onProgress: (Progress) -> Unit,
+        isCancelled: () -> Boolean
+    ) {
+        var offset = if (target.isFile) target.length() else 0L
+        if (offset > manifest.size) {
+            target.delete()
+            offset = 0
+        }
+
         val connection = try {
             (URL(manifest.url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 20_000
-                readTimeout = 30_000
+                // A slow mobile link can stall for more than 30 s between reads.
+                readTimeout = 60_000
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", "LeoCode/${BuildConfig.VERSION_NAME}")
+                // A transparent gzip would break the byte count and the resume.
+                setRequestProperty("Accept-Encoding", "identity")
                 if (offset > 0) setRequestProperty("Range", "bytes=$offset-")
             }
-        } catch (e: Exception) {
-            throw RuntimeInstallException("E_OFFLINE", "cannot reach python.org: ${e.message}")
+        } catch (e: IOException) {
+            throw RuntimeInstallException(
+                "E_OFFLINE",
+                "cannot reach the download server: ${e.message}"
+            )
         }
 
         try {
             val code = try {
                 connection.responseCode
-            } catch (e: Exception) {
+            } catch (e: IOException) {
                 throw RuntimeInstallException("E_OFFLINE", "download failed: ${e.message}")
             }
 
@@ -240,7 +369,10 @@ class RuntimeInstaller(
                 }
                 code == 416 && offset > 0 -> {
                     target.delete()
-                    throw RuntimeInstallException("E_OFFLINE", "download resume failed; retry to start over")
+                    throw RuntimeInstallException(
+                        "E_OFFLINE",
+                        "download resume failed; retry to start over"
+                    )
                 }
                 code !in 200..299 -> throw RuntimeInstallException(
                     "E_OFFLINE",
@@ -248,26 +380,46 @@ class RuntimeInstaller(
                 )
             }
 
-            val total = if (connection.contentLengthLong > 0) offset + connection.contentLengthLong else manifest.size
+            val total = if (connection.contentLengthLong > 0) {
+                offset + connection.contentLengthLong
+            } else {
+                manifest.size
+            }
             FileOutputStream(target, true).use { output ->
-                val input = BufferedInputStream(connection.inputStream)
-                val buffer = ByteArray(64 * 1024)
-                var written = offset
-                var lastEmit = 0L
-                while (true) {
-                    if (isCancelled()) throw RuntimeInstallException("E_CANCELLED", "install cancelled")
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
-                    written += read
-                    val now = System.currentTimeMillis()
-                    if (now - lastEmit > 120) {
-                        emit(onProgress, "download", written, total, "Downloading ${mb(written)} of ${mb(total)}")
-                        lastEmit = now
+                BufferedInputStream(connection.inputStream).use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    var written = offset
+                    var lastEmit = 0L
+                    while (true) {
+                        if (isCancelled()) {
+                            throw RuntimeInstallException("E_CANCELLED", "install cancelled")
+                        }
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        written += read
+                        if (written > manifest.size) {
+                            target.delete()
+                            throw RuntimeInstallException(
+                                "E_INTEGRITY",
+                                "the download is larger than the signed size"
+                            )
+                        }
+                        val now = System.currentTimeMillis()
+                        if (now - lastEmit > 120) {
+                            emit(
+                                onProgress,
+                                "download",
+                                written,
+                                total,
+                                "Downloading ${mb(written)} of ${mb(total)}"
+                            )
+                            lastEmit = now
+                        }
                     }
+                    output.fd.sync()
+                    emit(onProgress, "download", written, total, "Downloaded ${mb(written)}")
                 }
-                output.fd.sync()
-                emit(onProgress, "download", written, total, "Downloaded ${mb(written)}")
             }
         } finally {
             connection.disconnect()
@@ -282,7 +434,7 @@ class RuntimeInstaller(
     }
 
     private fun verify(
-        manifest: Manifest,
+        manifest: RuntimeManifest,
         artifact: File,
         onProgress: (Progress) -> Unit,
         isCancelled: () -> Boolean
@@ -293,7 +445,9 @@ class RuntimeInstaller(
         FileInputStream(artifact).use { input ->
             val buffer = ByteArray(64 * 1024)
             while (true) {
-                if (isCancelled()) throw RuntimeInstallException("E_CANCELLED", "install cancelled")
+                if (isCancelled()) {
+                    throw RuntimeInstallException("E_CANCELLED", "install cancelled")
+                }
                 val n = input.read(buffer)
                 if (n < 0) break
                 digest.update(buffer, 0, n)
@@ -313,136 +467,10 @@ class RuntimeInstaller(
         }
     }
 
-    // --------------------------------------------------------------- extraction
-
-    private fun extract(
-        manifest: Manifest,
-        artifact: File,
-        staging: File,
-        onProgress: (Progress) -> Unit,
-        isCancelled: () -> Boolean
-    ) {
-        emit(onProgress, "extract", 0, 0, "Extracting package")
-        val root = staging.canonicalFile
-        var written = 0L
-        var lastEmit = 0L
-
-        FileInputStream(artifact).use { fileIn ->
-            BufferedInputStream(fileIn).use { buffered ->
-                GzipCompressorInputStream(buffered).use { gzip ->
-                    TarArchiveInputStream(gzip).use { tar ->
-                        var entry: TarArchiveEntry? = tar.nextEntry
-                        while (entry != null) {
-                            if (isCancelled()) throw RuntimeInstallException("E_CANCELLED", "install cancelled")
-                            val name = entry.name
-                            val relative = relativeEntryPath(name, manifest.strip)
-                            if (relative == null) {
-                                entry = tar.nextEntry
-                                continue
-                            }
-                            if (isPruned(relative)) {
-                                entry = tar.nextEntry
-                                continue
-                            }
-
-                            val destination = safeDestination(root, relative)
-                            when {
-                                entry.isDirectory -> {
-                                    if (!destination.mkdirs() && !destination.isDirectory) {
-                                        throw RuntimeInstallException("E_IO", "cannot create ${destination.path}")
-                                    }
-                                }
-                                entry.isSymbolicLink -> {
-                                    createSymlink(root, destination, entry.linkName)
-                                }
-                                entry.isFile -> {
-                                    destination.parentFile?.mkdirs()
-                                    FileOutputStream(destination).use { output ->
-                                        tar.copyTo(output)
-                                    }
-                                    written += entry.size
-                                    if (entry.mode and 0x49 != 0) {
-                                        destination.setExecutable(true, false)
-                                    }
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastEmit > 250) {
-                                        emit(onProgress, "extract", written, 0, "Extracting ${mb(written)}")
-                                        lastEmit = now
-                                    }
-                                }
-                                else -> {
-                                    // Devices and FIFOs have no place in a runtime prefix.
-                                    throw RuntimeInstallException(
-                                        "E_INTEGRITY",
-                                        "package contains an unsupported entry: $name"
-                                    )
-                                }
-                            }
-                            entry = tar.nextEntry
-                        }
-                    }
-                }
-            }
-        }
-        emit(onProgress, "extract", written, written, "Extracted ${mb(written)}")
-    }
-
-    /** Strip the archive's leading components and reject anything suspicious. */
-    private fun relativeEntryPath(rawName: String, strip: Int): String? {
-        val name = rawName.replace('\\', '/')
-        if (name.startsWith("/")) {
-            throw RuntimeInstallException("E_INTEGRITY", "package contains an absolute path: $rawName")
-        }
-        val parts = name.split('/').filter { it.isNotEmpty() && it != "." }
-        if (parts.any { it == ".." }) {
-            throw RuntimeInstallException("E_INTEGRITY", "package path escapes the prefix: $rawName")
-        }
-        if (parts.size <= strip) return null
-        // The python.org package nests everything under prefix/; other top-level
-        // files (README, testbed) are build leftovers and must not be installed.
-        if (parts.first() != "prefix") return null
-        return parts.drop(strip).joinToString("/")
-    }
-
-    private fun isPruned(relative: String): Boolean {
-        if (relative == "include" || relative.startsWith("include/")) return true
-        if (relative == "lib/pkgconfig" || relative.startsWith("lib/pkgconfig/")) return true
-        // CPython's own test suite is ~38 MB and never needed at runtime.
-        if (relative.matches(Regex("lib/python\\d+\\.\\d+/test(/.*)?"))) return true
-        return false
-    }
-
-    private fun safeDestination(root: File, relative: String): File {
-        val destination = File(root, relative).canonicalFile
-        val rootPath = root.path + File.separator
-        if (destination != root && !destination.path.startsWith(rootPath)) {
-            throw RuntimeInstallException("E_INTEGRITY", "package path escapes the prefix: $relative")
-        }
-        return destination
-    }
-
-    private fun createSymlink(root: File, link: File, rawTarget: String) {
-        if (rawTarget.startsWith("/")) {
-            throw RuntimeInstallException("E_INTEGRITY", "package contains an absolute symlink: ${link.name}")
-        }
-        val resolved = File(link.parentFile, rawTarget).canonicalFile
-        val rootPath = root.path + File.separator
-        if (!resolved.path.startsWith(rootPath)) {
-            throw RuntimeInstallException("E_INTEGRITY", "symlink escapes the prefix: ${link.name}")
-        }
-        link.parentFile?.mkdirs()
-        link.delete()
-        try {
-            Files.createSymbolicLink(Paths.get(link.path), Paths.get(rawTarget))
-        } catch (e: Exception) {
-            throw RuntimeInstallException("E_IO", "cannot create symlink ${link.name}: ${e.message}")
-        }
-    }
-
     // ---------------------------------------------------------------- configure
 
     private fun configure(
-        manifest: Manifest,
+        manifest: RuntimeManifest,
         staging: File,
         onProgress: (Progress) -> Unit,
         isCancelled: () -> Boolean
@@ -463,57 +491,89 @@ class RuntimeInstaller(
         }
 
         if (isCancelled()) throw RuntimeInstallException("E_CANCELLED", "install cancelled")
-        emit(onProgress, "configure", 0, 0, "Bootstrapping pip")
-        val pip = runProcess(
-            staging,
-            listOf(launcher.path, "-m", "ensurepip", "--upgrade"),
-            runtimeEnv(staging),
-            180_000
-        )
-        if (pip.exit != 0) {
-            throw RuntimeInstallException(
-                "E_IO",
-                "pip bootstrap failed (exit ${pip.exit}): ${pip.output.takeLast(400).trim()}"
+
+        // Task 24 will ship pip in the artifact. Until then bootstrap it here and
+        // rewrite the shebangs: ensurepip writes the staging path, which stops
+        // existing after the atomic swap (P-05).
+        val pip = File(bin, "pip3")
+        if (!pip.exists()) {
+            emit(onProgress, "configure", 0, 0, "Bootstrapping pip")
+            val result = runProcess(
+                staging,
+                listOf(launcher.path, "-m", "ensurepip", "--upgrade"),
+                runtimeEnv(staging),
+                180_000,
+                isCancelled
             )
+            if (result.exit != 0) {
+                throw RuntimeInstallException(
+                    "E_IO",
+                    "pip bootstrap failed (exit ${result.exit}): ${result.output.takeLast(400).trim()}"
+                )
+            }
+            rewriteShebangs(staging, staging.absolutePath, workspace.usr.absolutePath)
         }
 
-        File(staging, ".leocode-runtime.json").writeText(
-            """
-            {"id":"${manifest.id}","version":"${manifest.version}","versionCode":${manifest.versionCode}}
-            """.trimIndent() + "\n"
+        File(staging, MARKER).writeText(
+            """{"id":"${manifest.id}","version":"${manifest.version}",""" +
+                """"versionCode":${manifest.versionCode},"installedAt":${System.currentTimeMillis()}}""" +
+                "\n"
         )
     }
 
+    /** Point `#!/<staging>/bin/python3` scripts at the final prefix. */
+    private fun rewriteShebangs(root: File, from: String, to: String) {
+        val bin = File(root, "bin")
+        bin.listFiles().orEmpty().forEach { file ->
+            if (!file.isFile || file.length() > 1_000_000) return@forEach
+            val firstLine = runCatching {
+                file.bufferedReader().use { it.readLine() }
+            }.getOrNull() ?: return@forEach
+            if (!firstLine.startsWith("#!") || !firstLine.contains(from)) return@forEach
+            val text = runCatching { file.readText() }.getOrNull() ?: return@forEach
+            runCatching { file.writeText(text.replaceFirst(from, to)) }
+        }
+    }
+
     private fun healthCheck(
-        manifest: Manifest,
-        staging: File,
+        manifest: RuntimeManifest,
+        prefix: File,
         onProgress: (Progress) -> Unit,
         isCancelled: () -> Boolean
     ) {
-        if (manifest.healthArgv.isEmpty()) return
         if (isCancelled()) throw RuntimeInstallException("E_CANCELLED", "install cancelled")
         emit(onProgress, "health", 0, 0, "Running the health check")
 
-        val argv = manifest.healthArgv.map { it.replace("{{prefix}}", staging.path) }
-        val result = runProcess(staging, argv, runtimeEnv(staging), manifest.healthTimeoutMs)
+        val argv = manifest.healthArgv.map { it.replace("{{prefix}}", prefix.path) }
+        val result = runProcess(
+            prefix,
+            argv,
+            runtimeEnv(prefix, manifest),
+            manifest.healthTimeoutMs,
+            isCancelled
+        )
         if (result.exit != 0) {
             throw RuntimeInstallException(
                 "E_HEALTH_CHECK",
-                "the installed runtime did not start (exit ${result.exit}): ${result.output.takeLast(400).trim()}"
+                "the installed runtime did not start (exit ${result.exit}): " +
+                    result.output.takeLast(400).trim()
             )
         }
         emit(onProgress, "health", 0, 0, "Health check passed: ${result.output.trim().take(80)}")
     }
 
-    private fun runtimeEnv(staging: File): Map<String, String> {
-        val path = staging.absolutePath
+    private fun runtimeEnv(prefix: File, manifest: RuntimeManifest? = null): Map<String, String> {
+        val path = prefix.absolutePath
+        val fromManifest = manifest?.env.orEmpty().mapValues { (_, value) ->
+            value.replace("{{prefix}}", path).replace("{{tmp}}", workspace.tmp.absolutePath)
+        }
         return workspace.childEnv() + mapOf(
             "PATH" to listOf("$path/bin", "/system/bin", "/system/xbin").joinToString(":"),
             "PYTHONHOME" to path,
             "LD_LIBRARY_PATH" to "$path/lib",
             "SSL_CERT_FILE" to "$path/etc/ca-certificates.pem",
             "TMPDIR" to workspace.tmp.absolutePath
-        )
+        ) + fromManifest
     }
 
     private data class ProcessResult(val exit: Int, val output: String)
@@ -522,9 +582,11 @@ class RuntimeInstaller(
         cwd: File,
         argv: List<String>,
         environment: Map<String, String>,
-        timeoutMs: Long
+        timeoutMs: Long,
+        isCancelled: () -> Boolean = { false }
     ): ProcessResult {
-        val builder = ProcessBuilder(argv).directory(cwd).redirectErrorStream(true)
+        val command = resolveCommand(cwd, argv)
+        val builder = ProcessBuilder(command).directory(cwd).redirectErrorStream(true)
         val childEnv = builder.environment()
         childEnv.clear()
         childEnv.putAll(environment)
@@ -548,11 +610,23 @@ class RuntimeInstaller(
             }
         }.apply { isDaemon = true; start() }
 
-        val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
-        if (!finished) {
-            process.destroyForcibly()
-            reader.join(1_000)
-            throw RuntimeInstallException("E_TIMEOUT", "${argv.first()} did not finish within ${timeoutMs / 1000}s")
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            if (process.waitFor(100, TimeUnit.MILLISECONDS)) break
+            if (isCancelled()) {
+                process.destroy()
+                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
+                throw RuntimeInstallException("E_CANCELLED", "install cancelled")
+            }
+            if (System.currentTimeMillis() > deadline) {
+                process.destroy()
+                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
+                reader.join(1_000)
+                throw RuntimeInstallException(
+                    "E_TIMEOUT",
+                    "${argv.first()} did not finish within ${timeoutMs / 1000}s"
+                )
+            }
         }
         reader.join(2_000)
         val text = synchronized(output) { output.toString() }
@@ -561,18 +635,37 @@ class RuntimeInstaller(
 
     // ----------------------------------------------------------------- activate
 
-    private fun activate(staging: File, backup: File) {
+    /** Move staging into place; returns true when a previous tree was kept. */
+    private fun activate(staging: File, backup: File): Boolean {
         val prefix = workspace.usr
+        var hadPrevious = false
         if (prefix.exists()) {
+            backup.deleteRecursively()
             if (!prefix.renameTo(backup)) {
-                throw RuntimeInstallException("E_IO", "cannot replace the existing runtime in ${prefix.path}")
+                throw RuntimeInstallException(
+                    "E_IO",
+                    "cannot replace the existing runtime in ${prefix.path}"
+                )
             }
+            hadPrevious = true
         }
         if (!staging.renameTo(prefix)) {
-            backup.renameTo(prefix)
+            if (hadPrevious) backup.renameTo(prefix)
             throw RuntimeInstallException("E_IO", "cannot move the runtime into ${prefix.path}")
         }
-        backup.deleteRecursively()
+        return hadPrevious
+    }
+
+    private fun readMarker(prefix: File): Marker? {
+        val file = File(prefix, MARKER)
+        if (!file.isFile) return null
+        val obj = runCatching {
+            json.parseToJsonElement(file.readText()) as? JsonObject
+        }.getOrNull() ?: return null
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val version = obj["version"]?.jsonPrimitive?.contentOrNull ?: ""
+        val code = obj["versionCode"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+        return Marker(id, version, code)
     }
 
     private fun emit(
@@ -591,7 +684,56 @@ class RuntimeInstaller(
 
     companion object {
         private val ID_PATTERN = Regex("^[a-z][a-z0-9-]{1,32}$")
-        private val SHA256_PATTERN = Regex("^[a-f0-9]{64}$")
-        private const val EXTRACT_HEADROOM = 80L * 1024 * 1024
+        private const val MARKER = ".leocode-runtime.json"
+        private const val EXTRACT_HEADROOM = 32L * 1024 * 1024
+        private const val DOWNLOAD_ATTEMPTS = 3
+        private const val RETRY_DELAY_MS = 2_000L
+
+        /**
+         * The package may legitimately ship no executable (the official
+         * python.org Android build has only `libpython`); `configure()` adds the
+         * launcher. Check the promise after that, not while extracting.
+         */
+        fun verifyExecutables(manifest: RuntimeManifest, prefix: File) {
+            val root = prefix.canonicalFile.toPath()
+            for (executable in manifest.executables) {
+                val file = File(prefix, normalizeRelative(executable)).canonicalFile
+                if (!file.toPath().startsWith(root)) {
+                    throw RuntimeInstallException(
+                        "E_BAD_MANIFEST",
+                        "invalid executable path in manifest: $executable"
+                    )
+                }
+                if (!file.isFile) {
+                    throw RuntimeInstallException(
+                        "E_INTEGRITY",
+                        "package is missing $executable"
+                    )
+                }
+                if (!file.canExecute()) file.setExecutable(true, false)
+            }
+        }
+
+        fun normalizeRelative(path: String): String {
+            val parts = path.replace('\\', '/').split('/')
+                .filter { it.isNotEmpty() && it != "." }
+            if (parts.isEmpty() || parts.any { it == ".." }) {
+                throw RuntimeInstallException("E_BAD_MANIFEST", "invalid path in manifest: $path")
+            }
+            return parts.joinToString("/")
+        }
+
+        /**
+         * `ProcessBuilder` resolves a relative executable against the app's own
+         * working directory, not the child's `directory`. Resolve anything with
+         * a path separator against [cwd] so `bin/python3` works; a bare name is
+         * left for the OS to find on PATH.
+         */
+        fun resolveCommand(cwd: File, argv: List<String>): List<String> {
+            if (argv.isEmpty()) return argv
+            val command = argv.first()
+            if (!command.contains('/') || File(command).isAbsolute) return argv
+            return listOf(File(cwd, command).path) + argv.drop(1)
+        }
     }
 }

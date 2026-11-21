@@ -59,9 +59,10 @@ const READ_METHODS = new Set([
 
 export function defaultTimeoutMs(method: string): number | null {
   if (USER_WAIT_METHODS.has(method) || method.startsWith("saf.")) return null
-  // The host replies when an install finishes, not on start, so a fixed timeout
-  // would abort every real install (B-03/W-01). Cancellation is runtime.cancel.
-  if (method === "runtime.install") return null
+  // An install/repair replies on start and then streams until a terminal
+  // `runtime.result`; the promise resolves on that event, not on the reply, so
+  // no fixed timeout applies. Cancellation is `runtime.cancel`.
+  if (method === "runtime.install" || method === "runtime.repair") return null
   // A Git clone/fetch/pull/push runs until it finishes; the reply is the result,
   // not a start ack. Progress arrives meanwhile and `git.cancel` stops it.
   if (GIT_NETWORK_METHODS.has(method)) return null

@@ -31,6 +31,7 @@ import type {
   ProcessEvent,
   ReadChunk,
   RunHandle,
+  RuntimeCatalogEntry,
   RuntimeInstallHandle,
   RuntimeInstallProgress,
   SafDocument,
@@ -255,6 +256,8 @@ export class MockBridge implements Bridge {
   readonly mode = "mock" as const
   private nodes = new Map<string, Node>(SEED)
   private themeListeners = new Set<(state: ThemeState) => void>()
+  private readonly runtimeInstalled = new Map<string, boolean>()
+
   private mode_: ThemeMode
   private workspaces: WorkspaceInfo[] = [
     {
@@ -1613,6 +1616,40 @@ export class MockBridge implements Bridge {
 
   // --------------------------------------------------------------- runtimes
 
+  async repairRuntime(
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart?: (handle: RuntimeInstallHandle) => void
+  ): Promise<void> {
+    // The real host keeps the old tree until the new one is healthy; the mock
+    // simply runs the same phase sequence again.
+    return this.installRuntime(id, onProgress, onStart)
+  }
+
+  async catalogRuntimes(): Promise<RuntimeCatalogEntry[]> {
+    const installed = this.runtimeInstalled.get("python") ?? false
+    return [
+      {
+        id: "python",
+        version: "3.14.10",
+        versionCode: 31410,
+        installed,
+        healthy: installed,
+        installedVersionCode: installed ? 31410 : null
+      }
+    ]
+  }
+
+  async uninstallRuntime(id: string): Promise<void> {
+    if (id !== "python") {
+      throw new BridgeError("E_NOT_FOUND", `${id} is not installed`)
+    }
+    if (!(this.runtimeInstalled.get(id) ?? false)) {
+      throw new BridgeError("E_NOT_FOUND", `${id} is not installed`)
+    }
+    this.runtimeInstalled.set(id, false)
+  }
+
   async installRuntime(
     id: string,
     onProgress: (progress: RuntimeInstallProgress) => void,
@@ -1642,6 +1679,7 @@ export class MockBridge implements Bridge {
       onProgress(step)
       await new Promise((resolve) => setTimeout(resolve, 220))
     }
+    this.runtimeInstalled.set(id, true)
   }
 
   private themeState(): ThemeState {

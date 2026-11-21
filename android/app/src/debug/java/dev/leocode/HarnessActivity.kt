@@ -49,6 +49,9 @@ class HarnessActivity : Activity() {
 
     /** Phase F (Tasks 19–23) tests; null when the app graph failed to start. */
     private var phaseF: PhaseFHarness? = null
+
+    /** Task 25 runtime installer tests. */
+    private lateinit var runtime: RuntimeHarness
     private val phaseFNet by lazy {
         val intent = intent
         PhaseFHarness.Net(
@@ -82,6 +85,7 @@ class HarnessActivity : Activity() {
         workspace = Workspace(filesDir)
         workspace.ensure()
         supervisor = ProcessSupervisor(workspace.childEnv())
+        runtime = RuntimeHarness(this, workspace)
 
         tests = listOf(
             Test("T1", "/system/bin/sh") { t1Shell() },
@@ -127,7 +131,12 @@ class HarnessActivity : Activity() {
             Test("T13", "commit + push over SSH") {
                 phaseF { it.t13(phaseFNet, phaseFRepos) }
             },
-            Test("T14", "Keystore envelope round-trip") { phaseF { it.t14() } }
+            Test("T14", "Keystore envelope round-trip") { phaseF { it.t14() } },
+            Test("T25", "runtime install python (signed manifest, health check)") {
+                runtime.install()
+            },
+            Test("T25L", "runtime catalog") { runtime.catalog() },
+            Test("T25C", "runtime cancel keeps the installed tree") { runtime.cancel() }
         )
 
         setContentView(buildUi())

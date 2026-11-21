@@ -78,7 +78,7 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 | Long Git | `git.clone/fetch/pull/push` | **none**: the reply is the finished operation; `git.progress` in the meantime; cancel with `git.cancel` |
 | Search | `fs.search` | 60 s (the reply is the summary after the stream) |
 | Control | `fs.search.cancel`, `git.cancel` | 2 s |
-| Install | `runtime.install` | no client timeout: the host replies when the install finishes (Task 25 will move the reply to the start); cancel with `runtime.cancel` |
+| Install | `runtime.install`, `runtime.repair` | reply on start within 10 s (`{ id, started }`); then `runtime.progress` events and one terminal `runtime.result`; no overall client timeout; cancel with `runtime.cancel` |
 
 Git notes:
 
@@ -206,15 +206,28 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `secrets.token.set` | `{ host, token }` → `GitOk` | live (Task 19–23) | Generic token slot, keyed by `host` |
 | `secrets.token.delete` | `{ host }` → `GitOk` | live (Task 19–23) | |
 | `secrets.token.list` | `{}` → `SecretHostsReply` | live (Task 19–23) | Keys only, never values |
-| `runtime.catalog` | `{}` → `[{ id, version, size, installed, healthy }]` | planned (Task 25) | Manifest-verified |
-| `runtime.install` | `{ id }` → event stream `runtime.progress`, then `{ id, installed }` | live (bundled installer; Task 25 replaces it) | `E_BUSY` while an id is installing |
-| `runtime.cancel` | `{ id }` → `{ cancelling }` | live | Flags the running install; polled between chunks |
-| `runtime.uninstall` / `runtime.repair` | `{ id }` → `{}` | planned (Task 25) | |
+| `runtime.catalog` | `{}` → `[{ id, version, versionCode, installed, healthy, installedVersionCode }]` | live (Task 25) | Manifest-verified; `healthy` checks the promised executables |
+| `runtime.install` | `{ id }` → `{ id, started }` at start, then `runtime.progress` events and one `runtime.result` | live (Task 25) | `E_BUSY` while an id is installing |
+| `runtime.cancel` | `{ id }` → `{ cancelling }` | live | Flags the running job; polled during download, extract, configure and health |
+| `runtime.repair` | `{ id }` → `{ id, started }`, then events as `runtime.install` | live (Task 25) | Keeps the current tree until the new one passes its health check |
+| `runtime.uninstall` | `{ id }` → `{}` | live (Task 25) | Removes the tree only when its marker names `id`; clears the rollback counter |
 | `language.list` | `{}` → `[{ id, name, extensions[], runtimeId, hasRepl, template }]` | planned (Task 30) | Language providers (D-017); Python is the first |
 | `trust.check` / `trust.grant` | `{ project, action }` → `{ trusted }` | planned (Task 26) | Scripts, pip, venv, Git hooks |
 
-> **Runtime prototype codes.** The Python installer prototype (commit `1a279a2`) emits `E_BAD_MANIFEST`, `E_INTEGRITY` and `E_HEALTH_CHECK`. They are not in the table above yet. Task 25 decides whether to add `E_INTEGRITY` and `E_HEALTH_CHECK` to the `ErrorCode` enum (and the catalog) or map them onto existing codes. `runtime.install` currently replies when the install finishes and streams `runtime.progress` until
-then; the client has no default timeout for it (see Timeouts). Task 25 moves the reply to the start.
+> **Runtime events and codes.** `runtime.progress` carries `{ phase, bytes, total, message }` with
+> phases `preparing`, `download`, `verify`, `extract`, `configure`, `health`, `done`. The terminal
+> `runtime.result` is `{ id, ok, code?, message? }`; a failed install reports one of
+> `E_BAD_MANIFEST`, `E_INTEGRITY`, `E_HEALTH_CHECK`, `E_OFFLINE`, `E_DISK_FULL`, `E_CANCELLED`,
+> `E_NOT_FOUND`, `E_UNSUPPORTED` or `E_INTERNAL`. Installer text is never forwarded (it contains
+> app paths and archive names); the event carries fixed copy and the detail is logged with a
+> correlation id.
+>
+> **Manifest signing.** Each `assets/runtime/<id>.json` ships with `<id>.json.sig`, a detached
+> Ed25519 signature over the exact manifest bytes. The public key is compiled into the APK
+> (`RuntimeKeys`), so replacing the manifest inside a modified APK does not help. CI signs with
+> `RUNTIME_SIGNING_KEY` from the protected `python-runtime` environment; `scripts/sign-manifest.sh`
+> does the same locally. A manifest whose `versionCode` is below the recorded install is refused
+> (rollback protection).
 
 ## Git and SSH (Phase F, Tasks 19–23)
 

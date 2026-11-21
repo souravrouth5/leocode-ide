@@ -424,3 +424,128 @@ describe("AndroidBridge transport (Task 11)", () => {
     expect(onBackgroundError.mock.calls[0][1]).toBe(BACKGROUND_CONTEXT.stopProcess)
   })
 })
+
+describe("runtime install jobs (Task 25)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function lastSent(channel: FakeChannel, method: string): number {
+    for (let i = channel.sent.length - 1; i >= 0; i -= 1) {
+      if (channel.sent[i].method === method) return i
+    }
+    throw new Error(`no ${method} was sent`)
+  }
+
+  it("resolves on the terminal runtime.result, not on the start reply", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    const phases: string[] = []
+
+    let settled = false
+    const pending = bridge
+      .installRuntime("python", (progress) => phases.push(progress.phase))
+      .then(() => {
+        settled = true
+      })
+
+    channel.reply(0, { id: "python", started: true })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(false)
+
+    channel.emit(0, "runtime.progress", {
+      phase: "download",
+      bytes: 10,
+      total: 100,
+      message: "Downloading"
+    })
+    channel.emit(0, "runtime.result", { id: "python", ok: true })
+    await pending
+
+    expect(phases).toEqual(["download"])
+    expect(channel.sent[0].method).toBe("runtime.install")
+    expect(channel.sent[0].payload).toEqual({ id: "python" })
+  })
+
+  it("rejects with the code from a failed runtime.result", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const pending = bridge.installRuntime("python", () => {})
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: "E_HEALTH_CHECK",
+      message: "the runtime did not start correctly after installing"
+    })
+
+    channel.reply(0, { id: "python", started: true })
+    channel.emit(0, "runtime.result", {
+      id: "python",
+      ok: false,
+      code: "E_HEALTH_CHECK",
+      message: "the runtime did not start correctly after installing"
+    })
+    await rejected
+  })
+
+  it("maps an unknown result code onto E_INTERNAL", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const pending = bridge.installRuntime("python", () => {})
+    const rejected = expect(pending).rejects.toMatchObject({ code: "E_INTERNAL" })
+
+    channel.reply(0, { id: "python", started: true })
+    channel.emit(0, "runtime.result", { id: "python", ok: false, code: "E_WHAT" })
+    await rejected
+  })
+
+  it("sends runtime.repair and cancels it through runtime.cancel", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+    let cancel: (() => void) | null = null
+
+    const pending = bridge.repairRuntime("python", () => {}, (handle) => {
+      cancel = handle.cancel
+    })
+    channel.reply(0, { id: "python", started: true })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(channel.sent[0].method).toBe("runtime.repair")
+    expect(cancel).not.toBeNull()
+    cancel!()
+    expect(channel.sent[lastSent(channel, "runtime.cancel")].payload).toEqual({ id: "python" })
+
+    channel.emit(0, "runtime.result", { id: "python", ok: true })
+    await pending
+  })
+
+  it("reads the catalog and removes a runtime", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    const catalog = bridge.catalogRuntimes()
+    channel.reply(0, [
+      {
+        id: "python",
+        version: "3.14.10",
+        versionCode: 31410,
+        installed: true,
+        healthy: true,
+        installedVersionCode: 31410
+      }
+    ])
+    await expect(catalog).resolves.toHaveLength(1)
+    expect(channel.sent[0].method).toBe("runtime.catalog")
+
+    const removed = bridge.uninstallRuntime("python")
+    channel.reply(lastSent(channel, "runtime.uninstall"), {})
+    await removed
+    expect(channel.sent[lastSent(channel, "runtime.uninstall")].payload).toEqual({
+      id: "python"
+    })
+  })
+})

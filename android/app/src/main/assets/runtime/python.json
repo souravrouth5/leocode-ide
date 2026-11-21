@@ -3,7 +3,9 @@
   "id": "python",
   "version": "3.14.10",
   "versionCode": 31410,
-  "abi": ["arm64-v8a"],
+  "abi": [
+    "arm64-v8a"
+  ],
   "minAndroid": 28,
   "artifact": {
     "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-aarch64-linux-android.tar.gz",
@@ -12,8 +14,13 @@
   },
   "install": {
     "layout": "prefix",
+    "prefix": "prefix",
     "strip": 1,
-    "executables": ["bin/python3"]
+    "installedSize": 47185920,
+    "executables": [
+      "bin/python3",
+      "bin/pip3"
+    ]
   },
   "env": {
     "PYTHONHOME": "{{prefix}}",
@@ -23,7 +30,11 @@
     "TMPDIR": "{{tmp}}"
   },
   "healthCheck": {
-    "argv": ["bin/python3", "-c", "import sys, ssl, sqlite3, zlib, hashlib; print(sys.version.split()[0])"],
+    "argv": [
+      "bin/python3",
+      "-c",
+      "import sys, ssl, sqlite3, zlib, hashlib; print(sys.version.split()[0])"
+    ],
     "timeoutMs": 30000
   },
   "limitations": [

@@ -11,6 +11,7 @@ import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.tar.TarConstants
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
 /**
@@ -31,6 +32,17 @@ class SafeExtractor(
 ) {
 
     data class Result(val files: Int, val bytes: Long)
+
+    internal enum class Kind { DIRECTORY, SYMLINK, HARDLINK, FILE, SPECIAL }
+
+    /** Classify an entry from its tar link flag (not the deprecated isFile). */
+    internal fun kindOf(entry: TarArchiveEntry): Kind = when (entry.linkFlag) {
+        TarConstants.LF_DIR -> Kind.DIRECTORY
+        TarConstants.LF_SYMLINK -> Kind.SYMLINK
+        TarConstants.LF_LINK -> Kind.HARDLINK
+        TarConstants.LF_NORMAL, TarConstants.LF_OLDNORM -> Kind.FILE
+        else -> Kind.SPECIAL
+    }
 
     fun extract(
         artifact: File,
@@ -66,8 +78,8 @@ class SafeExtractor(
                                     )
                                 }
                                 val destinationFile = resolve(root, rootPath, relative)
-                                when {
-                                    entry.isDirectory -> {
+                                when (kindOf(entry)) {
+                                    Kind.DIRECTORY -> {
                                         rejectSpecialMode(entry, relative)
                                         if (!destinationFile.mkdirs() && !destinationFile.isDirectory) {
                                             throw RuntimeInstallException(
@@ -77,17 +89,17 @@ class SafeExtractor(
                                         }
                                     }
 
-                                    entry.isSymbolicLink -> {
+                                    Kind.SYMLINK -> {
                                         rejectSpecialMode(entry, relative)
                                         createSymlink(root, rootPath, destinationFile, entry.linkName)
                                     }
 
-                                    entry.isLink -> {
+                                    Kind.HARDLINK -> {
                                         rejectSpecialMode(entry, relative)
                                         createHardLink(root, rootPath, destinationFile, entry.linkName, manifest)
                                     }
 
-                                    entry.isFile -> {
+                                    Kind.FILE -> {
                                         rejectSpecialMode(entry, relative)
                                         if (entry.size < 0) {
                                             throw RuntimeInstallException(
@@ -118,7 +130,7 @@ class SafeExtractor(
                                         }
                                     }
 
-                                    else -> throw RuntimeInstallException(
+                                    Kind.SPECIAL -> throw RuntimeInstallException(
                                         "E_INTEGRITY",
                                         "package contains an unsupported entry: $relative"
                                     )
@@ -131,25 +143,12 @@ class SafeExtractor(
             }
         }
 
-        // The manifest promises these; a package that does not contain them is
-        // broken even if every entry was individually safe.
-        for (executable in manifest.executables) {
-            val file = resolve(root, rootPath, normalizeRelative(executable))
-            if (!file.isFile) {
-                throw RuntimeInstallException(
-                    "E_INTEGRITY",
-                    "package is missing ${executable}"
-                )
-            }
-            if (!file.canExecute()) file.setExecutable(true, false)
-        }
-
         onProgress(bytes, files)
         return Result(files, bytes)
     }
 
     /** Strip the archive prefix and drop build leftovers; reject anything odd. */
-    private fun relativeEntryPath(rawName: String, manifest: RuntimeManifest): String? {
+    internal fun relativeEntryPath(rawName: String, manifest: RuntimeManifest): String? {
         val name = rawName.replace('\\', '/')
         if (name.isEmpty() || name.contains('\u0000')) {
             throw RuntimeInstallException("E_INTEGRITY", "package contains an empty path")

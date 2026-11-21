@@ -31,8 +31,10 @@ import {
   type ReadChunk,
   type RequestOptions,
   type RunHandle,
+  type RuntimeCatalogEntry,
   type RuntimeInstallHandle,
   type RuntimeInstallProgress,
+  type RuntimeInstallResult,
   type SafDocument,
   type SafExportResult,
   type SafProgress,
@@ -435,7 +437,7 @@ export class AndroidBridge implements Bridge {
           /* the PTY may already be gone */
         }
       )
-    } else if (late.method === "runtime.install") {
+    } else if (late.method === "runtime.install" || late.method === "runtime.repair") {
       const id = (late.payload as { id?: string } | null)?.id
       if (id) {
         void this.request("runtime.cancel", { id }, { timeoutMs: 2_000 }).catch(() => {
@@ -863,28 +865,86 @@ export class AndroidBridge implements Bridge {
     onStart?: (handle: RuntimeInstallHandle) => void,
     options?: RequestOptions
   ): Promise<void> {
-    const { id: requestId, result } = this.send<{ installed: boolean }>(
-      "runtime.install",
+    return this.runRuntimeJob("runtime.install", id, onProgress, onStart, options)
+  }
+
+  async repairRuntime(
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart?: (handle: RuntimeInstallHandle) => void,
+    options?: RequestOptions
+  ): Promise<void> {
+    return this.runRuntimeJob("runtime.repair", id, onProgress, onStart, options)
+  }
+
+  async catalogRuntimes(options?: RequestOptions): Promise<RuntimeCatalogEntry[]> {
+    return this.request<RuntimeCatalogEntry[]>("runtime.catalog", {}, options)
+  }
+
+  async uninstallRuntime(id: string, options?: RequestOptions): Promise<void> {
+    await this.request("runtime.uninstall", { id }, options)
+  }
+
+  /**
+   * `runtime.install` / `runtime.repair` answer as soon as the host accepts the
+   * job (Task 25), so the promise resolves on the terminal `runtime.result`
+   * event, not on the reply. A disconnect rejects it through `streamFailures`.
+   */
+  private async runRuntimeJob(
+    method: "runtime.install" | "runtime.repair",
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart: ((handle: RuntimeInstallHandle) => void) | undefined,
+    options: RequestOptions | undefined
+  ): Promise<void> {
+    let finish: { resolve: () => void; reject: (error: AppError) => void } | null = null
+    const done = new Promise<void>((resolve, reject) => {
+      finish = { resolve, reject }
+    })
+    // If the start reply fails, nobody awaits `done`; keep a late result from
+    // becoming an unhandled rejection.
+    done.catch(() => {})
+
+    const { id: requestId, result } = this.send<{ started: boolean }>(
+      method,
       { id },
       (event, payload) => {
-        if (event === "runtime.progress") onProgress(payload as RuntimeInstallProgress)
+        if (event === "runtime.progress") {
+          onProgress(payload as RuntimeInstallProgress)
+          return
+        }
+        if (event === "runtime.result") {
+          const outcome = payload as RuntimeInstallResult
+          if (outcome.ok) {
+            finish?.resolve()
+          } else {
+            finish?.reject(
+              new AppError(
+                isErrorCode(outcome.code) ? outcome.code : "E_INTERNAL",
+                outcome.message ?? "installation failed"
+              )
+            )
+          }
+        }
       },
       options
     )
 
-    onStart?.({
-      cancel: () => {
-        void this.request("runtime.cancel", { id }).catch((error: unknown) => {
-          // The install's own progress/exit drives the UI; a failed cancel must
-          // still be visible once (W-23).
-          this.background(error, BACKGROUND_CONTEXT.cancelInstall)
-        })
-      }
-    })
-
     try {
       await result
+      this.streamFailures.set(requestId, (error) => finish?.reject(error))
+      onStart?.({
+        cancel: () => {
+          void this.request("runtime.cancel", { id }).catch((error: unknown) => {
+            // The job's own result drives the UI; a failed cancel must still be
+            // visible once (W-23).
+            this.background(error, BACKGROUND_CONTEXT.cancelInstall)
+          })
+        }
+      })
+      await done
     } finally {
+      this.streamFailures.delete(requestId)
       this.streams.delete(requestId)
     }
   }

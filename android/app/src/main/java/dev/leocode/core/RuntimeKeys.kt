@@ -12,7 +12,7 @@ import java.util.Base64
  * Rotating the key means: generate a new pair, add the private half to the
  * environment, replace the value below, and re-sign each `assets/runtime/<id>.json`.
  * [FINGERPRINT] is the SHA-256 of the SubjectPublicKeyInfo DER and is printed
- * by `scripts/sign-runtime-manifest.sh`.
+ * by `scripts/sign-manifest.sh`.
  */
 object RuntimeKeys {
     /** Raw 32-byte Ed25519 public key for the `python` runtime. */

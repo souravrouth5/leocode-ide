@@ -35,8 +35,9 @@ describe("bridge timeout policy (Task 11)", () => {
     expect(defaultTimeoutMs("proc.run")).toBe(FAST_TIMEOUT_MS)
   })
 
-  it("never times out an install that replies when it finishes", () => {
+  it("never times out a streamed install or repair", () => {
     expect(defaultTimeoutMs("runtime.install")).toBeNull()
+    expect(defaultTimeoutMs("runtime.repair")).toBeNull()
   })
 
   it("lets a call override or disable its timeout", () => {

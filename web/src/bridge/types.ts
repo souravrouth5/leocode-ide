@@ -28,6 +28,8 @@ import type {
   GitSyncReply as GeneratedGitSyncReply,
   GitSyncRequest,
   RuntimeProgress as GeneratedRuntimeProgress,
+  RuntimeCatalogEntry as GeneratedRuntimeCatalogEntry,
+  RuntimeResult as GeneratedRuntimeResult,
   SafDocument as GeneratedSafDocument,
   SearchMatch as GeneratedSearchMatch,
   SecretSetRequest,
@@ -225,6 +227,8 @@ export type RuntimeInstallPhase =
   | "done"
 
 export type RuntimeInstallProgress = GeneratedRuntimeProgress
+export type RuntimeCatalogEntry = GeneratedRuntimeCatalogEntry
+export type RuntimeInstallResult = GeneratedRuntimeResult
 
 export interface RuntimeInstallHandle {
   cancel: () => void
@@ -383,6 +387,17 @@ export interface Bridge {
     onStart?: (handle: RuntimeInstallHandle) => void,
     options?: RequestOptions
   ): Promise<void>
+  /** Reinstall an existing runtime; the old tree stays until the new one is healthy. */
+  repairRuntime?(
+    id: string,
+    onProgress: (progress: RuntimeInstallProgress) => void,
+    onStart?: (handle: RuntimeInstallHandle) => void,
+    options?: RequestOptions
+  ): Promise<void>
+  /** Bundled runtimes, their installed state and the rollback counter. */
+  catalogRuntimes?(options?: RequestOptions): Promise<RuntimeCatalogEntry[]>
+  /** Remove an installed runtime and its rollback counter. */
+  uninstallRuntime?(id: string, options?: RequestOptions): Promise<void>
   /** Device Storage & SAF capabilities */
   getStorageInfo?(options?: RequestOptions): Promise<StorageInfo>
   requestStoragePermission?(options?: RequestOptions): Promise<boolean>

@@ -105,15 +105,21 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 
 ## Phase 0C — Python (Tasks 24–26)
 
+> **Task 25 device evidence (2026-11-21).** The installer was exercised through
+> the debug harness on both phones; raw logs are in
+> [`device-reports/20261121-task25-D1-D2.txt`](device-reports/20261121-task25-D1-D2.txt).
+> T25 installs the signed python.org 3.14.10 artifact, T25L reads the catalog,
+> and T25C cancels mid-download without touching the installed tree.
+
 | Test | D1 | D2 |
 |---|---|---|
-| `/system/bin/sh` available | **PASS** | |
-| toybox applets: ls/cat/grep/find/sed/tar | **PASS** (no unzip) | |
-| Runtime install (download, verify, extract, health check) | | |
-| Install resumes after network loss | | |
-| CPython `--version` | | |
+| `/system/bin/sh` available | **PASS** | **PASS** |
+| toybox applets: ls/cat/grep/find/sed/tar | **PASS** (no unzip) | **PASS** (unzip present) |
+| Runtime install (download, verify, extract, health check) | **PASS** (74 s) | **PASS** (497 s fresh, 333 s resumed) |
+| Install resumes after network loss | N/A (Wi-Fi-only ADB; turning the radio off drops the test transport) | **PASS** (`E_OFFLINE` at 3 307 954 B, resumed from the same offset; second `E_OFFLINE` at 6 011 314 B, final retry completed) |
+| CPython `--version` | **PASS** (`Python 3.14.10`) | **PASS** (`Python 3.14.10`) |
 | run script | | |
-| `pip --version` | | |
+| `pip --version` | **PASS** (`pip 26.2.2`) | **PASS** (`pip 26.2.2`) |
 | `venv` create + activate | | |
 | T15 `venv` + `pip install requests` + import `markupsafe` | | |
 | console script shebang | | |

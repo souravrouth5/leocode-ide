@@ -1,0 +1,130 @@
+LeoCode — Task 25 runtime installer, device verification
+Date: 2026-11-21
+Branch: feat/phase-g (HEAD 79ccf29 + uncommitted Task 25 changes)
+APK: android/app/build/outputs/apk/debug/app-debug.apk
+APK sha256: 8fdd1b3c3f1eaa0ef22dbb6e805289d9c9218831c814e3e6a69703037ca66c73
+Artifact: python.org Android build 3.14.10
+  sha256 423c80b957330cf0ebb92b9b20f2294c292144a441bdb0ceb8c69d14928e569b
+  size   23027305 bytes
+Manifest: android/app/src/main/assets/runtime/python.json (+ .sig, Ed25519)
+Harness: dev.leocode/.HarnessActivity, run via
+  adb shell am start -n dev.leocode/.HarnessActivity --es run T25|T25L|T25C
+Log tag: LeoCodeHarness:I
+
+Devices
+  D1  11f98015 / 192.168.22.174:5555  Redmi Note 7S   Android 9  (SDK 28)  arm64-v8a
+  D2  e76846f  / 192.168.22.210:43481 POCO F1         Android 15 (SDK 35)  arm64-v8a
+
+════════════════════════════════════════════════════════════════════
+D1 — Redmi Note 7S (Android 9 / API 28)
+════════════════════════════════════════════════════════════════════
+
+▶ T25 — runtime install python (signed manifest, health check)
+  phases: preparing -> download -> verify -> extract -> configure -> health -> done
+  elapsed: 74s
+  marker: {"id":"python","version":"3.14.10","versionCode":31410,"installedAt":1795265524406}
+  python3: Python 3.14.10
+  pip3: pip 26.2.2 from /data/user/0/dev.leocode/files/usr/lib/python3.14/site-packages/pip (python 3.14)
+  catalog: Status(id=python, version=3.14.10, versionCode=31410, installed=true, healthy=true, installedVersionCode=31410)
+  PASS runtime installed
+
+Re-run after the download-retry change (same APK), over Wi-Fi ADB:
+  11-21 18:46:20.323 12399 12399 I LeoCodeHarness:   PASS runtime installed
+  (The 23 MB artifact was fetched again because the cache is cleared after a
+  successful install. Wi-Fi on D1 was slow, so this run took ~12 min; the
+  install itself completed and the harness printed PASS.)
+
+▶ T25L — runtime catalog
+  11-21 18:47:01.844 14487 14487 I LeoCodeHarness:   python 3.14.10 (31410) installed=true healthy=true recorded=31410
+
+▶ T25C — runtime cancel keeps the installed tree
+  11-21 18:47:38.734 14565 14565 I LeoCodeHarness: ▶ T25C — runtime cancel keeps the installed tree
+  11-21 18:47:42.231 14565 14565 I LeoCodeHarness:   phases: preparing -> error:E_CANCELLED
+  11-21 18:47:42.231 14565 14565 I LeoCodeHarness:   staging removed: true
+  11-21 18:47:42.231 14565 14565 I LeoCodeHarness:   runtime untouched: true
+  11-21 18:47:42.231 14565 14565 I LeoCodeHarness:   PASS cancelled
+
+D1 verdict: T25 PASS, T25L PASS, T25C PASS.
+
+════════════════════════════════════════════════════════════════════
+D2 — POCO F1 (Android 15 / API 35), USB ADB (e76846f)
+════════════════════════════════════════════════════════════════════
+
+▶ T25 — runtime install python (signed manifest, health check), fresh run
+  11-21 18:13:46.914 17777 17777 I LeoCodeHarness: ▶ T25 — runtime install python (signed manifest, health check)
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   phases: preparing -> download -> verify -> extract -> configure -> health -> done
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   elapsed: 497s
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   marker: {"id":"python","version":"3.14.10","versionCode":31410,"installedAt":1795265524406}
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   python3: Python 3.14.10
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   pip3: pip 26.2.2 from /data/user/0/dev.leocode/files/usr/lib/python3.14/site-packages/pip (python 3.14)
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   catalog: Status(id=python, version=3.14.10, versionCode=31410, installed=true, healthy=true, installedVersionCode=31410)
+  11-21 18:22:05.445 17777 17777 I LeoCodeHarness:   PASS runtime installed
+
+▶ T25L — runtime catalog
+  11-21 18:42:05.691 17779 17779 I LeoCodeHarness: ▶ T25L — runtime catalog
+  11-21 18:42:05.773 17779 17779 I LeoCodeHarness:   python 3.14.10 (31410) installed=true healthy=true recorded=31410
+
+▶ T25C — runtime cancel keeps the installed tree
+  11-21 18:46:41.017 17780 17780 I LeoCodeHarness: ▶ T25C — runtime cancel keeps the installed tree
+  11-21 18:46:51.815 17780 17780 I LeoCodeHarness:   phases: preparing -> error:E_CANCELLED
+  11-21 18:46:51.815 17780 17780 I LeoCodeHarness:   staging removed: true
+  11-21 18:46:51.815 17780 17780 I LeoCodeHarness:   runtime untouched: true
+  11-21 18:46:51.815 17780 17780 I LeoCodeHarness:   PASS cancelled
+
+── Network-loss resume demo (D2, USB ADB; airplane mode) ─────────────
+
+1. Start T25; wait until the partial download reaches ~3 MB.
+     partial at cut: 3307954 bytes
+2. `adb shell cmd connectivity airplane-mode enable`.
+3. The installer exhausts its three attempts and reports E_OFFLINE:
+     11-21 18:50:37.031 17781 17781 I LeoCodeHarness:   FAIL E_OFFLINE: the download was interrupted: download failed: Unable to resolve host "www.python.org": No address associated with hostname. Retry to resume.
+     partial after failure: 3307954 bytes   (kept, not truncated)
+4. `adb shell cmd connectivity airplane-mode disable`; start T25 again.
+   The download resumes at the existing byte count and never restarts at 0:
+     before: 3307954
+     t=1 size=3307954
+     t=2 size=3307954
+     t=3 size=3357106
+     t=4 size=3586482
+     t=5 size=3865010
+     t=6 size=4143538
+     t=7 size=4471218
+     t=8 size=4618674
+     t=9 size=4848050
+     t=10 size=5061042
+5. Wi-Fi had not finished reconnecting, so this retry also ended E_OFFLINE at
+   6,011,314 bytes:
+     11-21 18:51:32.656 19989 19989 I LeoCodeHarness:   FAIL E_OFFLINE: the download was interrupted: download failed: Unable to resolve host "www.python.org": No address associated with hostname. Retry to resume.
+     partial after failure: 6011314 bytes   (kept again)
+6. Once `ping www.python.org` succeeded, start T25 a third time. It resumes
+   from 6,011,314 bytes and finishes:
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   phases: preparing -> download -> verify -> extract -> configure -> health -> done
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   elapsed: 333s
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   marker: {"id":"python","version":"3.14.10","versionCode":31410,"installedAt":1795267651404}
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   python3: Python 3.14.10
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   pip3: pip 26.2.2 from /data/user/0/dev.leocode/files/usr/lib/python3.14/site-packages/pip (python 3.14)
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   catalog: Status(id=python, version=3.14.10, versionCode=31410, installed=true, healthy=true, installedVersionCode=31410)
+     11-21 18:57:34.268 19991 19991 I LeoCodeHarness:   PASS runtime installed
+
+  Installed tree confirmed after the run:
+     adb shell run-as dev.leocode ls -ld files/usr
+     drwx------ 5 u0_a554 u0_a554 3488 2026-11-21 18:57 files/usr
+
+D2 verdict: T25 PASS (fresh and resumed), T25L PASS, T25C PASS,
+            network-loss resume PASS.
+
+════════════════════════════════════════════════════════════════════
+Notes
+════════════════════════════════════════════════════════════════════
+
+- The download retries up to three times with a `Range` request and a 2 s
+  delay. A checksum/size violation is not retried; it fails with E_INTEGRITY.
+- E_OFFLINE leaves the partial file in `cache/runtime-download/`; a later
+  `runtime.install`/`runtime.repair` resumes from that byte count.
+- E_CANCELLED removes `usr.staging` and leaves the installed tree and its
+  marker untouched.
+- D1's resume demo was not repeated because D1 is reachable only over Wi-Fi
+  ADB; turning the radio off would drop the test transport. D2 covers the
+  resume path end to end over USB ADB.
+- D2's first fresh install took 497 s and the resumed install 333 s; D1's
+  first install took 74 s on a faster link.

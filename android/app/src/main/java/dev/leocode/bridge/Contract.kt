@@ -350,7 +350,26 @@ data class StoragePermissionReply(val granted: Boolean)
 data class RuntimeInstallRequest(val id: String? = null)
 
 @Serializable
-data class RuntimeInstallReply(val id: String, val installed: Boolean)
+data class RuntimeInstallReply(val id: String, val started: Boolean)
+
+/** Terminal event for `runtime.install` / `runtime.repair`. */
+@Serializable
+data class RuntimeResult(
+    val id: String,
+    val ok: Boolean,
+    val code: String? = null,
+    val message: String? = null
+)
+
+@Serializable
+data class RuntimeCatalogEntry(
+    val id: String,
+    val version: String,
+    val versionCode: Int,
+    val installed: Boolean,
+    val healthy: Boolean,
+    val installedVersionCode: Int? = null
+)
 
 @Serializable
 data class RuntimeProgress(val phase: String, val bytes: Long, val total: Long, val message: String)

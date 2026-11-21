@@ -86,6 +86,8 @@ object BridgeTypesGenerator {
         "RuntimeInstallRequest" to RuntimeInstallRequest.serializer().descriptor,
         "RuntimeInstallReply" to RuntimeInstallReply.serializer().descriptor,
         "RuntimeProgress" to RuntimeProgress.serializer().descriptor,
+        "RuntimeResult" to RuntimeResult.serializer().descriptor,
+        "RuntimeCatalogEntry" to RuntimeCatalogEntry.serializer().descriptor,
         "RuntimeCancelRequest" to RuntimeCancelRequest.serializer().descriptor,
         "RuntimeCancelReply" to RuntimeCancelReply.serializer().descriptor,
         "SafDocument" to SafDocument.serializer().descriptor,

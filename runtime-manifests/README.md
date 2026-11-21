@@ -8,8 +8,13 @@ downloaded artifact before the hash **and** the signature in these manifests ver
 ```
 schema/manifest.schema.json
 versions/<runtime>-<version>.json       # unsigned body, committed
-versions/<runtime>-<version>.json.sig   # Ed25519 signature, produced at release time
+versions/<runtime>-<version>.json.sig   # Ed25519 signature (base64), produced at release time
 ```
+
+The APK carries a copy of the manifest and signature under
+`android/app/src/main/assets/runtime/<id>.json(.sig)`. `RuntimeInstaller` verifies the
+signature with the public key compiled into `RuntimeKeys.kt` before it downloads anything,
+so replacing the asset inside a modified APK does not help an attacker.
 
 ## Signing
 
@@ -18,7 +23,12 @@ Private key lives offline and is never in CI. Release procedure:
 
 ```bash
 scripts/sign-manifest.sh runtime-manifests/versions/python-3.11.9.json
+scripts/verify-manifest.sh runtime-manifests/versions/python-3.11.9.json docs/keys/manifest-public.pem
 ```
+
+The signature covers the exact manifest bytes and is stored as base64 in `<manifest>.sig`.
+`sign-manifest.sh` also prints the raw public key and its SPKI SHA-256, which must match
+`RuntimeKeys.PYTHON` and `RuntimeKeys.FINGERPRINT`.
 
 Rollback protection: `versionCode` must be strictly greater than the installed one; the app
 refuses older manifests even if correctly signed.

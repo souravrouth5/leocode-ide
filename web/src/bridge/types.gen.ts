@@ -21,6 +21,9 @@ export const ERROR_CODES = [
   "E_BUSY",
   "E_NO_RUNTIME",
   "E_OFFLINE",
+  "E_BAD_MANIFEST",
+  "E_INTEGRITY",
+  "E_HEALTH_CHECK",
   "E_AUTH",
   "E_HOSTKEY_CHANGED",
   "E_ROOT_UNAVAILABLE",
@@ -408,7 +411,7 @@ export interface RuntimeInstallRequest {
 
 export interface RuntimeInstallReply {
   id: string
-  installed: boolean
+  started: boolean
 }
 
 export interface RuntimeProgress {
@@ -416,6 +419,22 @@ export interface RuntimeProgress {
   bytes: number
   total: number
   message: string
+}
+
+export interface RuntimeResult {
+  id: string
+  ok: boolean
+  code?: string | null
+  message?: string | null
+}
+
+export interface RuntimeCatalogEntry {
+  id: string
+  version: string
+  versionCode: number
+  installed: boolean
+  healthy: boolean
+  installedVersionCode?: number | null
 }
 
 export interface RuntimeCancelRequest {

@@ -122,6 +122,7 @@ export type {
   ReadChunk,
   RequestOptions,
   RunHandle,
+  RuntimeCatalogEntry,
   RuntimeInstallHandle,
   RuntimeInstallPhase,
   RuntimeInstallProgress,

@@ -178,6 +178,30 @@ export const ERROR_CATALOG: Record<ErrorCode, CatalogEntry> = {
     severity: "warning",
     action: retry
   },
+  E_BAD_MANIFEST: {
+    title: "Runtime package rejected",
+    explanation:
+      "The runtime package description is missing, out of date, or was not signed by LeoCode. Nothing was installed.",
+    surface: "sheet",
+    severity: "error",
+    action: dismiss
+  },
+  E_INTEGRITY: {
+    title: "Runtime package is damaged",
+    explanation:
+      "The download did not match its signed checksum, or the package contained an unsafe file. It was discarded; retry the install.",
+    surface: "sheet",
+    severity: "error",
+    action: retry
+  },
+  E_HEALTH_CHECK: {
+    title: "Runtime did not start",
+    explanation:
+      "The runtime was installed but did not pass its startup check, so the previous version was kept. Retry the install when the device is idle.",
+    surface: "sheet",
+    severity: "error",
+    action: retry
+  },
   E_AUTH: {
     title: "Authentication failed",
     explanation:

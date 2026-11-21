@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { BridgeError, type AppInfo, type Bridge, type RuntimeInstallProgress } from "../bridge"
+import {
+  BridgeError,
+  type AppInfo,
+  type Bridge,
+  type RuntimeCatalogEntry,
+  type RuntimeInstallProgress
+} from "../bridge"
 import { redact } from "../errors/redact"
 import { CheckIcon, CpuIcon, RefreshIcon, TerminalIcon, XIcon } from "./Icons"
 
@@ -166,6 +172,7 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
   const [probeError, setProbeError] = useState<string | null>(null)
   const [progress, setProgress] = useState<RuntimeInstallProgress | null>(null)
   const [installing, setInstalling] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const [installError, setInstallError] = useState<{ code: string; message: string } | null>(null)
   const cancelRef = useRef<(() => void) | null>(null)
 
@@ -212,6 +219,16 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
       // In mock or constrained environment, keep defaults
     }
 
+    // The host's catalog is the authority for bundled runtimes: it checks the
+    // signed manifest and the installed executables. Fall back to the shell
+    // probe when the bridge predates `runtime.catalog`.
+    let catalog: RuntimeCatalogEntry[] = []
+    try {
+      if (bridge.catalogRuntimes) catalog = await bridge.catalogRuntimes()
+    } catch {
+      catalog = []
+    }
+
     // Probe each runtime
     for (let i = 0; i < updated.length; i++) {
       const item = { ...updated[i] }
@@ -220,6 +237,19 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
         item.version = "Android sh / Toybox"
         updated[i] = item
         continue
+      }
+
+      const entry = catalog.find((candidate) => candidate.id === item.id)
+      if (entry && !entry.installed) {
+        item.status = "missing"
+        item.version = undefined
+        item.subVersion = undefined
+        updated[i] = item
+        continue
+      }
+      if (entry?.installed) {
+        item.status = entry.healthy ? "installed" : "error"
+        item.version = entry.version
       }
 
       try {
@@ -281,6 +311,7 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
     setSelectedRuntime(rt)
     setProgress(null)
     setInstallError(null)
+    setConfirmRemove(false)
   }
 
   const startInstall = async () => {
@@ -317,6 +348,64 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
     } finally {
       setInstalling(false)
       cancelRef.current = null
+    }
+  }
+
+  const startRepair = async () => {
+    const rt = selectedRuntime
+    if (!rt || !bridge.repairRuntime) return
+
+    setInstalling(true)
+    setInstallError(null)
+    setProgress({ phase: "preparing", bytes: 0, total: 0, message: "Starting repair…" })
+
+    try {
+      await bridge.repairRuntime(
+        rt.id,
+        (next) => setProgress(next),
+        (handle) => {
+          cancelRef.current = handle.cancel
+        }
+      )
+      setProgress({ phase: "done", bytes: 0, total: 0, message: `${rt.name} repaired` })
+      onRuntimeInstalled?.(rt.id)
+      await probeAll()
+    } catch (err) {
+      const code = err instanceof BridgeError ? err.code : "E_INTERNAL"
+      if (code === "E_CANCELLED") {
+        setProgress(null)
+      } else {
+        setInstallError({
+          code,
+          message: err instanceof Error ? err.message : "repair failed"
+        })
+        setProgress(null)
+      }
+    } finally {
+      setInstalling(false)
+      cancelRef.current = null
+    }
+  }
+
+  const removeRuntime = async () => {
+    const rt = selectedRuntime
+    if (!rt || !bridge.uninstallRuntime) return
+
+    setInstalling(true)
+    setInstallError(null)
+    try {
+      await bridge.uninstallRuntime(rt.id)
+      onRuntimeInstalled?.(rt.id)
+      await probeAll()
+      closeModal()
+    } catch (err) {
+      setInstallError({
+        code: err instanceof BridgeError ? err.code : "E_INTERNAL",
+        message: err instanceof Error ? err.message : "removal failed"
+      })
+    } finally {
+      setInstalling(false)
+      setConfirmRemove(false)
     }
   }
 
@@ -613,9 +702,10 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
                     </span>
                   </div>
                   <p className="install-note">
-                    Downloads from python.org and verifies SHA-256 before installing into app
-                    storage. An interrupted download resumes. Pure-Python packages and Android
-                    wheels work; manylinux/musllinux wheels do not.
+                    Downloads from python.org, verifies the signed manifest and the package
+                    SHA-256, then health-checks the installed tree before replacing the previous
+                    one. An interrupted download resumes. Pure-Python packages and Android wheels
+                    work; manylinux/musllinux wheels do not.
                   </p>
                   {!bridge.installRuntime && (
                     <p className="install-note">
@@ -656,6 +746,28 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
                   Open shell
                 </button>
               )}
+              {!installing &&
+                !progress &&
+                (installedNow || selectedRuntime.status === "installed") && (
+                  <>
+                    {bridge.repairRuntime && (
+                      <button className="btn ghost" onClick={() => void startRepair()}>
+                        Repair
+                      </button>
+                    )}
+                    {bridge.uninstallRuntime && (
+                      <button
+                        className="btn ghost"
+                        onClick={() => {
+                          if (confirmRemove) void removeRuntime()
+                          else setConfirmRemove(true)
+                        }}
+                      >
+                        {confirmRemove ? "Confirm remove" : "Remove"}
+                      </button>
+                    )}
+                  </>
+                )}
               {!installedNow && !progress && isPython && (
                 <button
                   className="btn primary"

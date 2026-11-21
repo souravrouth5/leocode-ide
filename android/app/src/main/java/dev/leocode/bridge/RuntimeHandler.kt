@@ -5,20 +5,22 @@ import dev.leocode.core.Redactor
 import dev.leocode.core.RuntimeInstallException
 import dev.leocode.core.RuntimeInstaller
 import dev.leocode.core.Workspace
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
- * `runtime.install` / `runtime.cancel`, `docs/bridge-contract.md`.
+ * `runtime.*`, `docs/bridge-contract.md` (Task 25).
  *
- * An install streams `runtime.progress` and replies once when it finishes, so
- * the handler is async. Ids are locked with `E_BUSY` while installing; a cancel
- * only flips the flag the installer polls between chunks.
+ * `runtime.install` and `runtime.repair` answer as soon as the job is accepted,
+ * then stream `runtime.progress` and finish with one `runtime.result` event. The
+ * reply no longer waits for the download, so the 10 s bridge timeout does not
+ * apply to a slow install. Ids are locked with `E_BUSY` while a job runs.
  */
 class RuntimeHandler(
     context: Context,
@@ -28,7 +30,13 @@ class RuntimeHandler(
 ) : AsyncBridgeHandler, Closeable {
 
     companion object {
-        private val METHODS = setOf("runtime.install", "runtime.cancel")
+        private val METHODS = setOf(
+            "runtime.catalog",
+            "runtime.install",
+            "runtime.cancel",
+            "runtime.uninstall",
+            "runtime.repair"
+        )
         private fun correlationId(): String =
             "c-" + UUID.randomUUID().toString().replace("-", "").take(6)
     }
@@ -48,7 +56,26 @@ class RuntimeHandler(
         sink: StreamSink
     ) {
         when (method) {
-            "runtime.install" -> install(payload, respond, sink)
+            "runtime.catalog" -> respond(
+                AsyncReply.Ok(
+                    json.encodeToJsonElement(
+                        ListSerializer(RuntimeCatalogEntry.serializer()),
+                        installer.catalog().map {
+                            RuntimeCatalogEntry(
+                                it.id,
+                                it.version,
+                                it.versionCode,
+                                it.installed,
+                                it.healthy,
+                                it.installedVersionCode
+                            )
+                        }
+                    )
+                )
+            )
+
+            "runtime.install" -> start(payload, respond, sink, repair = false)
+            "runtime.repair" -> start(payload, respond, sink, repair = true)
             "runtime.cancel" -> {
                 val request =
                     json.decodePayload(RuntimeCancelRequest.serializer(), payload, method)
@@ -66,6 +93,8 @@ class RuntimeHandler(
                 )
             }
 
+            "runtime.uninstall" -> uninstall(payload, respond)
+
             else -> throw BridgeException(
                 ErrorCode.E_UNKNOWN_METHOD,
                 "unknown method: $method"
@@ -73,12 +102,14 @@ class RuntimeHandler(
         }
     }
 
-    private fun install(
+    private fun start(
         payload: JsonObject,
         respond: (AsyncReply) -> Unit,
-        sink: StreamSink
+        sink: StreamSink,
+        repair: Boolean
     ) {
-        val request = json.decodePayload(RuntimeInstallRequest.serializer(), payload, "runtime.install")
+        val method = if (repair) "runtime.repair" else "runtime.install"
+        val request = json.decodePayload(RuntimeInstallRequest.serializer(), payload, method)
         val runtimeId = request.id
             ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "id is required")
         val cancelled = AtomicBoolean(false)
@@ -86,54 +117,85 @@ class RuntimeHandler(
             throw BridgeException(ErrorCode.E_BUSY, "$runtimeId is already being installed")
         }
 
-        io.execute {
-            val reply = try {
-                installer.install(
-                    runtimeId,
-                    onProgress = { progress ->
-                        sink.event(
-                            "runtime.progress",
-                            json.encodeToJsonElement(
-                                RuntimeProgress.serializer(),
-                                RuntimeProgress(
-                                    progress.phase,
-                                    progress.bytes,
-                                    progress.total,
-                                    progress.message
-                                )
-                            )
-                        )
-                    },
-                    isCancelled = { cancelled.get() }
+        // Accept the job before the slow work so the reply fits the contract.
+        respond(
+            AsyncReply.Ok(
+                json.encodeToJsonElement(
+                    RuntimeInstallReply.serializer(),
+                    RuntimeInstallReply(runtimeId, true)
                 )
-                AsyncReply.Ok(
+            )
+        )
+
+        io.execute {
+            val progress: (RuntimeInstaller.Progress) -> Unit = { item ->
+                sink.event(
+                    "runtime.progress",
                     json.encodeToJsonElement(
-                        RuntimeInstallReply.serializer(),
-                        RuntimeInstallReply(runtimeId, true)
+                        RuntimeProgress.serializer(),
+                        RuntimeProgress(item.phase, item.bytes, item.total, item.message)
                     )
                 )
+            }
+            val result = try {
+                if (repair) {
+                    installer.repair(runtimeId, progress, cancelled::get)
+                } else {
+                    installer.install(runtimeId, progress, cancelled::get)
+                }
+                RuntimeResult(runtimeId, ok = true)
             } catch (e: RuntimeInstallException) {
                 // Never forward installer text: it contains absolute app paths
                 // and archive entry names (B-06). The detail goes to a redacted
                 // log with a correlation id the sheet can show.
                 val id = correlationId()
-                log("runtime.install $runtimeId $id ${e.code}: ${Redactor.redact(e.message ?: "")}")
-                AsyncReply.Error(
-                    ErrorCode.fromCode(e.code),
-                    safeMessage(e.code),
-                    id
-                )
+                log("$method $runtimeId $id ${e.code}: ${Redactor.redact(e.message ?: "")}")
+                RuntimeResult(runtimeId, ok = false, code = e.code, message = safeMessage(e.code))
             } catch (e: Throwable) {
                 val id = correlationId()
                 log(
-                    "runtime.install $runtimeId $id ${e.javaClass.name}: " +
+                    "$method $runtimeId $id ${e.javaClass.name}: " +
                         Redactor.redact(e.message ?: "")
                 )
-                AsyncReply.Error(ErrorCode.E_INTERNAL, "the runtime could not be installed", id)
+                RuntimeResult(
+                    runtimeId,
+                    ok = false,
+                    code = "E_INTERNAL",
+                    message = "the runtime could not be installed"
+                )
             } finally {
-                // Remove before replying so a cancel sent right after the reply
-                // does not find a stale job that is already gone.
                 jobs.remove(runtimeId)
+            }
+            sink.event(
+                "runtime.result",
+                json.encodeToJsonElement(RuntimeResult.serializer(), result)
+            )
+        }
+    }
+
+    private fun uninstall(payload: JsonObject, respond: (AsyncReply) -> Unit) {
+        val request = json.decodePayload(
+            RuntimeInstallRequest.serializer(),
+            payload,
+            "runtime.uninstall"
+        )
+        val runtimeId = request.id
+            ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "id is required")
+        io.execute {
+            val reply = try {
+                installer.uninstall(runtimeId)
+                AsyncReply.Ok(JsonObject(emptyMap()))
+            } catch (e: RuntimeInstallException) {
+                val id = correlationId()
+                log("runtime.uninstall $runtimeId $id ${e.code}: ${Redactor.redact(e.message ?: "")}")
+                AsyncReply.Error(ErrorCode.fromCode(e.code), safeMessage(e.code), id)
+            } catch (e: Throwable) {
+                val id = correlationId()
+                log(
+                    "runtime.uninstall $runtimeId $id ${e.javaClass.name}: " +
+                        Redactor.redact(e.message ?: "")
+                )
+                AsyncReply.Error(ErrorCode.E_INTERNAL, "the runtime could not be removed", id)
             }
             respond(reply)
         }
@@ -142,12 +204,13 @@ class RuntimeHandler(
     /** Fixed user-facing copy for installer failures (B-06). */
     private fun safeMessage(code: String): String = when (code) {
         "E_BAD_MANIFEST" -> "the runtime package manifest is not valid"
-        "E_INTEGRITY" -> "the download failed its integrity check"
+        "E_INTEGRITY" -> "the runtime package failed its integrity check"
         "E_HEALTH_CHECK" -> "the runtime did not start correctly after installing"
         "E_OFFLINE" -> "the download needs a network connection"
         "E_DISK_FULL" -> "there is not enough free space for this runtime"
         "E_CANCELLED" -> "the installation was cancelled"
         "E_PERMISSION" -> "Android denied access to the install location"
+        "E_NOT_FOUND" -> "that runtime is not installed"
         else -> "the runtime could not be installed"
     }
 
