@@ -122,9 +122,13 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 > Details: [`reports/task24-verification.md`](reports/task24-verification.md).
 >
 > **Task 26 device evidence (2026-11-21).** Raw probes on both phones through
-> `run-as` (the production T15 harness lands with the Task 26 code). The LAN
-> needs an authenticated proxy, so the host forwarded one with
-> `adb reverse tcp:18080`; that is test plumbing, not app behaviour. Logs:
+> `run-as`; the production T15 harness now ships in the debug build but its
+> device rows are not finished. D2's first T15 run passed venv, aliases, pip and
+> the `requests` requirements install, then failed the wheel row because the
+> pushed file was named `t15-markupsafe.whl` (pip requires a valid wheel
+> filename); the corrected rerun and D1 are pending. The LAN needs an
+> authenticated proxy, so the host forwarded one with `adb reverse tcp:18080`;
+> that is test plumbing, not app behaviour. Logs:
 > [`device-reports/20261121-task26-D1-D2.txt`](device-reports/20261121-task26-D1-D2.txt).
 
 | Test | D1 | D2 |
@@ -141,7 +145,8 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 | `markupsafe` wheel installs + imports | **PASS** (`_speedups` loaded) | **PASS** (`_speedups` loaded) |
 | PyPI Android wheel accepted by pip | **PASS** (`charset-normalizer` 3.5.2) | **PASS** (`charset-normalizer` 3.5.2) |
 | `venv` create + activate | **PASS** | **PASS** |
-| T15 `venv` + `pip install requests` + import `markupsafe` | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) |
+| venv + `pip install requests` + import `markupsafe` (probe) | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) |
+| T15 production harness (venv + requirements + wheel + fetch) | **PENDING** | **PARTIAL** (venv/aliases/pip/requirements PASS; wheel row retried with a valid filename) |
 | console script shebang | **PASS** (`pygments` → venv python) | **PASS** (`pygments` → venv python) |
 | venv symlinks on internal storage | **PASS** (`python` → `python3` → `usr/bin/python3`) | **PASS** (`python` → `python3` → `usr/bin/python3`) |
 | peak RSS of `python -c pass` | **8548 KB** | **11064 KB** |

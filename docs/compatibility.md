@@ -61,7 +61,9 @@ accepts the wheel. `pip` is pointed at the index with `--extra-index-url` and
 `SHA256SUMS` file; the artifact, manifest and signature are published to the
 `python-runtime` prerelease.
 
-The on-device install/import row is still pending (Task 26): the wheel is built
-and alignment-checked in CI, but it has not been installed on D1/D2 yet. PyPI
-Android wheels are checked in the same pass; a PyPI wheel that matches the
-device tags would not need our index.
+The wheel was installed and imported on both phones during the Task 26 probes
+(2026-11-21): `markupsafe` 3.0.2 from this wheel imports `_speedups` on D1
+(Android 9) and D2 (Android 15). PyPI Android wheels are checked in the same
+pass; `charset-normalizer` 3.5.2 was selected from PyPI on both phones, so a
+PyPI wheel that matches the device tags does not need our index. The production
+T15 harness run is still being finished (see `PROGRESS.md`).

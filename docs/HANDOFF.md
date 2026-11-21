@@ -1,173 +1,130 @@
-# Handoff — LeoCode state after the Phase F D1 pass (updated 2026-11-21)
+# Handoff — LeoCode state after Task 26 (updated 2026-11-21)
 
-Written for whoever picks this up next. It records what is done, what is open, how to reproduce
-the verification, and the traps that cost time. The task tracker (`PROGRESS.md`) and
-[`reports/phase-f-verification.md`](reports/phase-f-verification.md) remain the source of truth;
-this file is the orientation layer. **Phase F is complete on both phones: Tasks 19–23 are closed,
-D-016 is settled, and Phase G (Python) is next.**
+Written for whoever picks this up next. It records what is done, what is open, how to reproduce the
+verification, and the traps that cost time. The task tracker (`PROGRESS.md`) and the device reports
+under `docs/device-reports/` remain the source of truth; this file is the orientation layer.
+
+**Current phase:** Phase G (Python, D-017). Tasks 24 and 25 are done; Task 26's implementation and
+unit gates are done, and only its device rows remain.
 
 ## Where the work is
 
 | Item | State |
 |---|---|
-| Branch | `main` after PR **#1** merged; Phase G starts on a new branch off `main` |
-| Phase F | **Complete on both phones.** Tasks 19–23 are `[x]`; D1 (API 28) and D2 (Android 15) pass T10–T14 plus the extra Git/SSH rows. D-016 is settled. |
-| Commits this session | 2026-11-15: `993d4ad`, `69de290`, `560a4aa`, `2c4a2ac`, `fb675a4`, `7449d6b`, `cad1450`, `05dae96`, `9469b5c`; 2026-11-21: `7e62c71` (D1 pass), `be6e902` (Stop-all exit), `53274ea` (Phase B device evidence) |
-| Remote | PR **#1** (`v9-impl` → `main`) merged on 2026-11-21; `main` is the release branch |
-| Worktrees | Only the main tree remains; the merged `phase-f-*` worktrees were removed on 2026-11-21 |
-| Working tree | Clean |
-| Gates | Android 358 unit tests, `lintDebug`, `assembleDebug`; web 277 tests in 40 files, typecheck, lint, build; **CI green twice** — [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) (dispatch) and [44888183932](https://github.com/souravrouth5/leocode-ide/actions/runs/44888183932) (PR, `53274ea`) |
+| Branch | `feat/phase-g`, pushed to `origin` (do not merge without asking; the owner merges) |
+| Task 24 | CI and packaging complete; run [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602) green. The signed release is blocked on the protected `python-runtime` environment and `RUNTIME_SIGNING_KEY` (the current PAT gets 403 on environment APIs). |
+| Task 25 | **Done and device-verified on D1 and D2.** Raw evidence: [`device-reports/20261121-task25-D1-D2.txt`](device-reports/20261121-task25-D1-D2.txt). |
+| Task 26 | **Implementation complete, unit gates green, device rows in progress.** Commit `0a3fc84`. D2 T15 reached venv/aliases/pip/requirements PASS; the wheel row failed on an invalid pushed filename. D1 has not run T15. |
+| Working tree | Clean after the docs commit |
+| Gates | Android 417 unit tests / 0 failures / 1 skipped, `lintDebug`, `assembleDebug`; web 288 tests, typecheck, lint, build |
+| Devices | D1 `192.168.29.26:5555` (Redmi Note 7S, Android 9 / API 28); D2 `e76846f` (POCO F1, Android 15 / API 35) |
 
-## What was actually done
+## What Task 26 added
 
-Phase F (Tasks 19–23: Git, SSH, secrets) was merged before this session but had never built. The
-work here was: make it build, then run it on a device, then fix what the device exposed. The
-2026-11-21 D1 pass added no product code — it ran the same debug harness on the API 28 phone, recorded
-the evidence, and closed Tasks 19–23 and D-016.
-
-### 1. The merged tree did not build (`993d4ad`)
-
-`org.eclipse.jgit.ssh.apache:5.13.3` pulls `org.apache.sshd:sshd-osgi:2.7.0` — an uber-jar that
-already bundles `sshd-core`, `sshd-common` and `sshd-sftp` — while the build also pinned
-`sshd-core:2.13.2`. Every SSHD class existed twice, so `mergeDebugJavaResource` failed on duplicate
-classes and on `org/apache/sshd/common/kex/group17.prime`. **No test had ever run on that tree.**
-
-Fix: exclude `sshd-osgi`, depend on modular `sshd-core` + `sshd-sftp` at 2.13.2, and exclude the
-duplicate OSGi `plugin.properties` the same way the Bouncy Castle metadata already was.
-
-### 2. Four defects that only a device could expose
-
-None of these were reachable from JVM tests, because the unit suites substitute a fake cipher, a
-full Bouncy Castle, a JVM `user.home` and a same-thread event sink.
-
-| # | Symptom | Root cause | Commit |
-|---|---|---|---|
-| 1 | Keygen: `Selected fingerprint digest not supported: sha256` | Android 12+ ships a stub `BC` provider without SHA-256; MINA resolves digests by provider *name* | `69de290` |
-| 2 | Every secret write threw `SecretUnavailableException` | Keystore2 rejects a caller IV under `setRandomizedEncryptionRequired(true)` (`CALLER_NONCE_PROHIBITED`) | `69de290` |
-| 3 | SSH died in `ExceptionInInitializerError: No user home` | MINA's `PathUtils` reads `System.getProperty("user.home")`; Android never sets it | `fb675a4` |
-| 4 | Host-key prompt never reached the user; clone hung 120 s | Prompt emitted through a `ThreadLocal` that is empty on MINA's I/O thread | `2c4a2ac` |
-| 5 | `known_hosts` wrote `[[ip]:2222]:2222` — invalid, never matched | JGit passes the connect address as `[host]:port` | `560a4aa` |
+| Layer | Change |
+|---|---|
+| Trust | `core/TrustStore.kt`: per-project `script`, `pip`, `venv`, `git-hooks` grants tied to a SHA-256 fingerprint of the files they cover. Editing the script, `requirements.txt`, Git hooks, the project path or the runtime marker invalidates the grant. A corrupt index trusts nothing rather than failing every run. |
+| Python | `core/PythonProject.kt`: creates/removes `<project>/.venv` with the bundled runtime, runs pip/scripts with `VIRTUAL_ENV` and the venv first on `PATH`, and records the installed `requirements.txt` hash in `.venv/.leocode-requirements`. Aliases `python -> python3`, `pip -> pip3` are created at install time and on startup for existing runtimes. |
+| Bridge | `TrustHandler.kt`, `PythonHandler.kt`, DTOs in `Contract.kt`: `trust.check`/`grant`/`revoke`; `python.status`/`venv.create`/`venv.remove`/`requirements.install`. The install streams `python.install` and replies when pip exits. `proc.run` accepts an allowlisted `env`. |
+| Web | `features/python/pythonStore.ts` + `PythonProjectPanel.tsx`; `runStore` resolves the venv interpreter, asks for trust, and offers to install missing requirements before a `.py` run. Runtimes view shows the active project's runtime, venv, requirements and aliases. |
+| Harness | `PythonHarness.kt` + T15: venv, aliases, pip, requirements, optional wheel, then a script that imports `requests`/`markupsafe` and fetches `https://example.com`. |
 
 ## Device verification: what is proven, and what is not
 
-**D2 (POCO F1, LineageOS, Android 15 / API 35) — PASS.** T10 HTTPS clone, T11 Ed25519+RSA keygen,
-T12 SSH clone with host-key prompt, T12B pinned-host reuse (zero prompts), T13 SSH push, T13P SSH
-pull (fast-forward), T14 Keystore round-trip, T11B passphrase-protected import, T21 local Git
-operations including a resolved conflict, changed-host-key rejection, and `ssh-key-logcat.sh`
-clean (exit 0).
+**Task 26 raw compatibility probes (both phones, 2026-11-21) — PASS.** Raw logs:
+[`device-reports/20261121-task26-D1-D2.txt`](device-reports/20261121-task26-D1-D2.txt).
 
-Raw evidence:
-- [`device-reports/20261115-211717-phaseF-D2-e76846f.txt`](device-reports/20261115-211717-phaseF-D2-e76846f.txt)
-- [`device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt`](device-reports/20261115-222841-phaseF-D2-e76846f-round2.txt)
+- venv create/activate; `python -> python3 -> usr/bin/python3`
+- `requests` 2.34.2 from PyPI fetches `https://example.com` (`200`, 577 bytes)
+- `markupsafe` 3.0.2 from the LeoCode Android wheel imports `_speedups`
+- `pygments` console-script shebang points at the venv python
+- `requirements.txt` installs; peak RSS 8 548 KB (D1) / 11 064 KB (D2)
+- pip accepts PyPI Android wheels (`charset-normalizer` 3.5.2, `cp314-cp314-android_24_arm64_v8a`)
 
-**D1 (Redmi Note 7S, Android 9 / API 28) — PASS (2026-11-21).** D1 is the compatibility gate for
-D-016, and it is the only API 28 hardware. The current debug APK ran T10–T14 plus RSA keygen,
-passphrase-protected import, local Git/conflict, pinned-host reuse, changed-key rejection, pull and
-the logcat key-material check. All pass, so "JGit 5.13.3 works on our oldest supported device" is now
-a measurement. Raw evidence:
-- [`device-reports/20261121-131954-phaseF-D1-11f98015.txt`](device-reports/20261121-131954-phaseF-D1-11f98015.txt)
+**T15 through the production harness — partial.** D2 (2026-11-21 23:16) passed venv creation,
+`pyvenv.cfg`, aliases, pip 26.2.2 and the `requests` requirements install. The markupsafe row failed
+with `Invalid wheel filename (wrong number of parts): 't15-markupsafe'` because the wheel was pushed
+under a short name; pip requires `name-version-...whl`. Rename it on the device (see below) and
+rerun. **D1 has not run T15 yet.** Do not infer either device's result from the other.
 
-D1 reached the SSH server through `adb reverse tcp:2222` as `127.0.0.1:2222` (host and phone were on
-different subnets). It has no VPN, so app-UID networking and the reverse-loopback socket both worked.
-The logcat main buffer on D1 is only 256 KB, so raise it (`adb logcat -G 16M`) before a long run or
-the early rows rotate out.
+The app-UI demo (create venv, install requirements, run a script with the trust prompt) has not been
+recorded on either phone yet.
 
-**Not a device row, by decision:** the HTTPS-token push. It needs a token-authenticated remote,
-and its actual claim — that a token is stored but never returned — is a property of the replies,
-not the transport. `PhaseFHandlerTest.remote token is stored but only flagged in replies` asserts
-it through the real router instead. That test was validated by injecting a leak into the `url`
-field and confirming it failed.
-
-## Reproducing a device run
-
-Prerequisites: a debug APK from `v9-impl`, a scratch workspace, the device **unlocked and awake**,
-and its **VPN off** (see traps). Never run destructive steps against a real project. If the host and
-phone are on different subnets, run `adb reverse tcp:2222 tcp:2222` on that device and pass
-`--es sshHost 127.0.0.1 --es sshPort 2222`; D1 was verified that way on 2026-11-21.
-
-The Phase F rows are driven by a debug-only harness because the WebView is a canvas with a single
-accessibility node and debug builds expose no DevTools socket — the tests therefore call the same
-`GitEngine` / `SshKeyStore` / `HostKeyPrompts` / `KnownHostsStore` / `FileSecretStore` instances
-the bridge uses (`AppGraph` builds them once). Only the WebView rendering layer is skipped.
+## Reproducing the T15 run
 
 ```bash
-adb shell am start -n dev.leocode/.HarnessActivity --es run T12 \
-    --es sshHost <host-lan-ip> --es sshPort 2222
-adb logcat -d -s LeoCodeHarness:I
+cd android && ./gradlew :app:assembleDebug
+APK=app/build/outputs/apk/debug/app-debug.apk
+adb -s <serial> install -r -g "$APK"
+
+# The LAN has no direct internet. The host runs an authenticated proxy on 8080
+# (see the summary of /tmp/opencode/local-proxy.py) and exposes it on 18080:
+python3 /tmp/opencode/local-proxy.py 18080 &
+adb -s <serial> reverse tcp:18080 tcp:18080
+
+# Copy the markupsafe wheel into app storage under a VALID wheel name.
+adb -s <serial> push \
+  /tmp/opencode/wheelout/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl \
+  /sdcard/Download/t15-markupsafe.whl
+adb -s <serial> shell run-as dev.leocode mkdir -p files/tmp
+adb -s <serial> shell run-as dev.leocode cp /sdcard/Download/t15-markupsafe.whl \
+  files/tmp/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
+
+adb -s <serial> logcat -c
+adb -s <serial> shell am start -n dev.leocode/.HarnessActivity --es run T15 \
+  --es proxy http://127.0.0.1:18080 \
+  --es wheel /data/user/0/dev.leocode/files/tmp/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
+adb -s <serial> logcat -d -s LeoCodeHarness:I
 ```
 
-Row ids: `T10` HTTPS clone, `T10L` clone over loopback, `T11` keygen, `T11B` passphrase import,
-`T12` SSH clone + prompt, `T12B` pinned-host reuse, `T13` SSH push, `T13P` SSH pull, `T13T` HTTPS
-token push, `T14` Keystore, `T21` local Git + conflict. Diagnostics if something fails: `DX`
-(crypto), `DN` (network reachability), `D10`/`D12`/`D13T` (raw JGit, unmapped errors).
+A PASS ends with `PASS venv + requests + markupsafe + fetch` and `fetch 200`. `files/tmp/t15-project`
+is deleted and recreated on every run. Clean up afterwards: the project directory, the copied wheel,
+`/sdcard/Download/t15-markupsafe.whl`, and `adb reverse --remove tcp:18080`.
 
-For the SSH rows, start the committed test server:
+If `run-as ... cp /sdcard/...` is denied (D2 on Android 15), stream it instead:
 
 ```bash
-python3 -m venv /tmp/pf-venv && /tmp/pf-venv/bin/pip install paramiko
-/tmp/pf-venv/bin/python scripts/test-ssh-git-server.py   # setup steps in its header
+adb -s <serial> shell run-as dev.leocode dd \
+  of=files/tmp/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl \
+  < /tmp/opencode/wheelout/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
 ```
 
-`T11` mints a **fresh key every run**, so after it runs, append the `publicKey=` line from logcat
-to the server's `authorized_keys` before running `T12`/`T13*`. Cross-check with `ssh-keygen -lf`.
+## What to do next
 
-## Traps that cost time this session (read before debugging a "network" failure)
+1. **Finish Task 26 device rows.** Rerun T15 on D2 with the valid wheel name, then run the same T15
+   on D1. Record both in `PROGRESS.md`, `docs/test-matrix.md` and the compatibility notes. Then run
+   the app-UI demo on both phones (Runtimes → create environment → install requirements → Run a
+   `.py` file → accept the trust prompt) and capture evidence.
+2. **Fix the compatibility doc's last paragraph.** `docs/compatibility.md` still says the wheel
+   install/import row is pending; the probes above proved it. Replace that sentence with the
+   measured result.
+3. **Task 24 release (owner action).** Create the protected `python-runtime` environment, upload
+   `RUNTIME_SIGNING_KEY`, and dispatch CI so the release job publishes the tarball, manifest,
+   signature, wheel and `SHA256SUMS`.
+4. **Ask before starting Task 27.** Task 26 was explicitly scoped and approved; do not roll into the
+   next Phase G task without confirmation.
 
-1. **The phone's VPN blocks all app-UID sockets.** With `free.vpnindia…turbo` active, DNS
-   (`UnknownHostException` for every name), loopback through `adb reverse`, and LAN all fail for
-   app UIDs, while the `adb shell` UID is exempt. This looks exactly like a LeoCode networking bug.
-   Turn the VPN off for any network row.
-2. **A sleeping screen suspends app-UID networking.** Same symptom, same false trail. Keep the
-   device awake (`svc power stayon true`). This produced two false "Cannot reach the remote"
-   failures before it was identified.
-3. **The host and phone changed IPs mid-session** (`192.168.58.x` → `192.168.29.x`). Re-runs then
-   failed silently because the harness still pointed at the old address. Re-read `hostname -I`
-   before re-running.
-4. **Recreating the test server directory wipes `authorized_keys`**, so the device key must be
-   re-appended. A host-key rotation is also detected correctly as `E_HOSTKEY_CHANGED` — that is the
-   feature working, not a bug: forget the host (`rm files/ssh/known_hosts` or `ssh.hostkey.delete`).
-5. **Do not trust an error message from `GitEngine` alone.** `BridgeException` messages are
-   deliberately generic ("The Git operation failed"). Use the `D10`/`D12`/`D13T` diagnostics, which
-   run raw JGit and print the real exception chain.
-6. **A host and phone on different subnets cannot reach each other over the LAN.** The 2026-11-21
-   run had the host on `192.168.34.247` and D1 on `192.168.29.26`. Use
-   `adb reverse tcp:2222 tcp:2222` on that device and point the harness at `127.0.0.1:2222`.
-7. **D1's main logcat buffer is only 256 KB**, so a multi-row run rotates the early rows out.
-   Run `adb logcat -G 16M` first and capture one buffer for the whole sequence.
-8. **CI does not run on a `v9-impl` push.** `ci.yml` triggers only on `main` pushes, PRs and manual
-   dispatch, so a pushed branch looks untested. Open/update PR #1 or dispatch the workflow by hand.
+## Traps that cost time (read before debugging a "network" failure)
 
-## Security issue to fix
-
-**A GitHub personal access token is embedded in plaintext in `.git/config`** as the `origin` URL
-userinfo (`https://souravrouth5:github_pat_…@github.com/…`). Anyone with read access to this
-working copy can extract it, and it will be captured by any tooling that prints remotes. Recommend
-rotating that token and re-adding the remote without userinfo (a credential helper or
-`gh auth` instead). It was not changed during this session because rewriting the remote is a
-decision for the owner.
-
-## Suggested next steps
-
-For the full list of what remains before a release, with each gate's measured status, see
-[`RELEASE-READINESS.md`](RELEASE-READINESS.md).
-
-1. **Continue Phase G (Python, D-017).** Task 24 (CI artifact + wheel, run
-   [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602)) and
-   Task 25 (safe installer, device-verified on D1/D2) are done. The one Task 24 loose end is the
-   signed release: create the protected `python-runtime` environment and upload
-   `RUNTIME_SIGNING_KEY` (the current PAT gets 403 on environment APIs), then re-run
-   `workflow_dispatch` so the release job publishes. Task 26 (on-device wheel install/import,
-   `venv`, PyPI probe) is next.
-2. **Clean up the merged worktrees** (`phase-f-core`, `phase-f-web`, `phase-f-docs`) when convenient.
-3. **Repeat runs and soak** belong to Phase H Task 29. Every Phase F PASS is one run per phone, not a
-   soak, and the HTTPS-token push remains a unit-test row rather than a device measurement.
+1. **Direct internet is blocked on this LAN.** Use the host proxy on `18080` with `adb reverse`.
+   `example.com` through `requests` works; `pypi.org/simple/` and `files.pythonhosted.org` are flaky
+   and sometimes reset. Restart the proxy if `curl -x http://127.0.0.1:18080 https://example.com`
+   stops returning `200`.
+2. **A sleeping screen or an active VPN blocks app-UID networking.** Keep the device awake
+   (`svc power stayon true`) and turn the VPN off. `adb shell` is exempt, so it looks like an app bug.
+3. **pip validates wheel filenames.** A wheel copied as `t15-markupsafe.whl` is rejected before any
+   install. Keep `name-version-python-abi-platform.whl`.
+4. **D1's main logcat buffer is only 256 KB.** Run `adb logcat -G 16M` before a long sequence.
+5. **CI does not run on a branch push.** `ci.yml` triggers on `main` pushes, PRs and
+   `workflow_dispatch`; dispatch it by hand for `feat/phase-g`.
+6. **The GitHub PAT is still plaintext in `.git/config`.** Rotate it and move it to a credential
+   helper; do not print remotes in shared output.
 
 ## Honest caveats
 
-- Every PASS is a **single-run measurement per device** (D1 and D2). Nothing here is a soak test.
-- The SSH clone/push/pull rows ran against a **local test server**, not a public host. That
-  exercises the same JGit transport path, but not GitHub's real server behaviour or TLS.
-- `pull` was verified on a fast-forward. A conflicting pull returning `E_CONFLICT` was not
-  exercised on a device (conflict detection itself was, via `T21`).
-- HTTP (not HTTPS) was used for the token server attempt, so TLS for token auth is unproven on a
-  device.
+- Every PASS is a single-run measurement per device; nothing here is a soak test.
+- The Task 26 probes used `run-as` shell scripts; T15 is the production-harness equivalent and has
+  only partially run on D2.
+- `markupsafe` comes from the LeoCode wheel, not PyPI: PyPI has no Android wheel for 3.0.2 and pip
+  correctly refuses it there.
+- The signed Task 24 release has never run; only the unsigned CI path is proven.
