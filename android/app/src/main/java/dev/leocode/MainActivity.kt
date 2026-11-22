@@ -644,7 +644,8 @@ class MainActivity : ComponentActivity(), SafPort {
         val router = BridgeRouter(
             (application as LeoApp).graphOrThrow().json,
             listOf(
-                (application as LeoApp).graphOrThrow().appHandler(themePort()) { appInfo() },
+                (application as LeoApp).graphOrThrow()
+                    .appHandler(themePort(), { appInfo() }, ::shareText),
                 (application as LeoApp).graphOrThrow().fsHandler(),
                 (application as LeoApp).graphOrThrow().workspaceHandler(),
                 (application as LeoApp).graphOrThrow().draftHandler(),
@@ -1237,6 +1238,23 @@ class MainActivity : ComponentActivity(), SafPort {
     }
 
     // ------------------------------------------------------------------ loading
+
+    /**
+     * `app.share` (Task 27): open the system share sheet with redacted text.
+     * The chooser starts the target Activity, so it returns immediately and the
+     * bridge's 10 s timeout never applies.
+     */
+    private fun shareText(text: String): Boolean {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "LeoCode diagnostics")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        return runCatching {
+            startActivity(Intent.createChooser(send, "Share diagnostics"))
+            true
+        }.getOrDefault(false)
+    }
 
     private fun currentAssetUrl(): String =
         DevServerConfig.buildPageUrl(START_URL, themeManager.mode, themeManager.effective())

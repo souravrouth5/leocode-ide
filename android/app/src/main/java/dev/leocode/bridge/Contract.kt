@@ -55,6 +55,17 @@ data class AppInfo(
     val theme: ThemeState
 )
 
+/** `app.diagnostics`: redacted support report (Task 27). */
+@Serializable
+data class DiagnosticsReply(val report: String)
+
+/** `app.share`: hand redacted text to the system share sheet (Task 27). */
+@Serializable
+data class ShareRequest(val text: String)
+
+@Serializable
+data class ShareReply(val shared: Boolean)
+
 // ---------------------------------------------------------------------- fs
 
 @Serializable

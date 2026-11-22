@@ -15,6 +15,7 @@ import { createBootErrorQueue, installGlobalErrorHandlers } from "./errors/globa
 import { errorMessage, redact } from "./errors/redact"
 import { simulatedError } from "./errors/simulate"
 import { Shell } from "./features/shell/Shell"
+import { hasSeenOnboarding } from "./features/onboarding/onboarding"
 import { ThemeProvider } from "./theme/ThemeProvider"
 
 /**
@@ -134,6 +135,13 @@ function Boot({ stores }: { stores: AppStores }) {
     return () => {
       cancelled = true
     }
+  }, [stores])
+
+  // Task 27: first run shows the three mandatory screens. The marker is read
+  // here instead of the store constructor so tests that build a shell do not
+  // inherit an overlay. A layout effect avoids a frame of the IDE behind it.
+  useLayoutEffect(() => {
+    if (!hasSeenOnboarding()) stores.shell.getState().openOnboarding()
   }, [stores])
 
   // `?simulate=<code>` demonstrates each error surface without breaking a real

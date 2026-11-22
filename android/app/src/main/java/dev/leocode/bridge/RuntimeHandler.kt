@@ -49,6 +49,18 @@ class RuntimeHandler(
 
     override fun methods(): Set<String> = METHODS
 
+    /** Catalog entries for diagnostics; the install methods map the same data. */
+    fun catalog(): List<RuntimeCatalogEntry> = installer.catalog().map {
+        RuntimeCatalogEntry(
+            it.id,
+            it.version,
+            it.versionCode,
+            it.installed,
+            it.healthy,
+            it.installedVersionCode
+        )
+    }
+
     override fun handle(
         method: String,
         payload: JsonObject,
@@ -60,16 +72,7 @@ class RuntimeHandler(
                 AsyncReply.Ok(
                     json.encodeToJsonElement(
                         ListSerializer(RuntimeCatalogEntry.serializer()),
-                        installer.catalog().map {
-                            RuntimeCatalogEntry(
-                                it.id,
-                                it.version,
-                                it.versionCode,
-                                it.installed,
-                                it.healthy,
-                                it.installedVersionCode
-                            )
-                        }
+                        catalog()
                     )
                 )
             )

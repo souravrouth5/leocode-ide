@@ -136,9 +136,10 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | Method | Payload → Reply | Status | Notes |
 |---|---|---|---|
 | `app.ping` | `{}` → `{}` | live | Attach check |
-| `app.info` | `{}` → `{ version, webview, abi, androidSdk, pageSize, rooted }` | live (fields added in Task 17) | Used by degraded-mode detection and diagnostics |
+| `app.info` | `{}` → `{ app, version, mode, androidSdk, androidRelease, abi, webview, workspace, theme }` | live | Used by the shell, degraded-mode detection and diagnostics |
 | `app.theme.get` / `app.theme.set` | `{ mode? }` → `{ mode, effective }` | live | Syncs system bars |
-| `app.diagnostics` | `{}` → `{ report }` | planned (Task 27) | Redacted text report |
+| `app.diagnostics` | `{}` → `{ report }` | live (Task 27) | Redacted plain-text support report; Copy/Share in Diagnostics |
+| `app.share` | `{ text }` → `{ shared }` | live (Task 27) | Opens the system share chooser; redacts `text` again before sending |
 | `storage.info` | `{}` → `{ hasPermission, internalStorage, downloads, documents, workspace }` | live | Shape kept from v0; Task 27 may extend |
 | `storage.requestPermission` | `{}` → `{ granted }` | live | User-wait |
 | `saf.open` | `{ mime? }` → `{ name, uri, content, size }` (or `null` on cancel) | live | Copy-in; 4 MB cap |
@@ -219,6 +220,15 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `python.venv.create` | `{ project? }` → `{ created, status }` | live (Task 26) | Requires a `venv` trust grant; reply on finish |
 | `python.venv.remove` | `{ project? }` → `PythonStatusReply` | live (Task 26) | Removes only the project's `.venv` |
 | `python.requirements.install` | `{ project? }` → `{ ok, exitCode, output }` + `python.install` events | live (Task 26) | Requires a `pip` trust grant; streams pip lines |
+
+> **Diagnostics (`app.diagnostics` / `app.share`).** The diagnostics reply is `{ "report": string }`.
+> `report` is plain text, already redacted on-device by `core/Redactor.kt`, and covers the device
+> model, Android release/SDK/security patch, ABIs, WebView, page size, root status, storage
+> free/total, heap limit, the active workspace, installed runtimes and the last crash. The web layer
+> appends its recent-error ring and runs its matching `redact()` again before Copy or Share. Copy
+> writes that text to the clipboard. Share calls `app.share` with `{ "text": string }`; the host
+> redacts it once more and opens the system chooser, replying `{ "shared": boolean }`. The browser
+> mock returns `false`, so the web layer falls back to `navigator.share` or Copy.
 
 > **Runtime events and codes.** `runtime.progress` carries `{ phase, bytes, total, message }` with
 > phases `preparing`, `download`, `verify`, `extract`, `configure`, `health`, `done`. The terminal

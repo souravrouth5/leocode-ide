@@ -37,6 +37,9 @@ interface Props {
   /** Phase F: open the Git/SSH sheets from Settings. */
   onOpenSshKeys?: () => void
   onOpenRemotes?: () => void
+  /** Task 27: redacted support report and the first-run screens. */
+  onOpenDiagnostics?: () => void
+  onShowOnboarding?: () => void
 }
 
 export function SettingsDialog({
@@ -55,7 +58,9 @@ export function SettingsDialog({
   backupBusy = false,
   backupStatus = null,
   onOpenSshKeys,
-  onOpenRemotes
+  onOpenRemotes,
+  onOpenDiagnostics,
+  onShowOnboarding
 }: Props) {
   const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about">("editor")
 
@@ -101,7 +106,7 @@ export function SettingsDialog({
             onClick={() => setActiveTab("about")}
           >
             <CpuIcon size={16} />
-            <span>Environment</span>
+            <span>About</span>
           </button>
         </div>
 
@@ -415,6 +420,25 @@ export function SettingsDialog({
                 <CpuIcon size={18} />
                 <span>Open Runtime & Environment Manager</span>
               </button>
+            </div>
+
+            <div className="settings-card">
+              <label className="settings-card-label">Diagnostics</label>
+              <p className="guide-intro">
+                Device, WebView, storage, runtimes and recent errors, with paths and
+                credentials removed. Copy it for a bug report or share it with your device's
+                share sheet.
+              </p>
+              {onOpenDiagnostics && (
+                <button className="btn primary full-width" onClick={onOpenDiagnostics}>
+                  <span>Open diagnostics</span>
+                </button>
+              )}
+              {onShowOnboarding && (
+                <button className="btn ghost full-width" onClick={onShowOnboarding}>
+                  <span>Show onboarding again</span>
+                </button>
+              )}
             </div>
 
             <div className="settings-card">

@@ -317,6 +317,10 @@ export interface GitStream {
 export interface Bridge {
   readonly mode: "mock" | "android"
   info(options?: RequestOptions): Promise<AppInfo>
+  /** Redacted support report for Settings › About › Diagnostics (Task 27). */
+  diagnostics(options?: RequestOptions): Promise<string>
+  /** Open the system share sheet with redacted text; false when unavailable. */
+  shareText(text: string, options?: RequestOptions): Promise<boolean>
   list(path: string, options?: RequestOptions): Promise<FileEntry[]>
   read(path: string, options?: RequestOptions): Promise<string>
   write(path: string, content: string, options?: RequestOptions): Promise<void>

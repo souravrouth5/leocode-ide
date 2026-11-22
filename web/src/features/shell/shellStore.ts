@@ -18,6 +18,9 @@ export interface ShellState {
   settingsOpen: boolean
   terminalMounted: boolean
   prompt: PromptState | null
+  /** First-run onboarding (Task 27); opened by App when the marker is absent. */
+  onboardingOpen: boolean
+  onboardingStep: number
   /** Transient status-bar text (2.2 s). */
   status: string | null
   /**
@@ -30,6 +33,11 @@ export interface ShellState {
   setSidebarOpen(open: boolean): void
   toggleSidebar(): void
   setSettingsOpen(open: boolean): void
+  openOnboarding(): void
+  closeOnboarding(): void
+  setOnboardingStep(step: number): void
+  /** Android back inside onboarding: walk back, never dismiss from step 0. */
+  onboardingBack(): void
   openPrompt(prompt: PromptState): void
   closePrompt(): void
   flash(text: string): void
@@ -47,6 +55,8 @@ export function createShellStore(): StoreApi<ShellState> {
     settingsOpen: false,
     terminalMounted: false,
     prompt: null,
+    onboardingOpen: false,
+    onboardingStep: 0,
     status: null,
     sheets,
 
@@ -69,6 +79,24 @@ export function createShellStore(): StoreApi<ShellState> {
 
     setSettingsOpen(settingsOpen) {
       set({ settingsOpen })
+    },
+
+    openOnboarding() {
+      set({ onboardingOpen: true, onboardingStep: 0, settingsOpen: false })
+    },
+
+    closeOnboarding() {
+      set({ onboardingOpen: false, onboardingStep: 0 })
+    },
+
+    setOnboardingStep(step) {
+      set({ onboardingStep: Math.max(0, step) })
+    },
+
+    onboardingBack() {
+      const step = get().onboardingStep
+      if (step > 0) set({ onboardingStep: step - 1 })
+      // Step 0 is deliberately not dismissible.
     },
 
     openPrompt(prompt) {

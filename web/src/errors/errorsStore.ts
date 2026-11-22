@@ -17,6 +17,8 @@ export interface ActiveError {
   correlationId?: string
   /** Re-run the failed operation, when the caller can offer it. */
   retry?: () => void
+  /** When the error was reported, for the diagnostics report (Task 27). */
+  at?: number
 }
 
 export interface ReportOptions {
@@ -28,6 +30,8 @@ export interface ReportOptions {
 export interface ErrorsState {
   banner: ActiveError | null
   sheet: ActiveError | null
+  /** Most recent reports, newest first, for the diagnostics screen (Task 27). */
+  recent: ActiveError[]
   report(error: unknown, options?: ReportOptions): ActiveError
   dismissBanner(): void
   dismissSheet(): void
@@ -54,6 +58,7 @@ export function createErrorsStore(notify: Notify): StoreApi<ErrorsState> {
   return createStore<ErrorsState>((set, get) => ({
     banner: null,
     sheet: null,
+    recent: [],
 
     report(error, options) {
       const appError = toAppError(error)
@@ -63,8 +68,10 @@ export function createErrorsStore(notify: Notify): StoreApi<ErrorsState> {
         entry,
         context: options?.context,
         correlationId: nextCorrelationId(),
-        retry: options?.retry
+        retry: options?.retry,
+        at: Date.now()
       }
+      set((state) => ({ recent: [active, ...state.recent].slice(0, 20) }))
 
       if (entry.surface === "snackbar") {
         notify({

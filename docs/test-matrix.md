@@ -354,6 +354,25 @@ CodeMirror (133 KB) / xterm (74 KB) are fetched on first use.
 | Find / replace | | |
 | Search ~1 000-file repo | | |
 
+## Onboarding and diagnostics (Task 27)
+
+| Test | D1 (A9) | D2 (A15) | Notes |
+|---|---|---|---|
+| Fresh install shows the 3 onboarding screens in order | **PASS** (2026-11-22) | **PASS** (2026-11-22) | storage model → battery/MIUI/phantom-process killer → trust |
+| Trust warning cannot be skipped | **PASS** | **PASS** | "Start coding" disabled until the acknowledgement; no close/backdrop; back walks the steps and does not exit |
+| Onboarding stays finished | **PASS** | **PASS** | `localStorage["leocode.onboarding.v1"]="1"`; force-stop + relaunch opens the IDE |
+| Settings › About › Diagnostics fields | **PASS** | **PASS** | device, Android/SDK/patch, ABIs, WebView, page size, root, storage, heap, workspace, runtimes, last crash, recent errors |
+| Copy diagnostics | **PASS** | **PASS** | clipboard receives exactly the visible report; "Diagnostics copied" |
+| Share diagnostics | **PASS** | **PASS** | system chooser: `ChooserActivity` (A9) / `ChooserActivityLauncher` (A15) |
+| Report redacts paths and tokens | **PASS** | **PASS** | injected `/data/... token=...` became `<path> token=<redacted>`; no `/data/` or `/storage/` in the report |
+| Recent errors appear in the report | **PASS** | **PASS** | newest first, timestamp + correlation id |
+
+Evidence: [`device-reports/20261122-task27-D1-D2.txt`](device-reports/20261122-task27-D1-D2.txt)
+with the D1 and D2 screenshots beside it. D2's unattended first launch had the
+marker already set without harness input; a `pm clear` restored the first-run
+state, and an untouched second launch stayed on the onboarding, so the anomaly
+is recorded rather than inferred.
+
 ## Release (Tasks 28–29)
 
 | Test | D1 | D2 |

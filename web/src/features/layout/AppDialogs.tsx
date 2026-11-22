@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
 import { PromptDialog } from "../../components/PromptDialog"
@@ -9,11 +10,13 @@ import { ErrorSurfaces } from "../../errors/ErrorSurfaces"
 import { PaneBoundary } from "../../errors/PaneBoundary"
 import { describeProgress } from "../workspace/backupStore"
 import { DialogHost } from "../dialogs/DialogHost"
+import { DiagnosticsSheet } from "../diagnostics/DiagnosticsSheet"
 import { ConflictSheet } from "../git/ConflictSheet"
 import { DiffSheet } from "../git/DiffSheet"
 import { HostKeySheet } from "../git/HostKeySheet"
 import { RemoteSheet } from "../git/RemoteSheet"
 import { SshKeysSheet } from "../git/SshKeysSheet"
+import { resetOnboarding } from "../onboarding/onboarding"
 import { submitPrompt } from "../shell/promptActions"
 
 /** All sheets/dialogs, wired to their stores. */
@@ -29,6 +32,8 @@ export function AppDialogs({ version }: { version: string }) {
   const storage = useStore(files, (state) => state.storage)
   const backupBusy = useStore(backup, (state) => state.busy)
   const backupStatus = useStore(backup, (state) => state.status)
+  const recentErrors = useStore(errors, (state) => state.recent)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
 
   const requestStoragePermission = () => {
     void files.getState().requestStoragePermission()
@@ -164,6 +169,26 @@ export function AppDialogs({ version }: { version: string }) {
             shell.getState().setSettingsOpen(false)
             void git.getState().openRemotes()
           }}
+          onOpenDiagnostics={() => {
+            shell.getState().setSettingsOpen(false)
+            setDiagnosticsOpen(true)
+          }}
+          onShowOnboarding={() => {
+            shell.getState().setSettingsOpen(false)
+            resetOnboarding()
+            shell.getState().openOnboarding()
+          }}
+        />
+      </PaneBoundary>
+
+      <PaneBoundary title="The diagnostics report crashed">
+        <DiagnosticsSheet
+          open={diagnosticsOpen}
+          onClose={() => setDiagnosticsOpen(false)}
+          bridge={bridge}
+          recentErrors={recentErrors}
+          version={version}
+          onNotice={(message) => notifications.getState().enqueue({ kind: "info", message })}
         />
       </PaneBoundary>
 

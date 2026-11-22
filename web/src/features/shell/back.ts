@@ -13,6 +13,13 @@ import type { AppStores } from "../../app/stores"
 export function handleBack(stores: AppStores): boolean {
   const { errors, shell, run, dialogs } = stores
 
+  // First-run onboarding is the top layer and cannot be dismissed: back walks
+  // to the previous screen, and does nothing on the first one (Task 27).
+  if (shell.getState().onboardingOpen) {
+    shell.getState().onboardingBack()
+    return true
+  }
+
   // A confirm/prompt sheet is the most recent modal layer: dismiss it (which
   // resolves the wait as "cancelled") before anything behind it (PD-02).
   if (dialogs.getState().request) {

@@ -74,6 +74,15 @@ object CrashStore {
         return record
     }
 
+    /** Read the pending record without consuming it; used by diagnostics. */
+    fun peek(context: Context): CrashRecord? {
+        val file = file(context)
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString<CrashRecord>(file.readText())
+        }.getOrNull()?.let { capped(it) }
+    }
+
     fun clear(context: Context) {
         file(context).delete()
     }

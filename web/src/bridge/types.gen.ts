@@ -84,6 +84,18 @@ export interface AppInfo {
   theme: ThemeState
 }
 
+export interface DiagnosticsReply {
+  report: string
+}
+
+export interface ShareRequest {
+  text: string
+}
+
+export interface ShareReply {
+  shared: boolean
+}
+
 export interface FileEntry {
   name: string
   path: string

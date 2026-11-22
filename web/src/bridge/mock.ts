@@ -317,6 +317,32 @@ export class MockBridge implements Bridge {
     }
   }
 
+  async diagnostics(): Promise<string> {
+    return [
+      "LeoCode diagnostics",
+      "App       : LeoCode 0.0.1-mock (mock)",
+      "Package   : dev.leocode",
+      "Device    : Browser Mock",
+      "Android   : mock (SDK 0, patch unknown)",
+      "ABIs      : wasm",
+      "WebView   : browser",
+      "Page size : 4096 bytes (mock)",
+      "Root      : not detected",
+      "Storage   : 4096 MB free / 8192 MB total",
+      "Heap max  : 256 MB",
+      "Workspace : Workspace (default)",
+      "Runtimes  :",
+      "  python 3.14.10 (versionCode 31410) installed=false healthy=false",
+      "Last crash:",
+      "  none"
+    ].join("\n")
+  }
+
+  /** No system share sheet in mock mode; DiagnosticsSheet falls back to copy. */
+  async shareText(): Promise<boolean> {
+    return false
+  }
+
   async list(path: string): Promise<FileEntry[]> {
     const base = path === "" ? "." : path
     const entries: FileEntry[] = []

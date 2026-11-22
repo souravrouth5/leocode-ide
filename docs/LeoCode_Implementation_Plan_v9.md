@@ -648,6 +648,7 @@ Every task ends with a demo on the phones it names. A task is done only when its
 **Task 27: Onboarding and diagnostics screen**
 - Objective: first-run clarity and support data.
 - Guidance: 3 onboarding screens (storage model; battery / MIUI / phantom-process killer; trust warning, not silently skippable); Settings › About › Diagnostics (device, WebView, page size, root, runtimes, recent errors) with Copy and Share, redacted.
+- Implementation note (2026-11-22): the shipped report also carries app/build, Android release/SDK/security patch, ABIs, storage free/total, heap limit, workspace name/id and last crash; the web layer appends its recent-error ring and redacts again. Android WebView has no Web Share API, so Share goes through the `app.share` bridge method (system chooser) with a browser fallback. The Settings tab is labelled **About**.
 - Demo: fresh install on D1 walks onboarding; the diagnostics share contains no paths outside allowed roots.
 
 **Task 28: Release pipeline and self-update**

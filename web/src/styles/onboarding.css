@@ -1,0 +1,138 @@
+/* First-run onboarding (Task 27). A full-screen layer with no backdrop close. */
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 18px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(48, 120, 255, 0.22), transparent 55%),
+    var(--bg, #0f1115);
+  overflow-y: auto;
+}
+
+.onboarding-card {
+  width: min(520px, 100%);
+  margin: auto;
+  padding: 26px 22px 20px;
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 22px;
+  background: var(--panel, #161a22);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.onboarding-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.onboarding-kicker {
+  color: var(--muted, #9aa3b2);
+  font-size: 0.78rem;
+}
+
+.onboarding-dots {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 22px;
+}
+
+.onboarding-dot {
+  width: 22px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border, #2a2f3a);
+  transition: background 160ms ease, width 160ms ease;
+}
+
+.onboarding-dot.active {
+  width: 34px;
+  background: var(--accent, #4c8dff);
+}
+
+.onboarding-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 14px;
+  border-radius: 16px;
+  color: var(--accent, #4c8dff);
+  background: rgba(76, 141, 255, 0.12);
+}
+
+.onboarding-title {
+  margin: 0 0 10px;
+  font-size: 1.42rem;
+  line-height: 1.25;
+}
+
+.onboarding-intro {
+  margin: 0 0 16px;
+  color: var(--text, #e6e9ef);
+  line-height: 1.5;
+}
+
+.onboarding-points {
+  margin: 0 0 18px;
+  padding-left: 20px;
+  color: var(--muted, #9aa3b2);
+  line-height: 1.5;
+}
+
+.onboarding-points li + li {
+  margin-top: 8px;
+}
+
+.onboarding-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 18px;
+  padding: 12px;
+  border: 1px solid rgba(255, 186, 74, 0.35);
+  border-radius: 12px;
+  background: rgba(255, 186, 74, 0.08);
+  color: var(--text, #e6e9ef);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.onboarding-ack input {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent, #4c8dff);
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.onboarding-actions .btn {
+  min-width: 110px;
+}
+
+.onboarding-actions .btn:disabled {
+  opacity: 0.45;
+}
+
+.onboarding-footnote {
+  margin: 16px 0 0;
+  color: var(--muted, #9aa3b2);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}

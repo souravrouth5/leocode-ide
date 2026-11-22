@@ -63,4 +63,17 @@ describe("errors store routing (Task 12)", () => {
     expect(active.correlationId).toMatch(/^lc-/)
     expect(store.getState().sheet?.correlationId).toBe(active.correlationId)
   })
+
+  it("keeps the 20 most recent errors newest first with timestamps (Task 27)", () => {
+    const store = createErrorsStore(vi.fn())
+    for (let index = 0; index < 25; index += 1) {
+      store.getState().report(new AppError("E_IO", `failure ${index}`))
+    }
+
+    const recent = store.getState().recent
+    expect(recent).toHaveLength(20)
+    expect(recent[0].error.message).toBe("failure 24")
+    expect(recent[19].error.message).toBe("failure 5")
+    expect(recent.every((item) => typeof item.at === "number" && item.at > 0)).toBe(true)
+  })
 })

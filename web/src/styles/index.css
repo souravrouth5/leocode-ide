@@ -2,6 +2,7 @@
 @import "./tokens.css";
 @import "./base.css";
 @import "./splash.css";
+@import "./onboarding.css";
 @import "./layout.css";
 @import "./files.css";
 @import "./editor.css";
@@ -18,6 +19,7 @@
 @import "./runtimes.css";
 @import "./drawer-explorer.css";
 @import "./settings-dialog.css";
+@import "./diagnostics.css";
 @import "./menus.css";
 @import "./drawer-nav.css";
 @import "./errors.css";

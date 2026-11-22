@@ -476,6 +476,16 @@ export class AndroidBridge implements Bridge {
     return this.request<AppInfo>("app.info", {}, options)
   }
 
+  async diagnostics(options?: RequestOptions): Promise<string> {
+    const reply = await this.request<{ report: string }>("app.diagnostics", {}, options)
+    return reply.report
+  }
+
+  async shareText(text: string, options?: RequestOptions): Promise<boolean> {
+    const reply = await this.request<{ shared: boolean }>("app.share", { text }, options)
+    return reply.shared
+  }
+
   async list(path: string, options?: RequestOptions): Promise<FileEntry[]> {
     return this.request<FileEntry[]>("fs.list", { path }, options)
   }

@@ -9,6 +9,19 @@ beforeEach(() => {
 })
 
 describe("Android back button (W-12)", () => {
+  it("walks onboarding back and never dismisses it from the first screen", () => {
+    const stores = createAppStores(new MockBridge())
+    stores.shell.getState().openOnboarding()
+    stores.shell.getState().setOnboardingStep(1)
+
+    expect(handleBack(stores)).toBe(true)
+    expect(stores.shell.getState().onboardingStep).toBe(0)
+    expect(stores.shell.getState().onboardingOpen).toBe(true)
+
+    expect(handleBack(stores)).toBe(true)
+    expect(stores.shell.getState().onboardingOpen).toBe(true)
+  })
+
   it("closes the error sheet before anything else", () => {
     const stores = createAppStores(new MockBridge())
     stores.errors.getState().report(new AppError("E_INTERNAL", "boom"))

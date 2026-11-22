@@ -12,6 +12,8 @@ import { AppDialogs } from "../layout/AppDialogs"
 import { AppHeader } from "../layout/AppHeader"
 import { AppStatusBar } from "../layout/AppStatusBar"
 import { BottomNav } from "../layout/BottomNav"
+import { Onboarding } from "../onboarding/Onboarding"
+import { markOnboardingSeen } from "../onboarding/onboarding"
 import { RuntimesView } from "../runtimes/RuntimesView"
 import { TerminalView } from "../terminal/TerminalView"
 import { BackupProgressBanner } from "../workspace/BackupProgressBanner"
@@ -26,6 +28,8 @@ export function Shell({ info }: { info: AppInfo | null }) {
   const { shell, settings, editor } = stores
   const view = useStore(shell, (state) => state.view)
   const terminalMounted = useStore(shell, (state) => state.terminalMounted)
+  const onboardingOpen = useStore(shell, (state) => state.onboardingOpen)
+  const onboardingStep = useStore(shell, (state) => state.onboardingStep)
   const userSettings = useStore(settings, (state) => state.settings)
   const { mode, setMode } = useTheme()
 
@@ -81,6 +85,16 @@ export function Shell({ info }: { info: AppInfo | null }) {
       <BottomNav />
       <ExplorerDrawer version={info?.version ?? "0.1.0"} />
       <AppDialogs version={info?.version ?? "0.1.0"} />
+      <Onboarding
+        open={onboardingOpen}
+        step={onboardingStep}
+        onStep={(step) => shell.getState().setOnboardingStep(step)}
+        onFinish={() => {
+          markOnboardingSeen()
+          shell.getState().closeOnboarding()
+          shell.getState().flash("Welcome to LeoCode")
+        }}
+      />
     </div>
   )
 }

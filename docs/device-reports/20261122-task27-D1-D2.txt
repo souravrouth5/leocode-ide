@@ -1,0 +1,207 @@
+Task 27 — onboarding and diagnostics device evidence
+====================================================
+
+Date: 2026-11-22
+Build: debug APK, 40,307,xxx bytes, web assets synced from the Task 27 tree
+Rule: each phone is run and recorded separately; one device's result is not
+inferred from the other.
+
+D1 — Redmi Note 7S (lavender), Android 9 / API 28, serial 192.168.29.26:5555
+---------------------------------------------------------------------------
+
+Fresh install: `adb uninstall dev.leocode` then `adb install -r -g`, then
+`am start -W -n dev.leocode/.MainActivity`. First cold start reported
+`TotalTime: 125151` ms (D1 is slow to boot the WebView).
+
+Onboarding
+----------
+1. Step 1 "Your files live here" — app-private storage, uninstall warning and
+   shared-storage permission. Screenshot: 20261122-task27-d1-onboarding-1.png.
+2. Step 2 "Keep LeoCode alive" — running notification/Stop all, MIUI/HyperOS
+   Autostart + No restrictions, Android 12+ child-process restriction. No close
+   button and no backdrop. Screenshot: 20261122-task27-d1-onboarding-2.png.
+3. Step 3 "Scripts and packages are powerful" — trust warning, unchecked
+   acknowledgement and a disabled "Start coding" button. Tapping the disabled
+   button did nothing. Screenshot: 20261122-task27-d1-onboarding-3-ack.png.
+4. Android BACK on step 3 went to step 2; BACK again went to step 1; BACK on
+   step 1 left the Activity resumed with onboarding still visible. The screens
+   cannot be dismissed with back.
+5. Checking the acknowledgement enabled "Start coding"; tapping it opened the
+   IDE shell (screenshot d1-09-shell.png, not copied).
+6. `am force-stop` + relaunch showed the IDE shell directly; onboarding did not
+   reappear. Screenshot: 20261122-task27-d1-relaunch.png.
+7. `localStorage["leocode.onboarding.v1"]` via the WebView DevTools socket: "1".
+
+Diagnostics
+-----------
+Settings → Environment (now renamed About) → Diagnostics → Open diagnostics.
+Screenshot: 20261122-task27-d1-diagnostics.png. The report contained:
+
+    LeoCode diagnostics
+    Generated : 2026-11-22 14:21:45 +0530
+    App       : LeoCode 0.1.0 (debug)
+    Package   : dev.leocode
+    Device    : Xiaomi Redmi Note 7S
+    Android   : 9 (SDK 28, patch 2020-02-05)
+    ABIs      : arm64-v8a, armeabi-v7a, armeabi
+    WebView   : com.android.chrome 137.0.7151.115
+    Page size : 4096 bytes (native)
+    Root      : not detected
+    Storage   : 9673 MB free / 51205 MB total
+    Heap max  : 256 MB
+    Workspace : Workspace (default)
+    Runtimes  :
+      python 3.14.10 (versionCode 31410) installed=false healthy=false
+    Last crash:
+      none
+
+    Recent errors:
+      none
+
+Copy
+----
+The WebView clipboard was instrumented through CDP, then Copy was clicked. The
+text handed to `navigator.clipboard.writeText` was exactly the visible report
+(header + native report + recent errors) and the status notice read
+"Diagnostics copied". No path or token appeared in it.
+
+Share
+-----
+Share was clicked. `dumpsys activity activities` showed:
+
+    Hist #1: ActivityRecord{... android/com.android.internal.app.ChooserActivity}
+    Intent { act=android.intent.action.CHOOSER flg=0x800000
+             cmp=android/com.android.internal.app.ChooserActivity (has extras) }
+
+Screenshot: 20261122-task27-d1-share.png, titled "Share diagnostics".
+
+Redaction
+---------
+A synthetic window error with the message
+`failed at /data/data/dev.leocode/files/secret token=abc123` was reported. The
+recent-errors section then read:
+
+    2026-11-22T08:53:54.594Z E_INTERNAL during window error [lc-mwrlo8pl-1]:
+      failed at <path> token=<redacted>
+
+A direct check of the rendered report returned:
+
+    hasData=false hasStorage=false hasToken=false hasPath=true hasRedacted=true
+
+D1 result: PASS (onboarding, non-skippable trust gate, relaunch, diagnostics,
+Copy, Share chooser, redaction).
+
+D2 — POCO F1 (beryllium), Android 15 / API 35, serial 10.8.0.111:37485
+---------------------------------------------------------------------
+
+Fresh install: `adb uninstall dev.leocode` then `adb install -r -g`, then
+`am start -W -n dev.leocode/.MainActivity` (`TotalTime: 1386` ms). The Wi-Fi
+ADB serial moved from 10.8.0.75 to 10.8.0.111 during the pass (DHCP); the
+device was re-found by scanning port 37485.
+
+Onboarding
+----------
+1. Step 1 "Your files live here" (app-private storage, uninstall warning,
+   shared-storage permission). Screenshot: 20261122-task27-d2-onboarding-1.png.
+2. Step 2 "Keep LeoCode alive" (running notification/Stop all, MIUI/HyperOS
+   Autostart + No restrictions, Android 12+ child-process restriction).
+   Screenshot: 20261122-task27-d2-onboarding-2.png.
+3. Step 3 "Scripts and packages are powerful": unchecked acknowledgement and a
+   disabled "Start coding". Tapping the disabled button did nothing
+   (20261122-task27-d2-onboarding-3-disabled.png).
+4. Android BACK on step 3 went to step 2; BACK again went to step 1; BACK on
+   step 1 left `topResumedActivity=dev.leocode/.MainActivity` with onboarding
+   still visible. The screens cannot be dismissed with back.
+5. Checking the acknowledgement enabled "Start coding"
+   (20261122-task27-d2-onboarding-3-ack.png); tapping it opened the IDE shell.
+6. `am force-stop` + relaunch showed the IDE shell directly; onboarding did not
+   reappear (20261122-task27-d2-relaunch.png).
+
+Marker anomaly (recorded, not reproducible)
+-------------------------------------------
+The unattended first launch at 14:49 wrote
+`localStorage["leocode.onboarding.v1"]="1"` by 14:50 with no input sent by this
+harness, so the first captured screen after reconnecting was the IDE. To test
+the first-run path the app data was cleared (`pm clear dev.leocode`); onboarding
+then showed and every row above passed. A second `pm clear` + launch was left
+untouched for 25 s: the marker stayed `null` and the onboarding was still open
+(`Welcome to LeoCode`, step 1 visible), so no auto-finish path was found. The
+14:50 write is treated as a stray touch on the unattended screen; the clean
+first-run behaviour is the one recorded here.
+
+Diagnostics
+-----------
+Settings (menu → Settings) → About → Open diagnostics. Screenshot:
+20261122-task27-d2-diagnostics.png. The report contained:
+
+    LeoCode diagnostics
+    Generated : 2026-11-22 15:04:33 +0530
+    App       : LeoCode 0.1.0 (debug)
+    Package   : dev.leocode
+    Device    : Xiaomi POCO F1
+    Android   : 15 (SDK 35, patch 2025-09-01)
+    ABIs      : arm64-v8a, armeabi-v7a, armeabi
+    WebView   : com.google.android.webview 157.0.8103.50
+    Page size : 4096 bytes (native)
+    Root      : not detected
+    Storage   : 100357 MB free / 115797 MB total
+    Heap max  : 256 MB
+    Workspace : Workspace (default)
+    Runtimes  :
+      python 3.14.10 (versionCode 31410) installed=false healthy=false
+    Last crash:
+      none
+
+    Recent errors:
+      none
+
+Copy
+----
+With the clipboard instrumented through CDP, Copy handed
+`navigator.clipboard.writeText` exactly the visible report (header + native
+report + recent errors); the status notice read "Diagnostics copied". No path
+or token appeared in it.
+
+Share
+-----
+Share opened the Android 15 resolver:
+
+    topResumedActivity=ActivityRecord{... com.android.intentresolver/.ChooserActivityLauncher}
+    Intent { act=android.intent.action.CHOOSER flg=0x800000
+             cmp=com.android.intentresolver/.ChooserActivityLauncher (has extras) }
+
+The chooser was titled "Sharing text" and previewed the report
+(20261122-task27-d2-share.png).
+
+Redaction
+---------
+A synthetic window error with the message
+`failed at /data/user/0/dev.leocode/files/secret token=xyz789` was reported.
+The diagnostics report then ended with:
+
+    2026-11-22T09:36:12.785Z E_INTERNAL during window error [lc-mwrn6n75-1]:
+      failed at <path> token=<redacted>
+
+A direct check of the rendered report returned:
+
+    hasData=false hasStorage=false hasToken=false hasPath=true hasRedacted=true
+
+Screenshot: 20261122-task27-d2-redaction.png. The error sheet itself also showed
+`failed at <path> token=<redacted>`.
+
+D2 result: PASS (onboarding, non-skippable trust gate, relaunch, diagnostics,
+Copy, Share chooser, redaction).
+
+Summary
+-------
+
+| Row | D1 (A9 / API 28) | D2 (A15 / API 35) |
+|---|---|---|
+| Three onboarding screens, in order | PASS | PASS |
+| Acknowledgement required; no close/backdrop; back walks only | PASS | PASS |
+| Onboarding stays finished after force-stop + relaunch | PASS | PASS |
+| Diagnostics fields (device, WebView, page size, root, runtimes, errors) | PASS | PASS |
+| Copy hands over the exact visible report | PASS | PASS |
+| Share opens the system chooser | PASS | PASS |
+| Injected path/token redacted; no `/data/` or `/storage/` in the report | PASS | PASS |
+| Recent errors listed with timestamp + correlation id | PASS | PASS |

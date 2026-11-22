@@ -24,6 +24,7 @@ const USER_WAIT_METHODS = new Set([
 
 const IDEMPOTENT_READS = new Set([
   "app.info",
+  "app.diagnostics",
   "app.theme.get",
   "fs.list",
   "fs.read",

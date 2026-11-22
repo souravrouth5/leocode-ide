@@ -22,6 +22,8 @@ import dev.leocode.bridge.SshHandler
 import dev.leocode.bridge.TermHandler
 import dev.leocode.bridge.ThemePort
 import dev.leocode.bridge.WorkspaceHandler
+import dev.leocode.core.CrashStore
+import dev.leocode.core.Diagnostics
 import dev.leocode.core.OrphanReaper
 import dev.leocode.core.PathJail
 import dev.leocode.core.PidFileStore
@@ -189,8 +191,11 @@ class AppGraph(private val app: Application) {
     fun searchHandler(): SearchHandler =
         SearchHandler(searchEngine, { workspaceStore.activeDirectory() }, json)
 
-    fun appHandler(theme: ThemePort, appInfo: () -> AppInfo): AppHandler =
-        AppHandler(theme, appInfo, json)
+    fun appHandler(
+        theme: ThemePort,
+        appInfo: () -> AppInfo,
+        share: (String) -> Boolean = { false }
+    ): AppHandler = AppHandler(theme, appInfo, json, ::diagnostics, share)
 
     fun procHandler(): ProcHandler = procHandler
 
@@ -217,6 +222,34 @@ class AppGraph(private val app: Application) {
         runCatching {
             PythonProject(workspace, workspaceStore.activeDirectory()).ensureAliases()
         }.getOrDefault(false)
+
+    /** Redacted support report for Settings › About › Diagnostics (Task 27). */
+    fun diagnostics(): String = runCatching {
+        val active = workspaceStore.active()
+        Diagnostics.collect(
+            app,
+            workspace,
+            active.id,
+            active.name,
+            runtimeHandler.catalog().map {
+                Diagnostics.RuntimeFact(
+                    id = it.id,
+                    version = it.version,
+                    versionCode = it.versionCode,
+                    installed = it.installed,
+                    healthy = it.healthy,
+                    installedVersionCode = it.installedVersionCode
+                )
+            },
+            CrashStore.peek(app)
+        )
+    }.getOrElse { error ->
+        // Diagnostics must still answer when a subsystem is broken; the
+        // exception text goes through the redactor like every other field.
+        dev.leocode.core.Redactor.redact(
+            "LeoCode diagnostics\nReport unavailable: ${error.javaClass.simpleName}"
+        )
+    }
 
     fun gitHandler(): GitHandler = GitHandler(gitEngine, json)
 
