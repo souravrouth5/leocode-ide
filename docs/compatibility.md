@@ -66,5 +66,5 @@ The wheel was installed and imported on both phones during the Task 26 probes
 (Android 9) and D2 (Android 15). PyPI Android wheels are checked in the same
 pass; `charset-normalizer` 3.5.2 was selected from PyPI on both phones, so a
 PyPI wheel that matches the device tags does not need our index. The production
-T15 harness and the app-UI flow pass on D2 (2026-11-22); D1's rows are still
-pending because the device was unreachable (see `PROGRESS.md`).
+T15 harness and the app-UI flow pass on both D1 and D2 (2026-11-22; see
+`PROGRESS.md`).
