@@ -14,9 +14,9 @@ unit gates are done, and only its device rows remain.
 | Branch | `feat/phase-g`, pushed to `origin` (do not merge without asking; the owner merges) |
 | Task 24 | CI and packaging complete; run [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602) green. The signed release is blocked on the protected `python-runtime` environment and `RUNTIME_SIGNING_KEY` (the current PAT gets 403 on environment APIs). |
 | Task 25 | **Done and device-verified on D1 and D2.** Raw evidence: [`device-reports/20261121-task25-D1-D2.txt`](device-reports/20261121-task25-D1-D2.txt). |
-| Task 26 | **Implementation complete, unit gates green, device rows in progress.** Commit `0a3fc84`. D2 T15 reached venv/aliases/pip/requirements PASS; the wheel row failed on an invalid pushed filename. D1 has not run T15. |
+| Task 26 | **Implementation complete; D2 device rows PASS, D1 pending.** Commit `0a3fc84` plus the `ProcHandler` cwd fix. D2 passed T15 and the full app-UI flow on 2026-11-22; D1 was unreachable. |
 | Working tree | Clean after the docs commit |
-| Gates | Android 417 unit tests / 0 failures / 1 skipped, `lintDebug`, `assembleDebug`; web 288 tests, typecheck, lint, build |
+| Gates | Android 418 unit tests / 0 failures / 1 skipped, `lintDebug`, `assembleDebug`; web 288 tests, typecheck, lint, build |
 | Devices | D1 `192.168.29.26:5555` (Redmi Note 7S, Android 9 / API 28); D2 `e76846f` (POCO F1, Android 15 / API 35) |
 
 ## What Task 26 added
@@ -41,14 +41,21 @@ unit gates are done, and only its device rows remain.
 - `requirements.txt` installs; peak RSS 8 548 KB (D1) / 11 064 KB (D2)
 - pip accepts PyPI Android wheels (`charset-normalizer` 3.5.2, `cp314-cp314-android_24_arm64_v8a`)
 
-**T15 through the production harness — partial.** D2 (2026-11-21 23:16) passed venv creation,
-`pyvenv.cfg`, aliases, pip 26.2.2 and the `requests` requirements install. The markupsafe row failed
-with `Invalid wheel filename (wrong number of parts): 't15-markupsafe'` because the wheel was pushed
-under a short name; pip requires `name-version-...whl`. Rename it on the device (see below) and
-rerun. **D1 has not run T15 yet.** Do not infer either device's result from the other.
+**D2 — T15 and app UI PASS (2026-11-22).** T15 through the production harness passed venv,
+`pyvenv.cfg`, aliases, pip 26.2.2, the `requests` requirements install, the markupsafe Android wheel
+and the script (`python 3.14.10`, `requests 2.34.2`, `markupsafe &lt;b&gt;`, `fetch 200 577`). The
+app UI also passed: the Runtimes panel, venv creation with trust, pip with trust and a streamed log,
+Run through the project venv (`EXIT 0`), no prompt on a second Run, and a fresh requirements/trust
+prompt after editing `requirements.txt`. Raw report:
+[`device-reports/20261122-task26-D2-ui.txt`](device-reports/20261122-task26-D2-ui.txt).
 
-The app-UI demo (create venv, install requirements, run a script with the trust prompt) has not been
-recorded on either phone yet.
+**D1 — pending.** The device was unreachable on 2026-11-22 (old address closed, no mDNS service), so
+neither T15 nor the UI flow has run there. Do not infer D1 from D2.
+
+**Defect this run found:** `proc.run` resolved a relative `cwd` against
+`workspace.defaultWorkspace`, so the first Run in a non-default project looked for the script under
+`workspaces/default`. `ProcHandler` now takes the active-root supplier, like the trust/python
+handlers, and `ProcHandlerTest` covers it.
 
 ## Reproducing the T15 run
 
@@ -91,17 +98,14 @@ adb -s <serial> shell run-as dev.leocode dd \
 
 ## What to do next
 
-1. **Finish Task 26 device rows.** Rerun T15 on D2 with the valid wheel name, then run the same T15
-   on D1. Record both in `PROGRESS.md`, `docs/test-matrix.md` and the compatibility notes. Then run
-   the app-UI demo on both phones (Runtimes → create environment → install requirements → Run a
-   `.py` file → accept the trust prompt) and capture evidence.
-2. **Fix the compatibility doc's last paragraph.** `docs/compatibility.md` still says the wheel
-   install/import row is pending; the probes above proved it. Replace that sentence with the
-   measured result.
-3. **Task 24 release (owner action).** Create the protected `python-runtime` environment, upload
+1. **Finish Task 26 on D1.** Run T15 there with the valid wheel name, then the app-UI flow
+   (Runtimes → create environment → install requirements → Run a `.py` file → accept the trust
+   prompts). Record it in `PROGRESS.md`, `docs/test-matrix.md` and the compatibility notes, then
+   mark Task 26 `[x]`.
+2. **Task 24 release (owner action).** Create the protected `python-runtime` environment, upload
    `RUNTIME_SIGNING_KEY`, and dispatch CI so the release job publishes the tarball, manifest,
    signature, wheel and `SHA256SUMS`.
-4. **Ask before starting Task 27.** Task 26 was explicitly scoped and approved; do not roll into the
+3. **Ask before starting Task 27.** Task 26 was explicitly scoped and approved; do not roll into the
    next Phase G task without confirmation.
 
 ## Traps that cost time (read before debugging a "network" failure)

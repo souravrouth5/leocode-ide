@@ -20,6 +20,7 @@ class ProcHandler(
     private val workspace: Workspace,
     private val jail: PathJail,
     private val supervisor: ProcessSupervisor,
+    private val activeRoot: () -> File = { workspace.defaultWorkspace },
     private val json: Json = BridgeJson.value
 ) : StreamingBridgeHandler, Closeable {
 
@@ -96,7 +97,9 @@ class ProcHandler(
     }
 
     private fun resolve(raw: String): File = try {
-        jail.resolve(raw, workspace.defaultWorkspace)
+        // A relative cwd belongs to the active workspace, not the default one;
+        // Run in a non-default project otherwise executes from the wrong tree.
+        jail.resolve(raw, activeRoot())
     } catch (e: SecurityException) {
         throw BridgeException(ErrorCode.E_PATH_OUTSIDE_ROOT, "path is outside the allowed roots")
     }

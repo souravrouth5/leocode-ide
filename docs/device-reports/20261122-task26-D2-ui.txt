@@ -1,0 +1,95 @@
+Task 26 — D2 app-UI and T15 evidence
+Date: 2026-11-22
+Device: D2 — POCO F1 (beryllium), LineageOS, Android 15 / API 35
+Serial: 10.8.0.184:37485 (Wi-Fi ADB)
+Build: app-debug.apk from feat/phase-g, Task 26 code + the ProcHandler cwd fix
+
+Network note
+------------
+The LAN has no direct internet. The host ran a small forwarding proxy on
+127.0.0.1:18080 to the authenticated upstream proxy, exposed to the device with
+`adb reverse tcp:18080 tcp:18080`. For the UI demo, a local wheelhouse was served
+on 127.0.0.1:18081 and exposed with `adb reverse tcp:18081 tcp:18081`, so pip
+installed from a deterministic local index. This is test plumbing only; the
+production path (PyPI through the device's network) is covered by T15 and the
+earlier compatibility probes.
+
+T15 — production harness
+------------------------
+Command:
+  adb -s 10.8.0.184:37485 shell am start -n dev.leocode/.HarnessActivity \
+      --es run T15 --es proxy http://127.0.0.1:18080 \
+      --es wheel /data/user/0/dev.leocode/files/tmp/markupsafe-3.0.2-cp314-cp314-android_24_arm64_v8a.whl
+
+Logcat (LeoCodeHarness):
+  ▶ T15 — Python venv + requests + markupsafe + fetch
+    venv: /data/user/0/dev.leocode/files/tmp/t15-project/.venv/bin/python
+    pyvenv.cfg: home = /data/user/0/dev.leocode/files/usr/bin | include-system-site-packages = false | version = 3.14.10 | executable = /data/user/0/dev.leocode/files/usr/bin/python3 | command = /data/user/0/dev.leocode/files/usr/bin/python3 -m venv /data/user/0/dev.leocode/files/tmp/t15-project/.venv
+    aliases: python=true pip=true
+    pip: pip 26.2.2 from /data/user/0/dev.leocode/files/tmp/t15-project/.venv/lib/python3.14/site-packages/pip (python 3.14)
+    requirements: exit=0 Successfully installed certifi-2026.11.20 charset_normalizer-3.5.2 idna-3.20 requests-2.34.2 urllib3-2.8.0
+    wheel: exit=0 Successfully installed markupsafe-3.0.2
+    script: exit=0
+    python 3.14.10
+             requests 2.34.2
+             markupsafe &lt;b&gt;
+             fetch 200 577
+    PASS venv + requests + markupsafe + fetch
+
+Result: PASS (one run).
+
+App UI — full flow
+------------------
+Scratch project: workspace `restoretest` (id `209e19e0`), files written with
+`run-as`; no real project was touched.
+
+1. Runtimes → "This project's Python" shows the runtime path, `not created`
+   environment, `not installed` requirements, and `python, pip` aliases.
+   Screenshot: 20261122-task26-d2-panel.png
+2. "Create environment" → trust sheet ("A project environment runs Python from
+   the bundled runtime in this project."). Accepted.
+   Screenshot: 20261122-task26-d2-trust.png
+3. Environment becomes `<workspace>/.venv/bin/python`.
+   Screenshot: 20261122-task26-d2-venv.png
+4. "Install requirements" → pip trust sheet. Accepted; pip log streamed into the
+   panel and ended with:
+     Successfully installed certifi-2026.11.20 charset_normalizer-3.5.2
+     idna-3.20 markupsafe-3.0.2 requests-2.34.2 urllib3-2.8.0
+   Screenshot: 20261122-task26-d2-pip-log.png
+5. Run `demo.py` → script trust sheet. Accepted; output:
+     hello from /data/user/0/dev.leocode/files/workspaces/209e19e0/.venv/bin/python
+     python 3.14.10
+     requests 2.34.2
+     markupsafe &lt;b&gt;
+   EXIT 0. Screenshot: 20261122-task26-d2-run.png
+6. Run again → no prompt; the grant persisted for the unchanged script.
+7. Edit `requirements.txt` on disk, then Run → "Install requirements?" sheet.
+   Screenshot: 20261122-task26-d2-requirements-prompt.png
+   "Install and run" → the pip trust sheet reappeared because the requirements
+   fingerprint changed; accepted, pip reinstalled, script ran, EXIT 0.
+   Screenshot: 20261122-task26-d2-install-run.png
+
+Result: PASS for the D2 UI flow, including trust persistence and
+requirements-driven re-prompting.
+
+Defect found and fixed
+----------------------
+The first Run after opening the project failed with:
+  /data/user/0/dev.leocode/files/workspaces/209e19e0/.venv/bin/python: can't
+  open file '/data/user/0/dev.leocode/files/workspaces/default/demo.py':
+  [Errno 2] No such file or directory
+`ProcHandler` resolved a relative `cwd` against `workspace.defaultWorkspace`
+instead of the active workspace. It now takes an `activeRoot` supplier (wired to
+`WorkspaceStore.activeDirectory()`), matching the trust/python handlers.
+`ProcHandlerTest.relative cwd uses the active workspace` covers it.
+
+Caveats
+-------
+- D1 was not reachable on 2026-11-22 (its old address was closed and no mDNS
+  service appeared), so its T15 and UI rows are still pending. Do not infer them
+  from D2.
+- The wheel came from the committed `runtime-packaging` output; PyPI has no
+  Android wheel for markupsafe 3.0.2.
+- The UI demo's pip source was the local wheelhouse described above; the
+  PyPI/network path is the T15 run and the earlier compatibility probes.
+- One run per row, not a soak.

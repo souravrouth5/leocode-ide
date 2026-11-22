@@ -162,7 +162,7 @@ class AppGraph(private val app: Application) {
 
     private val activeRoot: () -> File = { workspaceStore.activeDirectory() }
 
-    private val procHandler = ProcHandler(workspace, jail, supervisor)
+    private val procHandler = ProcHandler(workspace, jail, supervisor, activeRoot)
     private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json)
     private val runtimeHandler = RuntimeHandler(
         app,

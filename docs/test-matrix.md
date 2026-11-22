@@ -121,15 +121,17 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 > release/publish job is gated on the protected `python-runtime` environment.
 > Details: [`reports/task24-verification.md`](reports/task24-verification.md).
 >
-> **Task 26 device evidence (2026-11-21).** Raw probes on both phones through
-> `run-as`; the production T15 harness now ships in the debug build but its
-> device rows are not finished. D2's first T15 run passed venv, aliases, pip and
-> the `requests` requirements install, then failed the wheel row because the
-> pushed file was named `t15-markupsafe.whl` (pip requires a valid wheel
-> filename); the corrected rerun and D1 are pending. The LAN needs an
-> authenticated proxy, so the host forwarded one with `adb reverse tcp:18080`;
-> that is test plumbing, not app behaviour. Logs:
-> [`device-reports/20261121-task26-D1-D2.txt`](device-reports/20261121-task26-D1-D2.txt).
+> **Task 26 device evidence.** Raw probes on both phones through `run-as` on
+> 2026-11-21. On 2026-11-22 D2 also passed T15 through the production harness and
+> the full app-UI flow (panel, venv + trust, pip + trust, Run through the venv,
+> trust persistence, requirements change → fresh prompt). That run found and
+> fixed `proc.run` resolving a relative `cwd` against the default workspace
+> instead of the active one. D1 has not run T15 or the UI flow yet; its device
+> was unreachable on 2026-11-22. The LAN needs an authenticated proxy, so the
+> host forwarded one with `adb reverse tcp:18080`; the UI demo also used a local
+> wheelhouse on `18081`. Both are test plumbing, not app behaviour. Logs:
+> [`device-reports/20261121-task26-D1-D2.txt`](device-reports/20261121-task26-D1-D2.txt)
+> and [`device-reports/20261122-task26-D2-ui.txt`](device-reports/20261122-task26-D2-ui.txt).
 
 | Test | D1 | D2 |
 |---|---|---|
@@ -146,7 +148,8 @@ D1/D2 cells below are static-check-only placeholders, not runtime evidence.
 | PyPI Android wheel accepted by pip | **PASS** (`charset-normalizer` 3.5.2) | **PASS** (`charset-normalizer` 3.5.2) |
 | `venv` create + activate | **PASS** | **PASS** |
 | venv + `pip install requests` + import `markupsafe` (probe) | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) | **PASS** (requests 2.34.2; markupsafe from the LeoCode wheel) |
-| T15 production harness (venv + requirements + wheel + fetch) | **PENDING** | **PARTIAL** (venv/aliases/pip/requirements PASS; wheel row retried with a valid filename) |
+| T15 production harness (venv + requirements + wheel + fetch) | **PENDING** | **PASS** (2026-11-22; wheel + fetch `200`, 577 bytes) |
+| App UI: venv create + trust, pip + trust, Run via venv, trust persistence, requirements change re-prompts | **PENDING** | **PASS** (2026-11-22; Run `EXIT 0`, screenshots in the D2 report) |
 | console script shebang | **PASS** (`pygments` → venv python) | **PASS** (`pygments` → venv python) |
 | venv symlinks on internal storage | **PASS** (`python` → `python3` → `usr/bin/python3`) | **PASS** (`python` → `python3` → `usr/bin/python3`) |
 | peak RSS of `python -c pass` | **8548 KB** | **11064 KB** |
