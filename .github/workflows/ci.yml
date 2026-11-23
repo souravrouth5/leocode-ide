@@ -101,14 +101,27 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
-      - name: Unit tests, lint (blocking) and assemble
+      # The committed gradle.properties is tuned for the 3.7 GB development
+      # machine (1 GB heap, 400 MB metaspace, in-process Kotlin). On a runner
+      # that budget made lint + test compilation exhaust metaspace, so the
+      # gates run as separate invocations with a CI-sized JVM: each one starts
+      # fresh, and a failure names the gate instead of a combined task list.
+      - name: Unit tests
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew --no-daemon -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" testDebugUnitTest
+
+      - name: Lint (blocking)
+        working-directory: android
+        run: ./gradlew --no-daemon -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" lintDebug
+
+      - name: Assemble the debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" assembleDebug
 
       - name: Generated bridge types are up to date (Task 7 drift check)
         working-directory: android
         run: |
-          ./gradlew --no-daemon generateBridgeTypes
+          ./gradlew --no-daemon -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" generateBridgeTypes
           if [ -n "$(git status --porcelain -- ../web/src/bridge/types.gen.ts)" ]; then
             echo "::error::web/src/bridge/types.gen.ts is stale or untracked. Run ./gradlew generateBridgeTypes and commit the result."
             git --no-pager diff -- ../web/src/bridge/types.gen.ts || true
@@ -301,7 +314,9 @@ jobs:
           export LEOCODE_VERSION_NAME="${{ steps.version.outputs.name }}"
           export LEOCODE_VERSION_CODE="${{ steps.version.outputs.code }}"
           export LEOCODE_UPDATE_URL="${{ steps.version.outputs.update_url }}"
-          (cd android && ./gradlew --no-daemon :app:assembleRelease :app:exportReleaseDependencies)
+          (cd android && ./gradlew --no-daemon \
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" \
+            :app:assembleRelease :app:exportReleaseDependencies)
 
       - name: Verify the signed APK
         if: steps.signing.outputs.available == 'true'
