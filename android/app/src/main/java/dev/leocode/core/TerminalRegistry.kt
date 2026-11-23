@@ -22,7 +22,8 @@ class TerminalRegistry(
         cwd: String,
         env: Map<String, String>,
         rows: Int,
-        cols: Int
+        cols: Int,
+        root: Boolean
     ) -> PtyProcess?,
     private val pidFiles: PidFileStore? = null,
     private val onCountChanged: (Int) -> Unit = {}
@@ -66,7 +67,8 @@ class TerminalRegistry(
         val alive: Boolean,
         val title: String,
         val cwd: String,
-        val exitCode: Int
+        val exitCode: Int,
+        val root: Boolean = false
     )
 
     /** Receives live output after [attach]. */
@@ -88,19 +90,21 @@ class TerminalRegistry(
 
     private val sessions = ConcurrentHashMap<String, Session>()
 
-    fun open(cwd: File, env: Map<String, String>, rows: Int, cols: Int): Opened? {
+    fun open(cwd: File, env: Map<String, String>, rows: Int, cols: Int, root: Boolean = false): Opened? {
         pruneExited()
         val pty = spawn(
             cwd.absolutePath,
             env,
             rows.coerceIn(1, MAX_DIMENSION),
-            cols.coerceIn(1, MAX_DIMENSION)
+            cols.coerceIn(1, MAX_DIMENSION),
+            root
         ) ?: return null
 
         val id = UUID.randomUUID().toString()
-        val session = Session(id, cwd.absolutePath, titleFor(cwd), pty)
+        val title = if (root) "root" else titleFor(cwd)
+        val session = Session(id, cwd.absolutePath, title, pty, root)
         sessions[id] = session
-        pidFiles?.write(id, pty.pid, "term")
+        pidFiles?.write(id, pty.pid, if (root) "root-term" else "term")
         thread(isDaemon = true, name = "leocode-term-$id") {
             pump(session)
         }
@@ -220,7 +224,8 @@ class TerminalRegistry(
         val id: String,
         val cwd: String,
         val title: String,
-        val pty: PtyProcess
+        val pty: PtyProcess,
+        val root: Boolean = false
     ) {
         private val ring = RingBuffer(SCROLLBACK_BYTES)
         private val lock = Object()
@@ -243,7 +248,7 @@ class TerminalRegistry(
         var finishedAt: Long = 0L
             private set
 
-        fun info(): Info = Info(id, pty.pid, alive, title, cwd, exitCode)
+        fun info(): Info = Info(id, pty.pid, alive, title, cwd, exitCode, root)
 
         fun attach(next: Listener, initialCredit: Long): Attachment {
             synchronized(lock) {

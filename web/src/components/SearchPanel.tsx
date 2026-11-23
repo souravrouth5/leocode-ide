@@ -27,7 +27,7 @@ export function SearchPanel() {
           <span>Find</span>
           <input
             value={query}
-            autoFocus
+            autoFocus={open}
             onChange={(event) => search.getState().setQuery(event.target.value)}
             placeholder="Text to find"
           />

@@ -271,7 +271,8 @@ data class ProcRunRequest(
     val argv: List<String> = emptyList(),
     val cwd: String? = null,
     val env: Map<String, String> = emptyMap(),
-    val timeoutMs: Long? = null
+    val timeoutMs: Long? = null,
+    val root: Boolean = false
 )
 
 @Serializable
@@ -292,7 +293,12 @@ data class ProcExit(val code: Int)
 // -------------------------------------------------------------------- term
 
 @Serializable
-data class TermOpenRequest(val cwd: String? = null, val cols: Int? = null, val rows: Int? = null)
+data class TermOpenRequest(
+    val cwd: String? = null,
+    val cols: Int? = null,
+    val rows: Int? = null,
+    val root: Boolean = false
+)
 
 @Serializable
 data class TermOpenReply(val sessionId: String, val pid: Int)
@@ -343,6 +349,25 @@ data class TermData(val b64: String)
 
 @Serializable
 data class TermExit(val code: Int)
+
+// -------------------------------------------------------------------- root (Phase E, Task 17 & 18)
+
+@Serializable
+data class RootStatusReply(
+    val available: Boolean,
+    val granted: Boolean,
+    val enabled: Boolean
+)
+
+@Serializable
+data class RootRequestReply(
+    val granted: Boolean
+)
+
+@Serializable
+data class RootLostEvent(
+    val sessionId: String? = null
+)
 
 // --------------------------------------------------------------------- saf
 

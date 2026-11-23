@@ -440,6 +440,24 @@ export function EyeOffIcon({ size = 20, className }: Props) {
   )
 }
 
+export function AlertTriangleIcon({ size = 20, className, color }: Props & { color?: string }) {
+  return (
+    <svg {...svg(size, className)} stroke={color ?? "currentColor"}>
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  )
+}
+
+export function ShieldIcon({ size = 20, className }: Props) {
+  return (
+    <svg {...svg(size, className)}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  )
+}
+
 
 
 

@@ -215,5 +215,19 @@ ModuleNotFoundError: No module named 'httpx'
 
       expect(stores.editor.getState().activePath).toBe("main.py")
     })
+
+    it("passes root: true to bridge.run when runAsRoot is enabled (Task 18)", async () => {
+      const bridge = new MockBridge()
+      const stores = createAppStores(bridge)
+      await stores.editor.getState().openFile("main.py")
+
+      stores.run.getState().setRunAsRoot(true)
+      expect(stores.run.getState().runAsRoot).toBe(true)
+
+      await stores.run.getState().runFile()
+      await settle()
+
+      expect(bridge.lastRunOptions?.root).toBe(true)
+    })
   })
 })

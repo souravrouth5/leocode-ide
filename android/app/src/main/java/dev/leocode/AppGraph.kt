@@ -123,16 +123,38 @@ class AppGraph(private val app: Application) {
     @Volatile
     var onFirstSession: (() -> Unit)? = null
 
-    private val supervisor = ProcessSupervisor(childEnv, pidFiles) {
-        sessionCountChanged()
+    val rootPrefs = object : dev.leocode.core.RootManager.RootPrefs {
+        private val prefs = app.getSharedPreferences("leocode_root", android.content.Context.MODE_PRIVATE)
+        override fun isEnabled(): Boolean = prefs.getBoolean("enabled", false)
+        override fun setEnabled(enabled: Boolean) {
+            prefs.edit().putBoolean("enabled", enabled).apply()
+        }
     }
 
+    val rootManager = dev.leocode.core.RootManager(rootPrefs)
+
+    private val supervisor = ProcessSupervisor(
+        childEnv = childEnv,
+        pidFiles = pidFiles,
+        onCountChanged = { sessionCountChanged() },
+        rootManager = rootManager
+    )
+
     private val terminals = TerminalRegistry(
-        spawn = { cwd, env, rows, cols -> PtySession.openShell(cwd, env, rows, cols) },
-        pidFiles = pidFiles
-    ) {
-        sessionCountChanged()
-    }
+        spawn = { cwd, env, rows, cols, root ->
+            dev.leocode.core.PtySession.openShell(
+                cwd = cwd,
+                env = env,
+                rows = rows,
+                cols = cols,
+                root = root,
+                suPath = rootManager.findSuBinary(),
+                onKillRoot = { pid, sig -> rootManager.kill(pid, sig) }
+            )
+        },
+        pidFiles = pidFiles,
+        onCountChanged = { sessionCountChanged() }
+    )
 
     // Phase F: tokens and SSH private keys are sealed with a Keystore key. The
     // cipher is lazy so app start does not touch the Keystore before it is needed.
@@ -170,8 +192,9 @@ class AppGraph(private val app: Application) {
 
     private val activeRoot: () -> File = { workspaceStore.activeDirectory() }
 
-    private val procHandler = ProcHandler(workspace, jail, supervisor, activeRoot)
-    private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json)
+    private val rootHandler = dev.leocode.bridge.RootHandler(rootManager, json)
+    private val procHandler = ProcHandler(workspace, jail, supervisor, activeRoot, json, rootManager)
+    private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json, rootManager)
     private val runtimeHandler = RuntimeHandler(
         app,
         workspace,
@@ -220,6 +243,8 @@ class AppGraph(private val app: Application) {
     fun procHandler(): ProcHandler = procHandler
 
     fun termHandler(): TermHandler = terminalHandler
+
+    fun rootHandler(): dev.leocode.bridge.RootHandler = rootHandler
 
     fun safHandler(port: SafPort): SafHandler = SafHandler(
         port,
@@ -270,7 +295,13 @@ class AppGraph(private val app: Application) {
                     installedVersionCode = it.installedVersionCode
                 )
             },
-            CrashStore.peek(app)
+            CrashStore.peek(app),
+            rootStatus = when {
+                rootManager.isEnabled() && rootManager.isGranted() -> "root mode enabled (granted)"
+                rootManager.isEnabled() -> "root mode enabled (grant pending/denied)"
+                rootManager.isAvailable() -> "su binary present (not enabled)"
+                else -> "not detected"
+            }
         )
     }.getOrElse { error ->
         // Diagnostics must still answer when a subsystem is broken; the

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { XIcon } from "./Icons"
 
@@ -7,11 +7,19 @@ interface SheetProps {
   onClose: () => void
   title?: string
   children: ReactNode
+  className?: string
 }
 
-export function Sheet({ open, onClose, title, children }: SheetProps) {
+export function Sheet({ open, onClose, title, children, className }: SheetProps) {
+  const sectionRef = useRef<HTMLElement | null>(null)
+
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      if (sectionRef.current?.contains(document.activeElement)) {
+        (document.activeElement as HTMLElement)?.blur()
+      }
+      return
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose()
     }
@@ -22,14 +30,15 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
   return createPortal(
     <>
       <div
-        className={"sheet-backdrop" + (open ? " is-open" : "")}
+        className={"sheet-backdrop" + (open ? " is-open" : "") + (className ? ` ${className}-backdrop` : "")}
         onClick={onClose}
         aria-hidden={!open}
       />
       {/* A closed sheet is off-screen but still mounted; hide it from assistive
           tech (and role queries) so its live regions stay inert. */}
       <section
-        className={"sheet" + (open ? " is-open" : "")}
+        ref={sectionRef}
+        className={"sheet" + (open ? " is-open" : "") + (className ? ` ${className}` : "")}
         role="dialog"
         aria-modal="true"
         aria-label={title}

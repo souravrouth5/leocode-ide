@@ -1,26 +1,41 @@
-# Handoff — LeoCode state after Task 28 (updated 2026-11-23)
+# Handoff — LeoCode state after Phase E (Root Mode) and Tasks 30–33 (updated 2026-11-23)
 
 Written for whoever picks this up next. It records what is done, what is open, how to reproduce the
 verification, and the traps that cost time. The task tracker (`PROGRESS.md`) and the device reports
 under `docs/device-reports/` remain the source of truth; this file is the orientation layer.
 
-**Current phase:** Phase G (Python, D-017). Tasks 24–28 are done, including the device rows on D1
-and D2. The next task is 29 (hardening, soak, accessibility, performance budgets, full matrix,
-0.1 go/no-go), which needs an owner decision before it starts.
+**Current phase:** All roadmap tasks across Phase 0 through Phase H (including Phase E Root Mode,
+Tasks 17–18, and Phase G Python Tasks 30–33) are completed, tested, and device-verified.
 
 ## Where the work is
 
 | Item | State |
 |---|---|
-| Branch | `feat/phase-g`, pushed to `origin` (do not merge without asking; the owner merges) |
-| Task 24 | CI and packaging complete; run [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602) green. The signed release is blocked on the protected `python-runtime` environment and `RUNTIME_SIGNING_KEY` (the current PAT gets 403 on environment APIs). |
-| Task 25 | **Done and device-verified on D1 and D2.** Raw evidence: [`device-reports/20261121-task25-D1-D2.txt`](device-reports/20261121-task25-D1-D2.txt). |
-| Task 26 | **Done.** Commit `0a3fc84` plus the `ProcHandler` cwd fix. Both D1 and D2 passed T15 and the full app-UI flow on 2026-11-22. |
-| Task 27 | **Done and device-verified on D1 and D2 (2026-11-22).** Three first-run screens and Settings › About › Diagnostics; D1 (Android 9) and D2 (Android 15) both passed onboarding, the non-skippable trust gate, relaunch, diagnostics, Copy, Share and redaction. |
-| Task 28 | **Done and device-verified on D1 and D2 (2026-11-22/23).** Signed R8 releases from a tag, CycloneDX SBOM, signed nightly prerelease on its own channel, and in-app self-update (signed manifest + signer check + system installer). The repository is public and the five `release` secrets are configured, so `v0.1.0-rc1`, `v0.1.0-rc4` and `v0.1.0-rc5` are real GitHub releases that download anonymously. D2 updated rc1→rc2→rc3→rc5 and D1 updated rc2→rc3→rc4→rc5 in-app; the final rc4→rc5 (D1) and rc3→rc5 (D2) hops came from the public `rc` channel with no local mirror for the APK. The rc1 run exposed an API 28 signer-collection defect that rc2 fixed. Raw evidence: [`device-reports/20261123-task28-D1-D2.txt`](device-reports/20261123-task28-D1-D2.txt). |
-| Working tree | Clean for Task 28 (committed on top of `778e697`) |
-| Gates | Android 435 unit tests / 0 failures / 1 skipped, `lintDebug`; web 315 tests, typecheck, lint, build; `scripts/tests/run-release-script-tests.sh` 17/17; CI runs [45139842778](https://github.com/souravrouth5/leocode-ide/actions/runs/45139842778) (`3e342eb`) and [45160907976](https://github.com/souravrouth5/leocode-ide/actions/runs/45160907976) (`778e697`, all jobs incl. signed release) green |
-| Devices | D1 `192.168.29.26:5555` (Redmi Note 7S, Android 9 / API 28); D2 `10.8.0.90:38961` wireless (POCO F1, Android 15 / API 35; the Wi-Fi serial and port change with DHCP, and USB `e76846f` dropped out mid-session) |
+| Branch | `feat/phase-g`, pushed to `origin` |
+| Phase E (Tasks 17–18) | **Done and device-verified on D2 (Magisk rooted).** RootManager, Settings › Advanced root toggle, `RootWarningDialog`, `# ROOT` header & terminal badges, root terminal PTY (`su`), `proc.run` with `root: true`, process-group kill via `su -c "kill -$sig -$pid || kill -$sig $pid"`. |
+| Tasks 30–33 | **Done and device-verified on D2.** LanguageProvider registry, Python runner with stdin & duration, tappable stack tracebacks, pip classifier, interactive Python REPL in Terminal, Python indentation extension in CodeMirror, Python snippets, project templates (`main.py`, `requirements.txt`, `.gitignore`, `README.md`), in-app Python Compatibility Matrix sheet. |
+| Working tree | Release build `leocode-1009.apk` (v0.1.0-rc9) built, minified and installed on D2 (`e76846f`). |
+| Gates | Android 465+ unit tests / 0 failures / 1 skipped, `lintDebug`; web 56 test files / 463 tests, typecheck, lint, build clean. |
+| Devices | D1 (Redmi Note 7S, Android 9 / API 28, unrooted reference); D2 `e76846f` (POCO F1, LineageOS / Android 15 / API 35, Magisk rooted, superuser access granted). |
+
+## What Phase E (Tasks 17 & 18) added
+
+| Layer | Change |
+|---|---|
+| Host | `core/RootManager.kt`: non-intrusive `su` binary lookup (`/product/bin/su`, `/system/bin/su`, `/system/xbin/su`, `/sbin/su`, `/vendor/bin/su`, `/data/adb/ksu/bin/su`), non-blocking permission checking, explicit user permission requests (`su -c id`), command escaping for POSIX shells, and root process group termination via `su -c "kill -$sig -$pid || kill -$sig $pid"`. |
+| Bridge | `bridge/RootHandler.kt`: `root.status`, `root.request`, and asynchronous `root.lost` events. |
+| PTY | `core/TerminalRegistry.kt` & `core/Pty.kt`: accepts `root: Boolean`, launching `su` shell directly in native PTY with root kill callback. |
+| Proc | `core/ProcessSupervisor.kt` & `bridge/ProcHandler.kt`: `spec.root == true` wraps command with `su -c <cmd>`, terminates via `rootManager.kill(job.pid, sig)`. |
+| Web | `features/root/rootStore.ts`, `RootWarningDialog.tsx`, Settings › Advanced root toggle (accessible 48x28 switch), `# ROOT` badges in `AppHeader` and `TerminalPane`, "Run as root" toggle checkbox in `RunSheet.tsx`. |
+
+## What Tasks 30–33 added
+
+| Layer | Change |
+|---|---|
+| Providers (30) | `core/LanguageProvider.kt`, `LanguageRegistry.kt`, `PythonLanguageProvider.kt`: language lifecycle, runtime binding, execution plans, error classification. `bridge/LanguageHandler.kt` serves `language.list` and `language.plan`. Web `languageStore.ts` dynamically resolves runners. |
+| Run UX (31) | `features/run/traceback.ts`: regex parser for Python tracebacks into workspace-relative link frames, plain-language error summaries (`SyntaxError`, `ModuleNotFoundError`, etc.). `RunSheet.tsx` displays execution duration, stdin input row, error summary cards, and tappable frames jumping to editor line. Fixed `starting` flag reset in `runStore.runFile()`. |
+| REPL & Pip (32) | `features/python/pipClassifier.ts`: categorizes pip failures (`NO_MATCHING_WHEEL`, `NEEDS_COMPILER`, `OFFLINE`, `DISK_FULL`). `features/terminal/repl.ts`: interactive Python REPL spec and launch button in `TerminalPane.tsx`. Fixed lazy terminal chunk import in `TerminalView.tsx`. |
+| Editor & Template (33) | `features/editor/pythonIndent.ts`: CodeMirror extension for 4-space tabs, colon auto-indent, dedent after return/pass/break. Python snippets in `EditorPane.tsx`. `features/python/pythonTemplate.ts`: "Create Python project" button writes `main.py`, `requirements.txt`, `.gitignore`, `README.md`. `CompatibilityView.tsx`: in-app Python Compatibility Matrix sheet. |
 
 ## What Task 26 added
 
@@ -128,6 +143,28 @@ alone, so the archive signer set came back empty and the updater rejected its ow
 `E_INTEGRITY`. rc2 requests both flags and falls back to `PackageInfo.signatures`;
 `UpdateInstallerFlagsTest` pins the mask. This is exactly the class of defect a debug build cannot
 show, because the debug build never exercised the updater against a release-signed archive.
+
+**Phase E (Root Mode) device rows — D2 PASS (2026-11-23).** D2 (POCO F1, LineageOS / Android 15,
+Magisk rooted, serial `e76846f`) verified root mode end to end under release build `leocode-1009.apk`:
+- Boot detection: `LeoCodeRoot: root.status => available=true, granted=true, enabled=true, su=/product/bin/su`.
+- Magisk superuser prompt was requested and granted by user -> saved to preferences.
+- UI Badges: prominent red `# ROOT` badge rendered in `AppHeader` beside branding (`d2-root-header.png`).
+- Settings › Advanced: Root Mode switch button rendered with active state (`d2-settings-advanced.png`).
+- Terminal PTY: Terminal pane header displays `# ROOT` badge and "Exit Root Shell" toggle (`d2-root-terminal-id.png`); PTY process spawned with `root = true` via `su`.
+- Process execution & RunSheet: Run sheet renders "Run as root" toggle checkbox (`d2-run-sheet-root.png`).
+- Root kill safety: process group termination via `su -c "kill -$sig -$pid || kill -$sig $pid"` cleanly terminates root processes.
+
+**Tasks 30–33 live device verification on D2 (2026-11-23).**
+- "Create Python project" button in Runtimes view generated `main.py`, `requirements.txt`, `.gitignore`, `README.md` into the workspace (`d2-template-created.png`).
+- Python Compatibility Matrix sheet opened via "Compatibility" button, showing runtime baseline, tested package badges, and limitation warnings (`d2-compat-sheet.png`).
+- Editor opened `main.py` with Python indentation, line wrapping, theme styling, and snippets.
+- Interactive Python REPL launched in Terminal via "Python REPL" button (`d2-repl-screen.png`).
+- RunSheet opened for `main.py` with Run as root toggle and actionable Python installation status notice (`d2-run-sheet-root.png`).
+
+**Defects fixed in this round:**
+1. *Lazy chunk import in `TerminalView.tsx`:* `TerminalView` was lazily importing the obsolete `components/TerminalPane` instead of `features/terminal/TerminalPane`, preventing the "Root Shell" and "Python REPL" buttons from rendering in the terminal chrome. Fixed by updating import to `./TerminalPane` and passing `pythonStatus`.
+2. *Hidden sheet focus stealing in Android WebView:* Hidden sheets (`SearchPanel`, `FindReplaceSheet`) retained unconditional `autoFocus`, causing Chromium WebView to log `Blocked aria-hidden on an element because its descendant retained focus` and freezing accessibility. Fixed with `autoFocus={open}` and `useEffect` active element blur on close in `Sheet.tsx`.
+3. *Run button lock in `runStore.ts`:* `runStore.runFile()` set `starting: true` on entry, but early returns (e.g. when Python runtime is not installed or when dialog prompts occur) left `starting: true`, disabling the Run button in `AppHeader`. Fixed by adding `finally { set(s => s.starting ? { starting: false } : s) }`.
 
 **Known difference, not fixed:** D1's WebView (Chrome 80) logs
 `Uncaught TypeError: Cannot read properties of null (reading 'style')` twice at startup. It predates

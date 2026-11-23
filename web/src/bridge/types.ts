@@ -54,6 +54,9 @@ import type {
   SshKnownHostInfo as GeneratedSshKnownHostInfo,
   StorageInfo as GeneratedStorageInfo,
   TermInfo as GeneratedTermInfo,
+  RootStatusReply as GeneratedRootStatusReply,
+  RootRequestReply as GeneratedRootRequestReply,
+  RootLostEvent as GeneratedRootLostEvent,
   UpdateCheckReply as GeneratedUpdateCheckReply,
   UpdateProgress as GeneratedUpdateProgress,
   UpdateResult as GeneratedUpdateResult,
@@ -104,6 +107,7 @@ export interface TerminalOptions {
   cwd: string
   cols: number
   rows: number
+  root?: boolean
   /** Call `done` after the data is rendered so the host's credit window works. */
   onData: (bytes: Uint8Array, done?: () => void) => void
   onExit: (code: number) => void
@@ -282,10 +286,17 @@ export type PythonRequirementsResult = GeneratedPythonRequirementsReply
 
 export type { LanguageDescriptor, LanguageListReply, LanguagePlanRequest, LanguagePlanReply }
 
-/** `proc.run` environment overrides (allowlisted host-side). */
+/** `proc.run` environment overrides (allowlisted host-side) and root mode. */
 export interface RunOptions extends RequestOptions {
   env?: Record<string, string>
+  root?: boolean
 }
+
+// -------------------------------------------------------- Root (Tasks 17–18)
+
+export type RootStatus = GeneratedRootStatusReply
+export type RootRequestResult = GeneratedRootRequestReply
+export type RootLostEvent = GeneratedRootLostEvent
 
 // ------------------------------------------------------------ Git (Tasks 21–23)
 
@@ -619,6 +630,11 @@ export interface Bridge {
   secretsTokenDelete(host: string, options?: RequestOptions): Promise<void>
   /** Host keys only; a stored token value never crosses the bridge. */
   secretsTokenList(options?: RequestOptions): Promise<string[]>
+
+  // ------------------------------------------------------------------ root (Tasks 17–18)
+  rootStatus(options?: RequestOptions): Promise<RootStatus>
+  rootRequest(options?: RequestOptions): Promise<RootRequestResult>
+  onRootLost?(listener: (event: RootLostEvent) => void): () => void
 }
 
 /**

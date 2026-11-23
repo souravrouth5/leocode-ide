@@ -37,6 +37,9 @@ import {
   type PythonVenvResult,
   type ReadChunk,
   type RequestOptions,
+  type RootLostEvent,
+  type RootRequestResult,
+  type RootStatus,
   type RunHandle,
   type RunOptions,
   type TrustReply,
@@ -169,6 +172,7 @@ export class AndroidBridge implements Bridge {
   private readonly streams = new Map<string, StreamHandler>()
   private readonly streamFailures = new Map<string, (error: AppError) => void>()
   private readonly themeListeners = new Set<(state: ThemeState) => void>()
+  private readonly rootLostListeners = new Set<(event: RootLostEvent) => void>()
   private readonly onDisconnect = () => this.disconnect()
   /** Requests whose reply arrived after the client gave up, for cleanup. */
   private readonly late = new Map<
@@ -384,6 +388,10 @@ export class AndroidBridge implements Bridge {
     }
 
     if (message.event) {
+      if (message.event === "root.lost") {
+        const payload = (message.payload ?? {}) as RootLostEvent
+        this.rootLostListeners.forEach((l) => l(payload))
+      }
       if (message.id) {
         const handler = this.streams.get(message.id)
         if (handler) {
@@ -700,7 +708,7 @@ export class AndroidBridge implements Bridge {
 
     const { id, result } = this.send<{ jobId: string }>(
       "proc.run",
-      { argv, cwd, env: options?.env ?? {} },
+      { argv, cwd, env: options?.env ?? {}, root: options?.root ?? false },
       (event, payload) => {
         if (event === "proc.stdout") onEvent({ stream: "stdout", data: payload.data })
         else if (event === "proc.stderr") onEvent({ stream: "stderr", data: payload.data })
@@ -781,7 +789,7 @@ export class AndroidBridge implements Bridge {
 
     const { id, result } = this.send<{ sessionId: string }>(
       "term.open",
-      { cwd: options.cwd, cols: options.cols, rows: options.rows },
+      { cwd: options.cwd, cols: options.cols, rows: options.rows, root: options.root ?? false },
       (event, payload) => {
         if (event === "term.data") {
           channel.receive(base64ToBytes(payload.b64 ?? ""))
@@ -1475,6 +1483,21 @@ export class AndroidBridge implements Bridge {
       options
     )
     return reply.hosts ?? []
+  }
+
+  // ------------------------------------------------------------------ root (Tasks 17–18)
+
+  async rootStatus(options?: RequestOptions): Promise<RootStatus> {
+    return this.request<RootStatus>("root.status", {}, options)
+  }
+
+  async rootRequest(options?: RequestOptions): Promise<RootRequestResult> {
+    return this.request<RootRequestResult>("root.request", {}, options)
+  }
+
+  onRootLost(listener: (event: RootLostEvent) => void): () => void {
+    this.rootLostListeners.add(listener)
+    return () => this.rootLostListeners.delete(listener)
   }
 }
 

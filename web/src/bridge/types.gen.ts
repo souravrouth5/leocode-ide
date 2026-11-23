@@ -258,6 +258,7 @@ export interface ProcRunRequest {
   cwd?: string | null
   env?: Record<string, string>
   timeoutMs?: number | null
+  root?: boolean
 }
 
 export interface ProcRunReply {
@@ -285,6 +286,7 @@ export interface TermOpenRequest {
   cwd?: string | null
   cols?: number | null
   rows?: number | null
+  root?: boolean
 }
 
 export interface TermOpenReply {
@@ -346,6 +348,20 @@ export interface TermData {
 
 export interface TermExit {
   code: number
+}
+
+export interface RootStatusReply {
+  available: boolean
+  granted: boolean
+  enabled: boolean
+}
+
+export interface RootRequestReply {
+  granted: boolean
+}
+
+export interface RootLostEvent {
+  sessionId?: string | null
 }
 
 export interface SafOpenRequest {

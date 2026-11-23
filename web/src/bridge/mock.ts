@@ -38,6 +38,9 @@ import type {
   PythonStatus,
   PythonVenvResult,
   ReadChunk,
+  RootLostEvent,
+  RootRequestResult,
+  RootStatus,
   RunHandle,
   RunOptions,
   TrustReply,
@@ -1587,6 +1590,8 @@ export class MockBridge implements Bridge {
     return []
   }
 
+  lastRunOptions?: RunOptions
+
   async run(
     argv: string[],
     cwd: string,
@@ -1594,6 +1599,7 @@ export class MockBridge implements Bridge {
     onStart?: (handle: RunHandle) => void,
     _options?: RunOptions
   ): Promise<number> {
+    this.lastRunOptions = _options
     onStart?.({ cancel: () => {} })
     const emit = (data: string, stream: ProcessEvent["stream"] = "stdout") =>
       onEvent({ stream, data })
@@ -1919,5 +1925,34 @@ export class MockBridge implements Bridge {
       name: filename,
       uri: `content://saf/${filename}`
     }
+  }
+
+  // ------------------------------------------------------------------ root (Tasks 17–18)
+
+  private rootAvailable = true
+  private rootGranted = false
+  private rootEnabled = false
+  private readonly rootLostListeners = new Set<(event: RootLostEvent) => void>()
+
+  async rootStatus(): Promise<RootStatus> {
+    return {
+      available: this.rootAvailable,
+      granted: this.rootGranted,
+      enabled: this.rootEnabled
+    }
+  }
+
+  async rootRequest(): Promise<RootRequestResult> {
+    if (!this.rootAvailable) {
+      throw new BridgeError("E_ROOT_UNAVAILABLE", "root is not available")
+    }
+    this.rootGranted = true
+    this.rootEnabled = true
+    return { granted: true }
+  }
+
+  onRootLost(listener: (event: RootLostEvent) => void): () => void {
+    this.rootLostListeners.add(listener)
+    return () => this.rootLostListeners.delete(listener)
   }
 }

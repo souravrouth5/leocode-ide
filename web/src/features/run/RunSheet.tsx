@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react"
+import { useStore } from "zustand"
+import type { StoreApi } from "zustand/vanilla"
 import { Sheet } from "../../components/Sheet"
 import { StopIcon } from "../../components/Icons"
 import { redact } from "../../errors/redact"
 import { editorCommand } from "../editor/commands"
+import type { RootState } from "../root/rootStore"
+import type { RunStore } from "./runStore"
 import {
   parseTraceback,
   isInsideWorkspace,
@@ -141,6 +145,9 @@ export function RunSheet({
                 ? "output is not saved automatically"
                 : ""}
           </span>
+          {stores?.root && stores?.run && (
+            <RunRootControls rootStore={stores.root} runStore={stores.run} running={running} />
+          )}
         </div>
 
         {errorSummary && (
@@ -214,6 +221,44 @@ export function RunSheet({
         </div>
       </div>
     </Sheet>
+  )
+}
+
+function RunRootControls({
+  rootStore,
+  runStore,
+  running
+}: {
+  rootStore: StoreApi<RootState>
+  runStore: RunStore
+  running: boolean
+}) {
+  const rootEnabled = useStore(rootStore, (s) => s.enabled)
+  const runAsRoot = useStore(runStore, (s) => s.runAsRoot)
+  if (!rootEnabled) return null
+  return (
+    <label
+      className="run-root-toggle"
+      title="Execute script with root (su) privileges"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        cursor: running ? "not-allowed" : "pointer",
+        fontSize: 11,
+        color: runAsRoot ? "#ef4444" : "var(--muted)",
+        userSelect: "none"
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={runAsRoot}
+        disabled={running}
+        onChange={(e) => runStore.getState().setRunAsRoot(e.target.checked)}
+        style={{ margin: 0 }}
+      />
+      <span>Root</span>
+    </label>
   )
 }
 

@@ -29,6 +29,7 @@ import { createDialogStore, type DialogState } from "../features/dialogs/dialogS
 import { createBackupStore, type BackupState } from "../features/workspace/backupStore"
 import { createGitStore, type GitStore } from "../features/git/gitStore"
 import { createUpdateStore, type UpdateState } from "../features/update/updateStore"
+import { createRootStore, type RootStore } from "../features/root/rootStore"
 
 export interface AppStores {
   bridge: Bridge
@@ -53,6 +54,8 @@ export interface AppStores {
   git: GitStore
   /** Signed self-update check and installer hand-off (Task 28). */
   updates: StoreApi<UpdateState>
+  /** Root execution and privilege manager (Phase E, Tasks 17 & 18). */
+  root: RootStore
   /** Remove listeners the stores installed on `window` (W-26). */
   dispose(): void
 }
@@ -115,6 +118,8 @@ export function createAppStores(bridge: Bridge): AppStores {
     dialogs
   })
   const updates = createUpdateStore({ bridge, errors })
+  const root = createRootStore(bridge)
+  void root.getState().checkStatus()
 
   let disposed = false
   return {
@@ -135,6 +140,7 @@ export function createAppStores(bridge: Bridge): AppStores {
     backup,
     git,
     updates,
+    root,
     dispose() {
       if (disposed) return
       disposed = true

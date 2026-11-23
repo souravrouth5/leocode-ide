@@ -24,7 +24,7 @@ export function FindReplaceSheet() {
           <span>Find</span>
           <input
             value={query}
-            autoFocus
+            autoFocus={open}
             onChange={(event) => findReplace.getState().setQuery(event.target.value)}
             placeholder="Text to find"
           />

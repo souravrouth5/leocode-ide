@@ -20,7 +20,8 @@ import kotlin.concurrent.thread
 class ProcessSupervisor(
     private val childEnv: Map<String, String> = emptyMap(),
     private val pidFiles: PidFileStore? = null,
-    private val onCountChanged: (Int) -> Unit = {}
+    private val onCountChanged: (Int) -> Unit = {},
+    private val rootManager: RootManager? = null
 ) {
 
     data class Spec(
@@ -28,7 +29,8 @@ class ProcessSupervisor(
         val cwd: java.io.File,
         val env: Map<String, String> = emptyMap(),
         val timeoutMs: Long = 30_000,
-        val maxOutputBytes: Int = 1 shl 20
+        val maxOutputBytes: Int = 1 shl 20,
+        val root: Boolean = false
     )
 
     data class Handle(val jobId: String, val pid: Int)
@@ -37,6 +39,7 @@ class ProcessSupervisor(
         val id: String,
         val process: Process,
         val pid: Int,
+        val root: Boolean = false,
         val terminating: AtomicBoolean = AtomicBoolean(false),
         val exitOnce: AtomicBoolean = AtomicBoolean(false)
     )
@@ -51,7 +54,11 @@ class ProcessSupervisor(
     ): Handle {
         require(spec.argv.isNotEmpty()) { "argv is empty" }
 
-        val command = if (SETSID.canExecute()) {
+        val command = if (spec.root) {
+            val suPath = rootManager?.findSuBinary() ?: "su"
+            val shellCmd = RootManager.buildShellCommand(spec.argv, spec.cwd)
+            listOf(suPath, "-c", shellCmd)
+        } else if (SETSID.canExecute()) {
             listOf(SETSID.path) + spec.argv
         } else {
             spec.argv
@@ -73,10 +80,10 @@ class ProcessSupervisor(
         runCatching { process.outputStream.close() }
         val pid = pidOf(process)
         val jobId = UUID.randomUUID().toString()
-        val job = Job(jobId, process, pid)
+        val job = Job(jobId, process, pid, root = spec.root)
         jobs[jobId] = job
         // A pidfile failure must not leave a running process without pumps (B-21).
-        runCatching { pidFiles?.write(jobId, pid, "proc") }
+        runCatching { pidFiles?.write(jobId, pid, if (spec.root) "root-proc" else "proc") }
         notifyCount()
 
         val outPump = StreamPump(process.inputStream, spec.maxOutputBytes, onStdout)
@@ -141,7 +148,9 @@ class ProcessSupervisor(
         if (!job.terminating.compareAndSet(false, true)) return
 
         val native = job.pid > 0 && NativePty.available()
-        if (native) {
+        if (job.root) {
+            rootManager?.kill(job.pid, 15)
+        } else if (native) {
             NativePty.killGroup(job.pid, 15)
         } else {
             runCatching { job.process.destroy() }
@@ -149,7 +158,11 @@ class ProcessSupervisor(
 
         val exited = runCatching { job.process.waitFor(2, TimeUnit.SECONDS) }.getOrDefault(false)
         if (!exited) {
-            if (native) NativePty.killGroup(job.pid, 9)
+            if (job.root) {
+                rootManager?.kill(job.pid, 9)
+            } else if (native) {
+                NativePty.killGroup(job.pid, 9)
+            }
             runCatching { job.process.destroyForcibly() }
         }
     }

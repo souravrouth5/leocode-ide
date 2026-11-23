@@ -73,17 +73,37 @@ interface PtyProcess {
 
 class PtySession private constructor(
     private val descriptor: ParcelFileDescriptor,
-    override val pid: Int
+    override val pid: Int,
+    val isRoot: Boolean = false,
+    private val onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null
 ) : PtyProcess {
     companion object {
         private const val DESTROY_GRACE_MS = 1_500L
         private const val DESTROY_POLL_MS = 25L
 
-        /** Opens an interactive `/system/bin/sh -i` in a new session/process group. */
-        fun openShell(cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? =
-            open("exec /system/bin/sh -i", cwd, env, rows, cols)
+        /** Opens an interactive `/system/bin/sh -i` or root shell in a new session/process group. */
+        fun openShell(
+            cwd: String,
+            env: Map<String, String>,
+            rows: Int,
+            cols: Int,
+            root: Boolean = false,
+            suPath: String? = null,
+            onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null
+        ): PtySession? {
+            val cmd = if (root) "exec ${suPath ?: "/product/bin/su"}" else "exec /system/bin/sh -i"
+            return open(cmd, cwd, env, rows, cols, isRoot = root, onKillRoot = onKillRoot)
+        }
 
-        fun open(cmd: String, cwd: String, env: Map<String, String>, rows: Int, cols: Int): PtySession? {
+        fun open(
+            cmd: String,
+            cwd: String,
+            env: Map<String, String>,
+            rows: Int,
+            cols: Int,
+            isRoot: Boolean = false,
+            onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null
+        ): PtySession? {
             if (!NativePty.available()) return null
             val pairs = env.map { (k, v) -> "$k=$v" }.toTypedArray()
             val result = NativePty.createSubprocess(cmd, cwd, pairs, rows, cols)
@@ -93,7 +113,7 @@ class PtySession private constructor(
             } catch (e: Throwable) {
                 return null
             }
-            return PtySession(descriptor, result[0])
+            return PtySession(descriptor, result[0], isRoot = isRoot, onKillRoot = onKillRoot)
         }
     }
 
@@ -160,7 +180,11 @@ class PtySession private constructor(
         // SIGTERM first, then a short grace period; SIGKILL only for a child that
         // ignores it (L-17). Called on the pump thread after waitFor() the pid is
         // already gone, so this normally returns immediately.
-        NativePty.killGroup(pid, OsConstants.SIGTERM)
+        if (isRoot) {
+            onKillRoot?.invoke(pid, OsConstants.SIGTERM)
+        } else {
+            NativePty.killGroup(pid, OsConstants.SIGTERM)
+        }
         var waited = 0L
         while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
             try {
@@ -172,7 +196,11 @@ class PtySession private constructor(
             waited += DESTROY_POLL_MS
         }
         if (ProcessStartTime.read(pid) != null) {
-            NativePty.killGroup(pid, OsConstants.SIGKILL)
+            if (isRoot) {
+                onKillRoot?.invoke(pid, OsConstants.SIGKILL)
+            } else {
+                NativePty.killGroup(pid, OsConstants.SIGKILL)
+            }
         }
         runCatching { descriptor.close() }
     }

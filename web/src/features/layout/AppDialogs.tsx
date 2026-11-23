@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
 import { PromptDialog } from "../../components/PromptDialog"
-import { RunSheet } from "../../components/RunSheet"
+import { RunSheet } from "../run/RunSheet"
 import { SettingsDialog } from "../../components/SettingsDialog"
 import { FindReplaceSheet } from "../../components/FindReplaceSheet"
 import { SearchPanel } from "../../components/SearchPanel"
@@ -19,6 +19,7 @@ import { SshKeysSheet } from "../git/SshKeysSheet"
 import { resetOnboarding } from "../onboarding/onboarding"
 import { submitPrompt } from "../shell/promptActions"
 import { UpdatesCard } from "../update/UpdatesCard"
+import { RootWarningDialog } from "../root/RootWarningDialog"
 
 /** All sheets/dialogs, wired to their stores. */
 export function AppDialogs({ version }: { version: string }) {
@@ -34,6 +35,7 @@ export function AppDialogs({ version }: { version: string }) {
   const backupBusy = useStore(backup, (state) => state.busy)
   const backupStatus = useStore(backup, (state) => state.status)
   const recentErrors = useStore(errors, (state) => state.recent)
+  const rootState = useStore(stores.root, (state) => state)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
 
   const requestStoragePermission = () => {
@@ -180,6 +182,26 @@ export function AppDialogs({ version }: { version: string }) {
             shell.getState().openOnboarding()
           }}
           updatesCard={<UpdatesCard version={version} />}
+          rootAvailable={rootState.available}
+          rootEnabled={rootState.enabled}
+          rootLoading={rootState.loading}
+          onRequestRoot={() => stores.root.getState().openWarning()}
+          onDisableRoot={() => stores.root.getState().disableRoot()}
+        />
+      </PaneBoundary>
+
+      <PaneBoundary title="Root warning crashed">
+        <RootWarningDialog
+          open={rootState.warningOpen}
+          onClose={() => stores.root.getState().closeWarning()}
+          onConfirm={async () => {
+            try {
+              await stores.root.getState().requestRoot()
+            } catch {
+              // handled by store
+            }
+          }}
+          loading={rootState.loading}
         />
       </PaneBoundary>
 

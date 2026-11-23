@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
+import { useStores } from "../../app/stores"
 import { AppError, type Bridge, type PythonStatus, type TerminalHandle } from "../../bridge"
 import {
   clearSessionId,
@@ -68,6 +69,25 @@ const NO_RUNTIME =
 
 const encoder = new TextEncoder()
 
+function useOptionalStores() {
+  try {
+    return useStores()
+  } catch {
+    return null
+  }
+}
+
+function useRootStoreState(stores: ReturnType<typeof useOptionalStores>) {
+  const root = stores?.root
+  const [state, setState] = useState(() => root?.getState() ?? null)
+  useEffect(() => {
+    if (!root) return
+    setState(root.getState())
+    return root.subscribe((next) => setState(next))
+  }, [root])
+  return state
+}
+
 export function TerminalPane({
   bridge,
   cwd,
@@ -79,6 +99,8 @@ export function TerminalPane({
   pythonStatus,
   onLaunchRepl
 }: TerminalPaneProps) {
+  const stores = useOptionalStores()
+  const rootStoreState = useRootStoreState(stores)
   const host = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -88,6 +110,7 @@ export function TerminalPane({
   )
   const [exited, setExited] = useState<number | null>(null)
   const [generation, setGeneration] = useState(0)
+  const [isRootSession, setIsRootSession] = useState(false)
   /** OSC 0/2 title, sanitised; "workspace" until the shell sends one. */
   const [title, setTitle] = useState("")
 
@@ -215,6 +238,7 @@ export function TerminalPane({
           cwd,
           cols: size.cols,
           rows: size.rows,
+          root: isRootSession,
           onData: (bytes, done) => term.write(bytes, done),
           onExit
         })
@@ -377,9 +401,43 @@ export function TerminalPane({
                 ? `exited${exited === null ? "" : " " + exited}`
                 : "starting"}
         </span>
+        {isRootSession && (
+          <span
+            className="badge root-badge"
+            title="Terminal running as superuser (root / UID 0)"
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              background: "var(--color-danger, #ef4444)",
+              color: "#ffffff",
+              padding: "2px 5px",
+              borderRadius: 3,
+              letterSpacing: 0.5
+            }}
+          >
+            # ROOT
+          </span>
+        )}
         <span className="terminal-cwd" title={title || undefined}>
           {title || (cwd === "." ? "workspace" : cwd)}
         </span>
+        {rootStoreState?.enabled && (
+          <button
+            className={"btn tiny " + (isRootSession ? "danger" : "")}
+            style={isRootSession ? { background: "var(--color-danger, #ef4444)", color: "#fff", border: "none" } : undefined}
+            title={isRootSession ? "Switch to standard user terminal" : "Launch root terminal session (UID 0)"}
+            onClick={() => {
+              handleRef.current?.close()
+              clearSessionId()
+              setIsRootSession((prev) => !prev)
+              setStatus("starting")
+              setExited(null)
+              setGeneration((v) => v + 1)
+            }}
+          >
+            {isRootSession ? "Exit Root Shell" : "Root Shell"}
+          </button>
+        )}
         <button
           className="btn tiny btn-repl"
           title="Open interactive Python REPL in this environment"

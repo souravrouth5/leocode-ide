@@ -7,15 +7,16 @@ import { lazyWithRetry } from "../../errors/lazyWithRetry"
 import { useTheme } from "../../theme/ThemeProvider"
 
 const TerminalPane = lazyWithRetry(() =>
-  import("../../components/TerminalPane").then((module) => ({ default: module.TerminalPane }))
+  import("./TerminalPane").then((module) => ({ default: module.TerminalPane }))
 )
 
 export function TerminalView() {
-  const { bridge, files, shell, settings, errors } = useStores()
+  const { bridge, files, shell, settings, errors, python } = useStores()
   const { effective } = useTheme()
   const view = useStore(shell, (state) => state.view)
   const cwd = useStore(files, (state) => state.cwd)
   const userSettings = useStore(settings, (state) => state.settings)
+  const pythonStatus = useStore(python, (state) => state.status)
   const active = view === "terminal"
 
   return (
@@ -41,6 +42,7 @@ export function TerminalView() {
             dark={effective === "dark"}
             fontSize={userSettings.terminalFontSize}
             fontFamily={userSettings.fontFamily}
+            pythonStatus={pythonStatus}
             onError={(error) =>
               errors.getState().report(error, { context: "Reconnect the terminal" })
             }

@@ -9,12 +9,13 @@ import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher"
 
 /** App bar: brand, workspace switcher, file/edit/overflow menus and the Run badge. */
 export function AppHeader() {
-  const { editor, run, shell, settings, findReplace, search, dialogs } = useStores()
+  const { editor, run, shell, settings, findReplace, search, dialogs, root } = useStores()
   const docs = useStore(editor, (state) => state.docs)
   const activePath = useStore(editor, (state) => state.activePath)
   const runState = useStore(run, (state) => state.run)
   const starting = useStore(run, (state) => state.starting)
   const userSettings = useStore(settings, (state) => state.settings)
+  const rootEnabled = useStore(root, (state) => state.enabled)
   const activeDoc = docs.find((doc) => doc.path === activePath) ?? null
   const activeDirty = activeDoc ? isDirty(activeDoc) : false
 
@@ -70,6 +71,24 @@ export function AppHeader() {
           </button>
           <LeoCodeLogo size={24} className="brand-logo" />
           <span className="brand-name">LeoCode</span>
+          {rootEnabled && (
+            <span
+              className="badge root-badge"
+              title="Root mode active (UID 0)"
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                background: "var(--color-danger, #ef4444)",
+                color: "#ffffff",
+                padding: "2px 6px",
+                borderRadius: 4,
+                letterSpacing: 0.5,
+                marginLeft: 4
+              }}
+            >
+              ROOT
+            </span>
+          )}
         </div>
         <div className="app-bar-actions">
           <WorkspaceSwitcher />

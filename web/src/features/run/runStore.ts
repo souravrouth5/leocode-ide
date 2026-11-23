@@ -35,6 +35,9 @@ export interface RunState {
   sheetOpen: boolean
   /** True from the tap until the process has spawned (W-14). */
   starting: boolean
+  /** Whether to execute process with root privileges (Task 18). */
+  runAsRoot: boolean
+  setRunAsRoot(enabled: boolean): void
   runFile(): Promise<void>
   /** Ask the host to kill the process group; the sheet stays open. */
   stop(): void
@@ -191,6 +194,10 @@ export function createRunStore(deps: RunDeps): RunStore {
       run: null,
       sheetOpen: false,
       starting: false,
+      runAsRoot: false,
+      setRunAsRoot(enabled: boolean) {
+        set({ runAsRoot: enabled })
+      },
 
       async runFile() {
         // One spawn at a time: two quick taps must not start two processes (W-14).
@@ -306,6 +313,10 @@ export function createRunStore(deps: RunDeps): RunStore {
 
           const argv = plan?.argv ?? (plan?.interpreter ? [plan.interpreter, name] : ["/system/bin/sh", name])
           try {
+            const runOptions = {
+              ...(plan?.env ? { env: plan.env } : {}),
+              root: get().runAsRoot
+            }
             const code = await bridge.run(
               argv,
               dirName(doc.path),
@@ -315,7 +326,7 @@ export function createRunStore(deps: RunDeps): RunStore {
                 if (activeRunId === runId) handle = next
                 else next.cancel()
               },
-              plan?.env ? { env: plan.env } : undefined
+              runOptions
             )
             finish(runId, code, null)
           } catch (error) {

@@ -21,7 +21,8 @@ class ProcHandler(
     private val jail: PathJail,
     private val supervisor: ProcessSupervisor,
     private val activeRoot: () -> File = { workspace.defaultWorkspace },
-    private val json: Json = BridgeJson.value
+    private val json: Json = BridgeJson.value,
+    private val rootManager: dev.leocode.core.RootManager? = null
 ) : StreamingBridgeHandler, Closeable {
 
     companion object {
@@ -55,11 +56,21 @@ class ProcHandler(
         val cwd = resolve(request.cwd ?: ".")
         if (!cwd.isDirectory) throw BridgeException(ErrorCode.E_NOT_DIR, "cwd is not a directory")
 
+        if (request.root) {
+            if (rootManager == null || !rootManager.isAvailable()) {
+                throw BridgeException(ErrorCode.E_ROOT_UNAVAILABLE, "root is not available")
+            }
+            if (!rootManager.isEnabled()) {
+                throw BridgeException(ErrorCode.E_ROOT_DENIED, "root mode is not enabled")
+            }
+        }
+
         val spec = ProcessSupervisor.Spec(
             argv = request.argv,
             cwd = cwd,
             env = ChildEnv.build(emptyMap(), request.env),
-            timeoutMs = request.timeoutMs?.takeIf { it > 0 } ?: DEFAULT_TIMEOUT_MS
+            timeoutMs = request.timeoutMs?.takeIf { it > 0 } ?: DEFAULT_TIMEOUT_MS,
+            root = request.root
         )
 
         val handle = try {

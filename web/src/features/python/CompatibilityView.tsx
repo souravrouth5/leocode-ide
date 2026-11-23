@@ -1,8 +1,7 @@
 import { useId, useMemo, useState, useEffect } from "react"
 import {
   PYTHON_COMPATIBILITY_DATA,
-  type CompatiblePackage,
-  type PackageType
+  type CompatiblePackage
 } from "./compatibilityData"
 
 export interface CompatibilityViewProps {

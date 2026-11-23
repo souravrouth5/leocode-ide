@@ -27,7 +27,8 @@ class TermHandler(
     private val jail: PathJail,
     private val childEnv: Map<String, String>,
     private val registry: TerminalRegistry,
-    private val json: Json = BridgeJson.value
+    private val json: Json = BridgeJson.value,
+    private val rootManager: dev.leocode.core.RootManager? = null
 ) : AsyncBridgeHandler, Closeable {
 
     companion object {
@@ -128,11 +129,21 @@ class TermHandler(
             throw BridgeException(ErrorCode.E_LIMIT, "too many terminal sessions")
         }
 
+        if (request.root) {
+            if (rootManager == null || !rootManager.isAvailable()) {
+                throw BridgeException(ErrorCode.E_ROOT_UNAVAILABLE, "root is not available")
+            }
+            if (!rootManager.isEnabled()) {
+                throw BridgeException(ErrorCode.E_ROOT_DENIED, "root mode is not enabled")
+            }
+        }
+
         val opened = registry.open(
             cwd,
             ChildEnv.build(childEnv) + ("PWD" to cwd.absolutePath),
             request.rows ?: DEFAULT_ROWS,
-            request.cols ?: DEFAULT_COLS
+            request.cols ?: DEFAULT_COLS,
+            root = request.root
         ) ?: throw BridgeException(ErrorCode.E_NO_RUNTIME, "native PTY is not available")
 
         val attachment = registry.attach(opened.sessionId, listener(sink), INITIAL_CREDIT)
@@ -199,7 +210,7 @@ class TermHandler(
         val infos = registry.list().map { info ->
             TermInfo(
                 sessionId = info.sessionId,
-                root = false,
+                root = info.root,
                 alive = info.alive,
                 title = info.title,
                 pid = info.pid,

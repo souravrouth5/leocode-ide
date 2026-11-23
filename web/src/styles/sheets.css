@@ -15,6 +15,14 @@
   pointer-events: auto;
 }
 
+.sheet-backdrop.root-warning-sheet-backdrop {
+  z-index: 159;
+}
+
+.sheet.root-warning-sheet {
+  z-index: 160;
+}
+
 .sheet {
   position: fixed;
   left: 0;

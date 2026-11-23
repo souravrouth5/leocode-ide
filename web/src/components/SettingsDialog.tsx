@@ -12,6 +12,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
+  ShieldIcon,
   SmartphoneIcon,
   SunIcon,
   TypeIcon
@@ -43,6 +44,12 @@ interface Props {
   onShowOnboarding?: () => void
   /** Task 28: signed update check card, wired to the update store. */
   updatesCard?: ReactNode
+  /** Phase E (Task 17): Root mode state and actions */
+  rootAvailable?: boolean
+  rootEnabled?: boolean
+  rootLoading?: boolean
+  onRequestRoot?: () => void
+  onDisableRoot?: () => void
 }
 
 export function SettingsDialog({
@@ -64,9 +71,14 @@ export function SettingsDialog({
   onOpenRemotes,
   onOpenDiagnostics,
   onShowOnboarding,
-  updatesCard
+  updatesCard,
+  rootAvailable = false,
+  rootEnabled = false,
+  rootLoading = false,
+  onRequestRoot,
+  onDisableRoot
 }: Props) {
-  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about">("editor")
+  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about" | "advanced">("editor")
 
   const changeFontSize = (delta: number) => {
     const current = settings.fontSize
@@ -111,6 +123,13 @@ export function SettingsDialog({
           >
             <CpuIcon size={16} />
             <span>About</span>
+          </button>
+          <button
+            className={"settings-nav-btn" + (activeTab === "advanced" ? " active" : "")}
+            onClick={() => setActiveTab("advanced")}
+          >
+            <ShieldIcon size={16} />
+            <span>Advanced</span>
           </button>
         </div>
 
@@ -482,6 +501,81 @@ export function SettingsDialog({
                   (reverts on reboot).
                 </li>
               </ul>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "advanced" && (
+          <div className="settings-panel">
+            <div
+              className="settings-card"
+              style={{ cursor: rootAvailable && !rootLoading ? "pointer" : "default" }}
+              onClick={() => {
+                if (!rootAvailable || rootLoading) return
+                if (!rootEnabled) {
+                  onRequestRoot?.()
+                } else {
+                  onDisableRoot?.()
+                }
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <label className="settings-card-label" style={{ marginBottom: 4, cursor: "inherit" }}>Root Mode</label>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--color-fg-muted)" }}>
+                    {rootAvailable
+                      ? "Execute terminal sessions and run processes as superuser (root / UID 0)."
+                      : "Root is not available on this device."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={rootEnabled}
+                  aria-label="Root Mode"
+                  disabled={!rootAvailable || rootLoading}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (!rootEnabled) {
+                      onRequestRoot?.()
+                    } else {
+                      onDisableRoot?.()
+                    }
+                  }}
+                  style={{
+                    position: "relative",
+                    width: 48,
+                    height: 28,
+                    borderRadius: 14,
+                    border: "none",
+                    background: rootEnabled ? "var(--color-danger, #ef4444)" : "var(--color-bg-subtle, #333)",
+                    cursor: (!rootAvailable || rootLoading) ? "not-allowed" : "pointer",
+                    padding: 2,
+                    transition: "background 0.2s ease",
+                    flexShrink: 0,
+                    outline: "none"
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "block",
+                      width: 24,
+                      height: 24,
+                      borderRadius: 12,
+                      background: "#fff",
+                      transform: rootEnabled ? "translateX(20px)" : "translateX(0)",
+                      transition: "transform 0.2s ease",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
+                    }}
+                  />
+                </button>
+              </div>
+              {rootEnabled && (
+                <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid var(--color-danger, #ef4444)", borderRadius: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-danger, #ef4444)", letterSpacing: 0.5 }}>ROOT ACTIVE</span>
+                  <span style={{ fontSize: 12, color: "var(--color-fg-muted)" }}>Terminal sessions and processes can execute as root.</span>
+                </div>
+              )}
             </div>
           </div>
         )}

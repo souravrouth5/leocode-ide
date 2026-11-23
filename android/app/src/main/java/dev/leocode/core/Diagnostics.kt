@@ -60,7 +60,8 @@ object Diagnostics {
         workspaceId: String,
         workspaceName: String,
         runtimes: List<RuntimeFact>,
-        lastCrash: CrashRecord?
+        lastCrash: CrashRecord?,
+        rootStatus: String? = null
     ): String {
         val webView = runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
         val stat = StatFs(workspace.root.absolutePath)
@@ -82,7 +83,7 @@ object Diagnostics {
                 } else {
                     "unknown (native lib not loaded)"
                 },
-                root = rootStatus(),
+                root = rootStatus ?: rootStatus(),
                 storageFreeMb = stat.availableBytes / MB,
                 storageTotalMb = stat.totalBytes / MB,
                 heapMaxMb = Runtime.getRuntime().maxMemory() / MB,

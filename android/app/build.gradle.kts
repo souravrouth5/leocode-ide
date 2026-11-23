@@ -213,12 +213,13 @@ tasks.register("exportReleaseDependencies") {
 tasks.register<JavaExec>("generateBridgeTypes") {
     group = "bridge"
     description = "Regenerate web/src/bridge/types.gen.ts from Kotlin serial descriptors"
-    dependsOn("compileDebugUnitTestKotlin")
+    dependsOn("compileDebugKotlin", "compileDebugUnitTestKotlin")
 
     val target = project.rootProject.projectDir.parentFile.resolve("web/src/bridge/types.gen.ts")
     val testRuntime = configurations.named("debugUnitTestRuntimeClasspath")
 
     classpath = files(
+        layout.buildDirectory.dir("tmp/kotlin-classes/debug"),
         layout.buildDirectory.dir("tmp/kotlin-classes/debugUnitTest"),
         testRuntime
     )

@@ -123,7 +123,7 @@ class TerminalRegistryTest {
         val fake = FakePty()
         val counts = CopyOnWriteArrayList<Int>()
         val registry = TerminalRegistry(
-            spawn = { _, _, _, _ -> fake },
+            spawn = { _, _, _, _, _ -> fake },
             onCountChanged = { counts += it }
         )
         try {
@@ -154,7 +154,7 @@ class TerminalRegistryTest {
     @Test
     fun `detach keeps the session and a second attach replays everything`() {
         val fake = FakePty()
-        val registry = TerminalRegistry(spawn = { _, _, _, _ -> fake })
+        val registry = TerminalRegistry(spawn = { _, _, _, _, _ -> fake })
         try {
             val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
             fake.emit("one")
@@ -192,7 +192,7 @@ class TerminalRegistryTest {
         val fake = FakePty()
         val counts = CopyOnWriteArrayList<Int>()
         val registry = TerminalRegistry(
-            spawn = { _, _, _, _ -> fake },
+            spawn = { _, _, _, _, _ -> fake },
             onCountChanged = { counts += it }
         )
         try {
@@ -219,7 +219,7 @@ class TerminalRegistryTest {
     @Test
     fun `closeAll reports an exit to an attached listener`() {
         val fake = FakePty()
-        val registry = TerminalRegistry(spawn = { _, _, _, _ -> fake })
+        val registry = TerminalRegistry(spawn = { _, _, _, _, _ -> fake })
         val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
         val collector = Collector()
         registry.attach(sessionId, collector)!!.start()
@@ -235,7 +235,7 @@ class TerminalRegistryTest {
     fun `clamps rows and cols to a sane range`() {
         val sizes = CopyOnWriteArrayList<Pair<Int, Int>>()
         val fake = FakePty()
-        val registry = TerminalRegistry(spawn = { _, _, rows, cols ->
+        val registry = TerminalRegistry(spawn = { _, _, rows, cols, _ ->
             sizes += rows to cols
             fake
         })
@@ -250,7 +250,7 @@ class TerminalRegistryTest {
     @Test
     fun `a blocked PTY write does not block close`() {
         val pty = SlowWritePty()
-        val registry = TerminalRegistry(spawn = { _, _, _, _ -> pty })
+        val registry = TerminalRegistry(spawn = { _, _, _, _, _ -> pty })
         val sessionId = registry.open(workDir(), emptyMap(), 24, 80)!!.sessionId
         val writer = Thread { registry.write(sessionId, byteArrayOf(1)) }
         writer.isDaemon = true
@@ -269,11 +269,25 @@ class TerminalRegistryTest {
 
     @Test
     fun `unknown session ids are rejected`() {
-        val registry = TerminalRegistry(spawn = { _, _, _, _ -> null })
+        val registry = TerminalRegistry(spawn = { _, _, _, _, _ -> null })
         assertEquals(null, registry.open(workDir(), emptyMap(), 24, 80))
         assertEquals(null, registry.attach("missing", Collector()))
         assertEquals(false, registry.write("missing", byteArrayOf(1)))
         assertEquals(false, registry.ack("missing", 1))
+    }
+
+    @Test
+    fun `root terminal sets root flag and passes root to spawn`() {
+        var spawnedRoot = false
+        val fake = FakePty()
+        val registry = TerminalRegistry(spawn = { _, _, _, _, root ->
+            spawnedRoot = root
+            fake
+        })
+        val opened = registry.open(workDir(), emptyMap(), 24, 80, root = true)
+        assertNotNull(opened)
+        assertTrue(spawnedRoot)
+        assertEquals(true, registry.list().firstOrNull { it.sessionId == opened!!.sessionId }?.root)
     }
 
     private fun snapshot(registry: TerminalRegistry, sessionId: String): ByteArray {
