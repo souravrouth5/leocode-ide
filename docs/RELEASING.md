@@ -85,6 +85,20 @@ versionCode = major*1_000_000 + minor*1_000 + patch*10 + prerelease
 single source of truth for both fields. Tags must be canonical decimal: `v01.2.3`, `v0.1.0-rc01`
 and `v0.1.0-rc9` are rejected rather than mapped onto a colliding code.
 
+### Update channels
+
+There are three, each a fixed download path so an installed build always polls the same URL:
+
+| Channel | Who polls it | URL |
+|---|---|---|
+| stable | `vX.Y.Z` builds (the default) | `.../releases/latest/download/release.json` |
+| rc | `-rc` builds | `.../releases/download/rc/release.json` |
+| nightly | nightly builds | `.../releases/download/nightly/release.json` |
+
+Every channel publishes fixed asset names and moves its tag (`rc`, `nightly`) on each build, so the
+URL never changes; the versioned `v*` release keeps the per-tag assets. A channel never offers an
+older code than the installed one, and `versionCode` only ever increases within a line.
+
 Nightly builds are a separate preview channel: `0.0.0-nightly.<run_number>`, code
 `2_100_000_000 + run_number`, published under the moving `nightly` tag with fixed asset names
 (`leocode-nightly.apk`, `leocode-nightly.cdx.json`). A nightly is built on the daily 03:00 UTC
@@ -94,7 +108,7 @@ possible tag code (`2_099_099_999`), so nightly-to-nightly updates always move f
 colliding with a future `v2.x` tag. Nightlies embed the `nightly` manifest URL rather than
 `releases/latest`, so a nightly install keeps receiving nightlies. Moving back to a stable build
 requires installing a stable APK manually (or uninstalling); this is deliberate — a nightly should
-never silently downgrade to an older stable code.
+never silently downgrade to an older stable code. The same applies to an rc build.
 
 ## Cutting a release
 
@@ -109,20 +123,29 @@ never silently downgrade to an older stable code.
 3. The `release` job downloads the web bundle built by the `web` job, assembles the signed release
    APK with R8, verifies its certificate and version against the tag, signs `release.json`, writes
    the SBOM and publishes the GitHub release. Tags containing `-rc` are published as prereleases.
+   An rc tag is published **twice**: the versioned release (`v0.1.0-rc1`) keeps the per-tag assets
+   and notes, and the moving `rc` release receives the same build under fixed names
+   (`leocode-rc.apk`, `leocode-rc.cdx.json`) with a manifest whose APK URL points at the channel.
+   RC builds poll the channel, so `rc1 → rc2 → rc3` updates are actually offered; the channel is
+   what `releases/latest` can never be, because it excludes prereleases.
 4. Verify the published assets:
 
    ```bash
+   # the versioned release
    curl -L -O https://github.com/souravrouth5/leocode-ide/releases/download/v0.1.0-rc1/release.json
    curl -L -O https://github.com/souravrouth5/leocode-ide/releases/download/v0.1.0-rc1/release.json.sig
    curl -L -O https://github.com/souravrouth5/leocode-ide/releases/download/v0.1.0-rc1/SHA256SUMS
+   # the rc channel an installed rc build polls
+   curl -L -O https://github.com/souravrouth5/leocode-ide/releases/download/rc/release.json
+   curl -L -O https://github.com/souravrouth5/leocode-ide/releases/download/rc/release.json.sig
    scripts/verify-manifest.sh release.json docs/keys/release-manifest-public.pem
    sha256sum -c --ignore-missing SHA256SUMS
    ```
 
-A prerelease is **not** what `releases/latest` points at. Stable builds therefore only see stable
-releases by default; to test an rc build, build it with
-`LEOCODE_UPDATE_URL=…/releases/download/v0.1.0-rc1/release.json` (the device demo below does this
-with a local `file://` mirror).
+A prerelease is **not** what `releases/latest` points at. Stable builds poll `releases/latest`, rc
+builds poll the `rc` channel, and nightly builds poll the `nightly` channel; each channel only ever
+moves forward because `versionCode` increases monotonically. To leave a channel, install a stable
+APK manually (or uninstall) — a preview build never silently downgrades to an older stable code.
 
 If the `release` secrets are missing, a nightly logs a notice and skips the build instead of
 failing `main`; a tag release fails closed, because publishing an unsigned or debug-signed APK is

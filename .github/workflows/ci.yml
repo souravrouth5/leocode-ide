@@ -240,11 +240,14 @@ jobs:
             echo "asset=leocode-$VERSION_CODE" >> "$GITHUB_OUTPUT"
             if [[ "$GITHUB_REF_NAME" == *-rc* ]]; then
               echo "prerelease=true" >> "$GITHUB_OUTPUT"
-              # `releases/latest` excludes prereleases, so an rc must point at
-              # its own release or rc-to-rc updates would never be offered.
-              echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/release.json" >> "$GITHUB_OUTPUT"
+              echo "channel=rc" >> "$GITHUB_OUTPUT"
+              # `releases/latest` excludes prereleases, so an rc has to poll a
+              # channel that later rcs also publish to. The moving `rc` tag
+              # carries fixed asset names, exactly like `nightly`.
+              echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/rc/release.json" >> "$GITHUB_OUTPUT"
             else
               echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "channel=stable" >> "$GITHUB_OUTPUT"
               echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release.json" >> "$GITHUB_OUTPUT"
             fi
           else
@@ -258,6 +261,7 @@ jobs:
             echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
             echo "tag=nightly" >> "$GITHUB_OUTPUT"
             echo "asset=leocode-nightly" >> "$GITHUB_OUTPUT"
+            echo "channel=nightly" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/release.json" >> "$GITHUB_OUTPUT"
           fi
@@ -337,6 +341,33 @@ jobs:
           (cd dist && sha256sum *.apk release.json release.json.sig *.cdx.json > SHA256SUMS)
           cat dist/SHA256SUMS
 
+      - name: Assemble the rc channel assets
+        if: steps.signing.outputs.available == 'true' && steps.version.outputs.channel == 'rc'
+        env:
+          LEOCODE_RELEASE_KEY: ${{ runner.temp }}/release-signing.pem
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          # An installed rc polls the moving `rc` tag, so the channel needs its
+          # own manifest whose APK URL is the fixed channel asset. The tag
+          # release keeps the versioned names for the changelog.
+          mkdir -p dist/rc
+          cp "dist/${{ steps.version.outputs.asset }}.apk" dist/rc/leocode-rc.apk
+          cp "dist/${{ steps.version.outputs.asset }}.cdx.json" dist/rc/leocode-rc.cdx.json
+
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$LEOCODE_RELEASE_KEY"
+          chmod 600 "$LEOCODE_RELEASE_KEY"
+          scripts/make-release-manifest.py \
+            --apk dist/rc/leocode-rc.apk \
+            --version-name "${{ steps.version.outputs.name }}" \
+            --version-code "${{ steps.version.outputs.code }}" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/rc/leocode-rc.apk" \
+            --notes "Automated release from $GITHUB_SHA on $GITHUB_REF_NAME." \
+            --out dist/rc/release.json
+          scripts/sign-release.sh dist/rc/release.json
+          (cd dist/rc && sha256sum leocode-rc.apk release.json release.json.sig leocode-rc.cdx.json > SHA256SUMS)
+          cat dist/rc/SHA256SUMS
+
       - name: Move the nightly tag
         if: steps.signing.outputs.available == 'true' && steps.version.outputs.tag == 'nightly'
         run: |
@@ -382,6 +413,48 @@ jobs:
             dist/*.cdx.json
             dist/SHA256SUMS
           prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          draft: false
+
+      - name: Move the rc tag
+        if: steps.signing.outputs.available == 'true' && steps.version.outputs.channel == 'rc'
+        run: |
+          git tag -f rc "$GITHUB_SHA"
+          git push -f origin refs/tags/rc
+
+      - name: Remove stale rc assets
+        if: steps.signing.outputs.available == 'true' && steps.version.outputs.channel == 'rc'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The channel keeps exactly the current five assets; anything else
+          # belongs to an older rc run.
+          gh release view rc --json assets --jq '.assets[].name' 2>/dev/null |
+            while read -r name; do
+              case "$name" in
+                release.json|release.json.sig|SHA256SUMS|leocode-rc.apk|leocode-rc.cdx.json) ;;
+                *) gh release delete-asset rc "$name" --yes || true ;;
+              esac
+            done || true
+
+      - name: Publish the rc channel
+        if: steps.signing.outputs.available == 'true' && steps.version.outputs.channel == 'rc'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: rc
+          name: LeoCode IDE (RC)
+          body: |
+            The current release candidate, published from ${{ github.sha }} (`${{ steps.version.outputs.name }}`).
+
+            An installed rc build polls this channel, so `rc` → `rc` updates are
+            offered. The versioned release next to this one keeps the per-tag
+            assets and notes.
+          files: |
+            dist/rc/leocode-rc.apk
+            dist/rc/release.json
+            dist/rc/release.json.sig
+            dist/rc/leocode-rc.cdx.json
+            dist/rc/SHA256SUMS
+          prerelease: true
           draft: false
 
   python-runtime:
