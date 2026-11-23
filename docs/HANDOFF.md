@@ -19,7 +19,7 @@ and D2. The next task is 29 (hardening, soak, accessibility, performance budgets
 | Task 27 | **Done and device-verified on D1 and D2 (2026-11-22).** Three first-run screens and Settings › About › Diagnostics; D1 (Android 9) and D2 (Android 15) both passed onboarding, the non-skippable trust gate, relaunch, diagnostics, Copy, Share and redaction. |
 | Task 28 | **Done and device-verified on D1 and D2 (2026-11-22/23).** Signed R8 releases from a tag, CycloneDX SBOM, signed nightly prerelease on its own channel, and in-app self-update (signed manifest + signer check + system installer). D2 updated rc1→rc2 and rc2→rc3 in-app; D1 updated rc2→rc3 in-app after the rc1 run exposed an API 28 signer-collection defect that rc2 fixed. Raw evidence: [`device-reports/20261123-task28-D1-D2.txt`](device-reports/20261123-task28-D1-D2.txt). |
 | Working tree | Clean for Task 28 (committed on top of `cad0bc0`) |
-| Gates | Android 435 unit tests / 0 failures / 1 skipped, `lintDebug`; web 315 tests, typecheck, lint, build; `scripts/tests/run-release-script-tests.sh` 17/17 |
+| Gates | Android 435 unit tests / 0 failures / 1 skipped, `lintDebug`; web 315 tests, typecheck, lint, build; `scripts/tests/run-release-script-tests.sh` 17/17; CI run [45139842778](https://github.com/souravrouth5/leocode-ide/actions/runs/45139842778) green on `3e342eb` |
 | Devices | D1 `192.168.29.26:5555` (Redmi Note 7S, Android 9 / API 28); D2 `e76846f` over USB (POCO F1, Android 15 / API 35; the Wi-Fi serial changes with DHCP) |
 
 ## What Task 26 added
