@@ -6,8 +6,9 @@ auditable instead of a feeling. Update this file when a gate changes state.
 
 **Summary: the product is not release-ready. The runtime/Python layer runs on both phones
 (Tasks 24–26), onboarding/diagnostics closed on both (Task 27, 2026-11-22), and release engineering
-plus signed self-update closed in Task 28 (2026-11-23), but Tasks 30–33, the accessibility/soak/
-performance gates and the owner-side release secrets remain.** The Phase F API 28 gap closed on
+plus signed self-update closed in Task 28 (2026-11-23) — including real signed GitHub releases that
+both phones updated from, anonymously — but Tasks 30–33, the accessibility/soak/performance gates,
+and an owner-side offline keystore backup remain.** The Phase F API 28 gap closed on
 2026-11-21: D1 passes T10–T14 and the extra Git/SSH rows, settling D-016.
 
 ## 1. Gate status at a glance
@@ -27,14 +28,14 @@ performance gates and the owner-side release secrets remain.** The Phase F API 2
 | 11 | Device matrix: D1 (Android 9 / API 28) | **PARTIAL** | Phases B–F verified; Phase F T10–T14 plus the extra Git/SSH rows passed on 2026-11-21 (D-016 settled); Phase G Python (Task 26) verified 2026-11-22; Task 27 and Task 28 verified 2026-11-22/23 |
 | 12 | Device matrix: Android 10–14 | **NO HARDWARE** | D-014 accepts the gap; it cannot be closed by effort alone |
 | 13 | Runtime/Python works on a device | **PARTIAL** | Tasks 24–26 verified on D1 and D2 (2026-11-22); Tasks 30–33 open |
-| 14 | Release signing | **PASS** (owner secrets pending) | Release keystore (RSA 4096, cert `2b294e12…bdaf`); `LEOCODE_REQUIRE_RELEASE_SIGNING=1` fails closed, the debug fallback needs an explicit opt-in. GitHub still needs `RELEASE_STORE_BASE64`/`RELEASE_STORE_PASSWORD`/`RELEASE_KEY_ALIAS`/`RELEASE_KEY_PASSWORD` in the protected `release` environment |
+| 14 | Release signing | **PASS** | Release keystore (RSA 4096, cert `2b294e12…bdaf`); `LEOCODE_REQUIRE_RELEASE_SIGNING=1` fails closed, the debug fallback needs an explicit opt-in. All five secrets (`RELEASE_STORE_BASE64`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`, `RELEASE_SIGNING_KEY`) are in the protected `release` environment, restricted to `main` + `v*`; rc1/rc4/rc5 built and published from it. Only an offline keystore backup stays owner-side |
 | 15 | R8 / shrinking | **PASS** | `isMinifyEnabled` + `proguard-rules.pro` (JGit, SSHD, BouncyCastle, kotlinx-serialization, eddsa); rc3 passes `smoke.sh` on D1 (3 175 ms) and D2 (686 ms) |
 | 16 | SBOM | **PASS** | `scripts/make-sbom.py` → CycloneDX 1.5 JSON (Maven + npm, dev deps dropped, deduplicated) published per release and nightly |
 | 17 | Onboarding + Diagnostics screens | **PASS** | Implemented and gated 2026-11-22 (Android 425 tests, web 300); D1 and D2 PASS (onboarding, trust gate, Copy, Share, redaction). Evidence: `docs/device-reports/20261122-task27-D1-D2.txt` |
 | 18 | Accessibility audit | **NOT STARTED** | 27 of 55 web components use ARIA/roles; no a11y tests; Android has no a11y test coverage |
 | 19 | Performance budgets | **NOT MEASURED** | No budget defined or enforced |
 | 20 | Soak / long-run stability | **NOT DONE** | Every device PASS is a single run |
-| 21 | Self-update | **PASS** | Ed25519-signed manifest + APK signer/size/version check, then the system installer; D1 rc2→rc3 and D2 rc1→rc2, rc2→rc3 in-app (2026-11-22/23). Evidence: `docs/device-reports/20261123-task28-D1-D2.txt` |
+| 21 | Self-update | **PASS** | Ed25519-signed manifest + APK signer/size/version check, then the system installer; D1 rc2→rc3→rc4→rc5 and D2 rc1→rc2→rc3→rc5 in-app (2026-11-22/23), the last hop on each fetched from the public `rc` channel with no token. Evidence: `docs/device-reports/20261123-task28-D1-D2.txt` |
 | 22 | Root mode (Tasks 17–18) | **BLOCKED** | D2 has no `su`; needs a rooted device |
 | 23 | Crash recovery / redaction | **PASS** | `CrashStore` + `Redactor` + `RecoveryActivity`; device demo on D1 and D2 2026-11-21 (renderer loss, escalation, forced crash, back order) |
 | 24 | Secrets never reach the WebView | **PASS** | `PhaseFHandlerTest` asserts token stored-but-never-returned; `ssh-key-logcat.sh` clean on D2 |
@@ -71,10 +72,18 @@ defect the debug build could not: on API 28 the updater's `getPackageArchiveInfo
 archive certificates, so the signer check rejected a legitimate download until rc2 added
 `GET_SIGNATURES` and a `PackageInfo.signatures` fallback.
 
-What is still open here is operational, not code: the owner must add the keystore and manifest-key
-secrets to the protected `release` environment, back the keystore up offline, and decide how key
-rotation would be handled (the current signer check compares current signers, so a rotated lineage
-would be rejected).
+The pipeline is now proven end to end against the real service: `v0.1.0-rc1`, `v0.1.0-rc4` and
+`v0.1.0-rc5` are public GitHub releases, their manifests verify against the committed Ed25519 key,
+and both phones updated from the public `rc` channel (D1 rc4→rc5, D2 rc3→rc5) with anonymous
+downloads. That exercise also forced two operational fixes: the release job's JVM was too small for
+a 3.7 GB dev machine's `gradle.properties` (now separate gates with a CI-sized JVM, commit 778e697),
+and a private repository answers release-asset requests with 404, which the app reports as
+`E_OFFLINE` — hence the repository is public and the caveat is in `docs/RELEASING.md`.
+
+What is still open here is operational, not code: back the keystore up offline and treat it as
+permanent. The signer check compares current signers, so a rotated lineage would be rejected and
+every user would have to reinstall by hand; the pinned expected certificate in CI has to move in the
+same commit as any replacement keystore.
 
 ### 2.3 Verification depth is thin
 

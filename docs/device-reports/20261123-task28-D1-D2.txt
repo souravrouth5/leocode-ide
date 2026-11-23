@@ -152,3 +152,108 @@ Notes and known issues
   D2 logs no such error. Left as a follow-up; not introduced by Task 28.
 * D1's download/resume row from the runtime matrix is N/A for transport reasons
   and was not toggled. Neither phone is rooted, so no Phase E rows were run.
+
+T28.5 Public release channel: rc4 -> rc5 on both phones (2026-11-23)
+-------------------------------------------------------------------
+The repository was private during T28.1-T28.4, so a phone polling GitHub
+received HTTP 404 and those rows used a local `file://` mirror. The owner made
+the repository public before this section; everything below is fetched from
+GitHub with no token, exactly as an installed app does it.
+
+Published builds, checked anonymously from the host:
+
+  release     run          channel APK      size (B)   versionCode
+  v0.1.0-rc1  45150240324  leocode-rc.apk   18 882 266  1001
+  v0.1.0-rc4  45156437138  leocode-rc.apk   18 882 246  1004
+  v0.1.0-rc5  45160907976  leocode-rc.apk   18 882 257  1005
+
+  $ curl -sSL https://github.com/souravrouth5/leocode-ide/releases/download/rc/release.json
+  200, 421 bytes
+  $ scripts/verify-manifest.sh release.json docs/keys/release-manifest-public.pem
+  Signature Verified Successfully
+
+  rc1 manifest: versionCode 1001, apk sha256 db2d572b...f11dd807
+  rc5 manifest: versionCode 1005, apk sha256 ea217fc7...b533103d8
+  rc1 APK downloaded anonymously -> sha256 db2d572b...f11dd807 (matches)
+    apksigner certificate SHA-256 2b294e12...6bdaf, aapt versionCode=1001
+  SHA256SUMS verified for the manifest, signature and SBOM.
+
+Why rc4 exists: the rc3 builds on both phones were compiled with
+LEOCODE_UPDATE_URL=file:///sdcard/Download/leocode-update/release.json (checked
+with `strings` on dist/release/leocode-1003.apk), so they cannot see GitHub.
+rc4 is the bridge build that bakes the public channel into the installed app.
+
+D1 - Redmi Note 7S, Android 9 / API 28
+  T28.5a  rc3 -> rc4  PASS
+    start                      versionCode=1003 versionName=0.1.0-rc3
+    bridge                     pushed the real rc4 manifest + signature to the
+                               mirror path the installed build polls; the APK
+                               URL inside it is the public rc channel
+    check                      "LeoCode 0.1.0-rc4 is available", 18.0 MB,
+                               notes + "Last checked 16:15:34"
+                               docs/device-reports/20261123-task28-pub-d1-offer-rc4.png
+    download                   HTTPS from GitHub: 6.9 MB of 18.0 MB after 10 s,
+                               11.4 MB after 12 s
+                               docs/device-reports/20261123-task28-pub-d1-download-rc4.png
+    installer                  Android 9 update prompt ("Your existing data
+                               will not be lost")
+                               docs/device-reports/20261123-task28-pub-d1-installer-rc4.png
+    Play Protect               "App scan recommended" -> "Scan app" ->
+                               "App installed."
+    after                      versionCode=1004 versionName=0.1.0-rc4
+    recheck                    "LeoCode 0.1.0-rc4 is up to date" (16:18:51),
+                               which proves the public URL is baked in
+                               docs/device-reports/20261123-task28-pub-d1-uptodate-rc4.png
+
+  T28.5b  rc4 -> rc5  PASS (real channel end to end)
+    check                      "LeoCode 0.1.0-rc5 is available" (16:41:01)
+                               docs/device-reports/20261123-task28-pub-d1-offer-rc5.png
+    download                   11.4 MB of 18.0 MB after 12 s
+                               docs/device-reports/20261123-task28-pub-d1-download-rc5.png
+    installer                  docs/device-reports/20261123-task28-pub-d1-installer-rc5.png
+    Play Protect               "App scan recommended" -> "Scan app" ->
+                               "App installed."
+                               docs/device-reports/20261123-task28-pub-d1-installed-rc5.png
+    after                      versionCode=1005 versionName=0.1.0-rc5
+    recheck                    "LeoCode 0.1.0-rc5 is up to date" (16:45:29)
+                               docs/device-reports/20261123-task28-pub-d1-uptodate-rc5.png
+
+D2 - POCO F1, Android 15 / API 35 (wireless debugging, VPN active)
+  T28.5a  rc3 -> rc5  PASS
+    start                      versionCode=1003 versionName=0.1.0-rc3
+    bridge                     pushed the real rc5 manifest + signature to the
+                               mirror path; the APK URL is the public channel
+    check                      "LeoCode 0.1.0-rc5 is available" (16:49:36)
+                               docs/device-reports/20261123-task28-pub-d2-offer-rc5.png
+    download                   HTTPS from GitHub, 711 KB after 12 s, 4.7 MB
+                               after 102 s, 10.5 MB after 342 s, finished at
+                               ~12 min (~20-45 KB/s; this phone is behind an
+                               India-VPN, and the wireless-debugging address
+                               changed mid-run from 10.8.0.51 to 10.8.0.90)
+                               docs/device-reports/20261123-task28-pub-d2-download-rc5.png
+    installer                  "Do you want to update this app?" -> Update
+    Play Protect               "App scan recommended" -> "Scan app" ->
+                               "Harmful app blocked" ->
+                               docs/device-reports/20261123-task28-pub-d2-pp-blocked.png
+                               "More details" -> "Install anyway" ->
+                               docs/device-reports/20261123-task28-pub-d2-pp-install-anyway.png
+                               "App installed."
+    after                      versionCode=1005 versionName=0.1.0-rc5
+    recheck                    "LeoCode 0.1.0-rc5 is up to date" (17:13:07)
+                               docs/device-reports/20261123-task28-pub-d2-about-rc5.png
+                               docs/device-reports/20261123-task28-pub-d2-uptodate-rc5.png
+
+CI note: the first rc5 run (45159589551) failed in the Android job with
+`OutOfMemoryError: Metaspace` in :app:compileDebugUnitTestKotlin. The committed
+gradle.properties is sized for the 3.7 GB development machine (1 GB heap,
+400 MB metaspace), so tests, lint and assemble now run as separate CI
+invocations with `-Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=1g"` and
+the release build uses -Xmx3g (commit 778e697). Run 45160907976 is green:
+web, python-runtime, android and signed release all succeed, and the rc5
+assets above were downloaded anonymously afterwards.
+
+Observed per device, not inferred: D1 showed "Scan app" then install; D2 showed
+"Scan app" then "Harmful app blocked" for the same signed APK. Play Protect is
+server-side and not deterministic; Android's package installer had already
+matched the signer with the installed app, which is what the integrity gate
+enforces.

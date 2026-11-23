@@ -382,6 +382,9 @@ is recorded rather than inferred.
 | In-app update check finds the next rc | **PASS** (2026-11-23) | **PASS** (2026-11-22, 2026-11-23) | signed `release.json` + `.sig` verified; offered `0.1.0-rc3` with size and notes |
 | System installer opens from the update card | **PASS** (2026-11-23) | **PASS** (2026-11-23) | D1 shows Android 9's "Open with" chooser (several APK handlers) → Package installer; D2 opens the installer directly |
 | Update installs and the app runs the new build | **PASS** (2026-11-23) | **PASS** (2026-11-23) | `versionCode` 1002 → 1003 on both; D2 rc1→rc2 too |
+| Public release channel: check + download from GitHub | **PASS** (2026-11-23) | **PASS** (2026-11-23) | repository public, no token; rc5 manifest signature verified, APK fetched over HTTPS (`rc` channel); D1 rc4→rc5, D2 rc3→rc5, both ended on `versionCode` 1005 |
+| Moving `rc` channel serves rc→rc updates | **PASS** (2026-11-23) | **PASS** (2026-11-23) | `releases/download/rc/release.json` + fixed asset names; `releases/latest` excludes prereleases, which is why the channel had to exist |
+| Post-update recheck reports "up to date" against the same channel | **PASS** (2026-11-23) | **PASS** (2026-11-23) | proves the public URL is baked into the installed build, not just used once |
 | Update rejected when the archive signer differs | INFO | INFO | unit test (`UpdateInstallerFlagsTest`, installer tests); the API 28 empty-signer path was seen live on D1 in rc1 and fixed in rc2 |
 | 4 h soak (Wi-Fi ADB) | | | Task 29 |
 | Accessibility: 48 dp, 200 % font | | | Task 29 |
@@ -389,8 +392,11 @@ is recorded rather than inferred.
 | Editor RSS < 120 MB | | | Task 29 |
 
 Evidence: [`device-reports/20261123-task28-D1-D2.txt`](device-reports/20261123-task28-D1-D2.txt)
-with screenshots from both phones. D1's Play Protect blocked the first sideload
-until "More details" → "Install anyway"; D2 showed the softer "Scan app" dialog.
+with screenshots from both phones. Sections T28.1–T28.4 ran against a local `file://` mirror while
+the repository was private; T28.5 is the public-channel run (real GitHub release, anonymous download,
+D1 rc4→rc5 and D2 rc3→rc5). Play Protect is server-side and differed per device for the same signed
+APK: D1 showed "Scan app" then installed, D2 showed "Scan app" → "Harmful app blocked" → "More
+details" → "Install anyway".
 
 ## Legend
 
