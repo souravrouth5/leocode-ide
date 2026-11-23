@@ -12,6 +12,7 @@ import { createFilesStore, type FilesState } from "../features/files/filesStore"
 import { createEditorStore, type EditorStore } from "../features/editor/editorStore"
 import { createRunStore, type RunStore } from "../features/run/runStore"
 import { createPythonStore, type PythonState } from "../features/python/pythonStore"
+import { createLanguageStore, type LanguageState } from "../features/language/languageStore"
 import {
   createWorkspaceStore,
   type WorkspaceState
@@ -37,6 +38,8 @@ export interface AppStores {
   shell: StoreApi<ShellState>
   files: StoreApi<FilesState>
   editor: EditorStore
+  /** Pluggable language providers and runtimes (Task 30). */
+  language: StoreApi<LanguageState>
   /** Per-project venv, requirements and trust decisions (Task 26). */
   python: StoreApi<PythonState>
   run: RunStore
@@ -82,8 +85,10 @@ export function createAppStores(bridge: Bridge): AppStores {
     dialogs,
     workspaceId: () => workspace?.getState().activeId ?? null
   })
+  const language = createLanguageStore(bridge)
+  void language.getState().refresh()
   const python = createPythonStore({ bridge, dialogs, notifications, errors })
-  const run = createRunStore({ bridge, editor, notifications, python })
+  const run = createRunStore({ bridge, editor, notifications, python, language })
   workspace = createWorkspaceStore({
     bridge,
     files,
@@ -120,6 +125,7 @@ export function createAppStores(bridge: Bridge): AppStores {
     shell,
     files,
     editor,
+    language,
     python,
     run,
     workspace,

@@ -3,6 +3,7 @@ import type { Bridge, ProcessEvent, RunHandle } from "../../bridge"
 import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { EditorState } from "../editor/editorStore"
 import type { PythonState } from "../python/pythonStore"
+import type { LanguageState } from "../language/languageStore"
 import { baseName, dirName, isDirty } from "../editor/model"
 
 export interface RunSegment {
@@ -48,8 +49,17 @@ export const RUN_LIMIT = 200_000
 export const PYTHON_HINT =
   "Python is not installed on this device yet. Open Runtimes, install Python, then run the file again."
 
-export const runKind = (path: string): "python" | "shell" | null => {
-  const lower = path.toLowerCase()
+export const runKind = (path: string, language?: StoreApi<LanguageState>): string | null => {
+  const name = baseName(path)
+  const langState = language?.getState()
+  if (langState?.loaded) {
+    const provider = langState.findForFile(name)
+    if (provider) return provider.id
+    const lower = name.toLowerCase()
+    if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "shell"
+    return null
+  }
+  const lower = name.toLowerCase()
   if (lower.endsWith(".py")) return "python"
   if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "shell"
   return null
@@ -60,10 +70,11 @@ interface RunDeps {
   editor: StoreApi<EditorState>
   notifications: StoreApi<NotificationsState>
   python: StoreApi<PythonState>
+  language?: StoreApi<LanguageState>
 }
 
 export function createRunStore(deps: RunDeps): RunStore {
-  const { bridge, editor, notifications, python } = deps
+  const { bridge, editor, notifications, python, language } = deps
   let handle: RunHandle | null = null
   let buffer: RunSegment[] = []
   let frame: number | null = null
@@ -151,12 +162,14 @@ export function createRunStore(deps: RunDeps): RunStore {
           const doc = path ? state.docs.find((item) => item.path === path) : undefined
           if (!doc) return
           const name = baseName(doc.path)
-          const kind = runKind(name)
+          const kind = runKind(name, language)
+          const provider = language?.getState().findForFile(name)
+
           if (!kind) {
             notifications.getState().enqueue({
               kind: "warning",
-              message: "LeoCode can only run .py and .sh files right now",
-              detail: `${name} needs an interpreter that is not installed`,
+              message: "LeoCode can only run files with a registered language provider (such as .py and .sh)",
+              detail: `${name} has no runner available`,
               durationMs: 6_000
             })
             return
@@ -164,9 +177,9 @@ export function createRunStore(deps: RunDeps): RunStore {
           // Never run stale bytes: persist the buffer first when it differs from disk.
           if (isDirty(doc) && !(await editor.getState().save(doc.path))) return
 
-          // Task 26: every runnable file is project code, so ask for trust and
-          // resolve the project venv/requirements before spawning anything.
-          let plan: { interpreter: string; env: Record<string, string> } | null = null
+          // Task 26/30: every runnable file is project code, so ask for trust and
+          // resolve the project environment before spawning anything.
+          let plan: { interpreter?: string; argv?: string[]; env?: Record<string, string> } | null = null
           if (kind === "python") {
             const prepared = await python.getState().prepareForRun(doc.path)
             if ("hint" in prepared) {
@@ -183,6 +196,37 @@ export function createRunStore(deps: RunDeps): RunStore {
               return
             }
             plan = prepared
+          } else if (provider) {
+            const trustAction = provider.trustTriggers?.[0] ?? "script"
+            if (!(await python.getState().trust(trustAction as any, doc.path))) {
+              set({
+                sheetOpen: true,
+                run: {
+                  title: name,
+                  running: false,
+                  exitCode: null,
+                  segments: [],
+                  hint: "This script was not trusted, so it was not run."
+                }
+              })
+              return
+            }
+            try {
+              const planned = await bridge.languagePlan({ file: name })
+              plan = { argv: planned.argv, env: planned.env }
+            } catch (err) {
+              set({
+                sheetOpen: true,
+                run: {
+                  title: name,
+                  running: false,
+                  exitCode: null,
+                  segments: [],
+                  hint: (err as Error).message
+                }
+              })
+              return
+            }
           } else if (!(await python.getState().trust("script", doc.path))) {
             set({
               sheetOpen: true,
@@ -209,7 +253,7 @@ export function createRunStore(deps: RunDeps): RunStore {
             run: { title: name, running: true, exitCode: null, segments: [], hint: null }
           })
 
-          const argv = kind === "python" ? [plan!.interpreter, name] : ["/system/bin/sh", name]
+          const argv = plan?.argv ?? (plan?.interpreter ? [plan.interpreter, name] : ["/system/bin/sh", name])
           try {
             const code = await bridge.run(
               argv,
@@ -220,13 +264,14 @@ export function createRunStore(deps: RunDeps): RunStore {
                 if (activeRunId === runId) handle = next
                 else next.cancel()
               },
-              plan ? { env: plan.env } : undefined
+              plan?.env ? { env: plan.env } : undefined
             )
             finish(runId, code, null)
           } catch (error) {
             // The run sheet is the error surface here; it shows the message and hint.
             const message = (error as Error).message
-            finish(runId, null, kind === "python" ? `${message}\n\n${PYTHON_HINT}` : message)
+            const hint = kind === "python" ? `${message}\n\n${PYTHON_HINT}` : message
+            finish(runId, null, hint)
           }
         } finally {
           set((current) => (current.starting ? { starting: false } : current))

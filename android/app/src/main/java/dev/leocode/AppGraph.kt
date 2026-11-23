@@ -10,6 +10,7 @@ import dev.leocode.bridge.BridgeJson
 import dev.leocode.bridge.DraftHandler
 import dev.leocode.bridge.FsHandler
 import dev.leocode.bridge.GitHandler
+import dev.leocode.bridge.LanguageHandler
 import dev.leocode.bridge.ProcHandler
 import dev.leocode.bridge.PythonHandler
 import dev.leocode.bridge.RuntimeHandler
@@ -37,6 +38,8 @@ import dev.leocode.core.TrustStore
 import dev.leocode.core.UpdateChecker
 import dev.leocode.core.UpdateInstaller
 import dev.leocode.core.Workspace
+import dev.leocode.core.language.LanguageRegistry
+import dev.leocode.core.language.PythonLanguageProvider
 import dev.leocode.core.secrets.AndroidSecretCipher
 import dev.leocode.core.secrets.FileSecretStore
 import dev.leocode.git.GitEngine
@@ -183,6 +186,20 @@ class AppGraph(private val app: Application) {
         json,
         log = { line -> android.util.Log.w("LeoCodePython", line) }
     )
+
+    /** Language providers (Task 30, D-017). */
+    val languageRegistry = LanguageRegistry(
+        listOf(PythonLanguageProvider(workspace))
+    )
+
+    private val languageHandler = LanguageHandler(
+        registry = languageRegistry,
+        activeRoot = activeRoot,
+        jail = jail,
+        json = json
+    )
+
+    fun languageHandler(): LanguageHandler = languageHandler
 
     fun fsHandler(): FsHandler =
         FsHandler(workspace, jail, trash, json) { workspaceStore.activeDirectory() }

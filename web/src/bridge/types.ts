@@ -37,6 +37,10 @@ import type {
   PythonStatusReply as GeneratedPythonStatusReply,
   PythonVenvReply as GeneratedPythonVenvReply,
   PythonRequirementsReply as GeneratedPythonRequirementsReply,
+  LanguageDescriptor,
+  LanguageListReply,
+  LanguagePlanRequest,
+  LanguagePlanReply,
   SafDocument as GeneratedSafDocument,
   SearchMatch as GeneratedSearchMatch,
   SecretSetRequest,
@@ -274,6 +278,10 @@ export type PythonStatus = GeneratedPythonStatusReply
 export type PythonVenvResult = GeneratedPythonVenvReply
 export type PythonRequirementsResult = GeneratedPythonRequirementsReply
 
+// ----------------------------------------------------- Language (Task 30)
+
+export type { LanguageDescriptor, LanguageListReply, LanguagePlanRequest, LanguagePlanReply }
+
 /** `proc.run` environment overrides (allowlisted host-side). */
 export interface RunOptions extends RequestOptions {
   env?: Record<string, string>
@@ -475,6 +483,12 @@ export interface Bridge {
     onLine: (line: string) => void,
     options?: RequestOptions
   ): Promise<PythonRequirementsResult>
+
+  // ---------------------------------------------------- language (Task 30)
+  /** List all registered language providers. */
+  languageList(options?: RequestOptions): Promise<LanguageListReply>
+  /** Build execution plan for running a script. */
+  languagePlan(request: LanguagePlanRequest, options?: RequestOptions): Promise<LanguagePlanReply>
 
   // ------------------------------------------------------ updates (Task 28)
   /**

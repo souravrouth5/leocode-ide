@@ -30,7 +30,7 @@ export interface RuntimeCardData {
   description: string
   guidance: string
   envVars?: Record<string, string>
-  checkCommands: {
+  checkCommands?: {
     primary: string[]
     secondary?: string[]
   }
@@ -67,34 +67,27 @@ const DEFAULT_RUNTIMES: RuntimeCardData[] = [
   {
     id: "node",
     name: "Node.js & npm",
-    category: "Phase 5",
-    status: "probing",
+    category: "Phase 5 (Deferred)",
+    status: "missing",
     path: "/data/data/dev.leocode/files/usr/bin/node",
-    description: "JavaScript / TypeScript runtime for local tooling and dev servers.",
+    description: "Empty extension point (D-017, Task 30). JavaScript / TypeScript language provider will be added after 0.1.",
     guidance:
-      "V8-based Node.js LTS engine. Allows running npm scripts, Vite, and Node servers bound to localhost.",
+      "Deferred behind LanguageProvider. Node.js, npm and dev servers will be supported via an independent language provider after 0.1.",
     envVars: {
       NODE_PATH: "/data/data/dev.leocode/files/usr/lib/node_modules"
-    },
-    checkCommands: {
-      primary: ["node", "--version"],
-      secondary: ["npm", "--version"]
     }
   },
   {
     id: "java",
     name: "Java / OpenJDK",
-    category: "Phase 6",
-    status: "probing",
+    category: "Phase 6 (Deferred)",
+    status: "missing",
     path: "/data/data/dev.leocode/files/usr/lib/jvm",
-    description: "OpenJDK Headless Runtime for compilation and execution.",
+    description: "Empty extension point (D-017, Task 30). Java language provider will be added after 0.1.",
     guidance:
-      "Supports javac, java, and jar execution on device without root. Configured via JAVA_HOME.",
+      "Deferred behind LanguageProvider. OpenJDK execution will be supported via an independent language provider after 0.1.",
     envVars: {
       JAVA_HOME: "/data/data/dev.leocode/files/usr/lib/jvm"
-    },
-    checkCommands: {
-      primary: ["java", "-version"]
     }
   },
   {
@@ -250,6 +243,11 @@ export function RuntimeManager({ bridge, info, onOpenTerminal, onRuntimeInstalle
       if (entry?.installed) {
         item.status = entry.healthy ? "installed" : "error"
         item.version = entry.version
+      }
+
+      if (!item.checkCommands) {
+        updated[i] = item
+        continue
       }
 
       try {

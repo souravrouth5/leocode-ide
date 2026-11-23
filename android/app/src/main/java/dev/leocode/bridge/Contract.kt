@@ -474,6 +474,40 @@ data class PythonRequirementsReply(val ok: Boolean, val exitCode: Int, val outpu
 @Serializable
 data class PythonInstallEvent(val data: String)
 
+// ----------------------------------------------------------------- language (Task 30)
+
+@Serializable
+data class LanguageDescriptor(
+    val id: String,
+    val displayName: String,
+    val extensions: List<String>,
+    val runtimeId: String? = null,
+    val supportsRepl: Boolean = false,
+    val trustTriggers: List<String> = emptyList(),
+    val templateFiles: List<String> = emptyList(),
+    val requiresRuntime: Boolean = false
+)
+
+@Serializable
+data class LanguageListReply(
+    val languages: List<LanguageDescriptor> = emptyList()
+)
+
+@Serializable
+data class LanguagePlanRequest(
+    val file: String,
+    val project: String? = null
+)
+
+@Serializable
+data class LanguagePlanReply(
+    val languageId: String,
+    val argv: List<String>,
+    val env: Map<String, String> = emptyMap(),
+    val cwd: String? = null,
+    val trustAction: String? = null
+)
+
 // ----------------------------------------------------------------- secrets
 
 @Serializable

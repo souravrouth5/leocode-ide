@@ -43,7 +43,9 @@ const IDEMPOTENT_READS = new Set([
   "git.remote.list",
   // Task 26: status and trust checks are safe to retry.
   "python.status",
-  "trust.check"
+  "trust.check",
+  // Task 30: language listing is safe to retry.
+  "language.list"
 ])
 
 /** Long Git network operations are progress-driven and cancelled by op id. */

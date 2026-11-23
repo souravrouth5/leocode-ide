@@ -12,8 +12,9 @@ const RuntimeManager = lazyWithRetry(() =>
 )
 
 export function RuntimesView({ info }: { info: AppInfo | null }) {
-  const { bridge, shell, run } = useStores()
+  const { bridge, shell, run, language } = useStores()
   const view = useStore(shell, (state) => state.view)
+  const hasPython = useStore(language, (state) => state.languages.some((l) => l.id === "python"))
 
   return (
     <section
@@ -30,7 +31,7 @@ export function RuntimesView({ info }: { info: AppInfo | null }) {
           />
         )}
       >
-        <PythonProjectPanel />
+        {hasPython ? <PythonProjectPanel /> : null}
         <Suspense fallback={<div className="empty">Loading runtimes…</div>}>
           <RuntimeManager
             bridge={bridge}

@@ -28,6 +28,10 @@ import type {
   GitStream,
   GitSyncRequest,
   GitSyncResult,
+  LanguageDescriptor,
+  LanguageListReply,
+  LanguagePlanRequest,
+  LanguagePlanReply,
   ProcessEvent,
   PythonProjectRequest,
   PythonRequirementsResult,
@@ -1626,6 +1630,12 @@ export class MockBridge implements Bridge {
       return 0
     }
 
+    if (this.mockLanguages.some((l) => l.id === cmd) && args[0]) {
+      emit(`running ${join(cwd, args[0])} in mock ${cmd}…\n`)
+      emit(`Hello from mock ${cmd}!\n`)
+      return 0
+    }
+
     if ((cmd === "sh" || cmd === "/system/bin/sh") && args[0] === "-c" && args[1]) {
       const script = args[1]
       if (script.includes("toybox")) {
@@ -1760,6 +1770,58 @@ export class MockBridge implements Bridge {
   ): Promise<PythonRequirementsResult> {
     onLine("Requirement already satisfied (mock)")
     return { ok: true, exitCode: 0, output: "Requirement already satisfied (mock)\n" }
+  }
+
+  // ---------------------------------------------------- language (Task 30)
+
+  private mockLanguages: LanguageDescriptor[] = [
+    {
+      id: "python",
+      displayName: "Python",
+      extensions: ["py"],
+      runtimeId: "python",
+      supportsRepl: true,
+      trustTriggers: ["script", "venv", "pip"],
+      templateFiles: ["main.py", "requirements.txt", ".gitignore", "README.md"],
+      requiresRuntime: true
+    }
+  ]
+
+  setMockLanguages(languages: LanguageDescriptor[]): void {
+    this.mockLanguages = [...languages]
+  }
+
+  async languageList(): Promise<LanguageListReply> {
+    return { languages: this.mockLanguages }
+  }
+
+  async languagePlan(request: LanguagePlanRequest): Promise<LanguagePlanReply> {
+    const ext = request.file.split(".").pop()?.toLowerCase() ?? ""
+    const provider = this.mockLanguages.find(lang => lang.extensions.map(e => e.toLowerCase()).includes(ext))
+    if (!provider) {
+      throw new BridgeError("E_UNSUPPORTED", `No language provider registered for file: ${request.file}`)
+    }
+    if (provider.id === "python") {
+      const status = this.mockPythonStatus()
+      const interpreter = status.venvPython ?? status.runtimePython ?? "/data/user/0/dev.leocode/files/usr/bin/python3"
+      return {
+        languageId: "python",
+        argv: [interpreter, request.file],
+        env: {
+          PATH: "/data/user/0/dev.leocode/files/usr/bin:/system/bin",
+          PYTHONHOME: "/data/user/0/dev.leocode/files/usr"
+        },
+        cwd: null,
+        trustAction: "script"
+      }
+    }
+    return {
+      languageId: provider.id,
+      argv: [provider.id, request.file],
+      env: {},
+      cwd: null,
+      trustAction: "script"
+    }
   }
 
   async installRuntime(

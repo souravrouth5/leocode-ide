@@ -54,4 +54,49 @@ describe("run store (Task 13)", () => {
     stores.run.getState().close()
     expect(stores.run.getState().run).toBeNull()
   })
+
+  it("degrades gracefully to no language when Python provider is removed", async () => {
+    const bridge = new MockBridge()
+    bridge.setMockLanguages([]) // No language providers
+    const stores = createAppStores(bridge)
+    await stores.language.getState().refresh()
+
+    await stores.editor.getState().openFile("main.py")
+    await stores.run.getState().runFile()
+
+    expect(stores.run.getState().run).toBeNull()
+    const notification = stores.notifications.getState().queue[0]
+    expect(notification).toBeDefined()
+    expect(notification.kind).toBe("warning")
+    expect(notification.message).toContain("registered language provider")
+  })
+
+  it("runs a file with a custom language provider (Task 30)", async () => {
+    const bridge = new MockBridge()
+    bridge.setMockLanguages([
+      {
+        id: "ruby",
+        displayName: "Ruby",
+        extensions: ["rb"],
+        runtimeId: null,
+        supportsRepl: true,
+        trustTriggers: ["script"],
+        templateFiles: ["main.rb"],
+        requiresRuntime: false
+      }
+    ])
+    const stores = createAppStores(bridge)
+    await stores.language.getState().refresh()
+
+    stores.editor.setState({
+      docs: [{ path: "script.rb", content: "puts 'hi'", saved: "puts 'hi'", eol: "\n" }],
+      activePath: "script.rb"
+    })
+    await stores.run.getState().runFile()
+    await settle()
+
+    const run = stores.run.getState().run
+    expect(run?.running).toBe(false)
+    expect(run?.exitCode).toBe(0)
+  })
 })

@@ -506,6 +506,34 @@ export interface PythonInstallEvent {
   data: string
 }
 
+export interface LanguageDescriptor {
+  id: string
+  displayName: string
+  extensions: string[]
+  runtimeId?: string | null
+  supportsRepl?: boolean
+  trustTriggers?: string[]
+  templateFiles?: string[]
+  requiresRuntime?: boolean
+}
+
+export interface LanguageListReply {
+  languages?: LanguageDescriptor[]
+}
+
+export interface LanguagePlanRequest {
+  file: string
+  project?: string | null
+}
+
+export interface LanguagePlanReply {
+  languageId: string
+  argv: string[]
+  env?: Record<string, string>
+  cwd?: string | null
+  trustAction?: string | null
+}
+
 export interface SafDocument {
   name: string
   uri: string

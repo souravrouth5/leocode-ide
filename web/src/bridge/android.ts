@@ -27,6 +27,9 @@ import {
   type GitStream,
   type GitSyncRequest,
   type GitSyncResult,
+  type LanguageListReply,
+  type LanguagePlanRequest,
+  type LanguagePlanReply,
   type ProcessEvent,
   type PythonProjectRequest,
   type PythonRequirementsResult,
@@ -1022,6 +1025,19 @@ export class AndroidBridge implements Bridge {
         if (event === "python.install") onLine((payload as { data?: string }).data ?? "")
       }
     )
+  }
+
+  // ---------------------------------------------------- language (Task 30)
+
+  async languageList(options?: RequestOptions): Promise<LanguageListReply> {
+    return this.request<LanguageListReply>("language.list", {}, options)
+  }
+
+  async languagePlan(
+    request: LanguagePlanRequest,
+    options?: RequestOptions
+  ): Promise<LanguagePlanReply> {
+    return this.request<LanguagePlanReply>("language.plan", request, options)
   }
 
   /**
