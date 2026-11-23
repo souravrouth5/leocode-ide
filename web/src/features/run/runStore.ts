@@ -5,6 +5,12 @@ import type { EditorState } from "../editor/editorStore"
 import type { PythonState } from "../python/pythonStore"
 import type { LanguageState } from "../language/languageStore"
 import { baseName, dirName, isDirty } from "../editor/model"
+import { editorCommand } from "../editor/commands"
+import {
+  parseTraceback,
+  type ErrorSummary,
+  type ParsedTraceback
+} from "./traceback"
 
 export interface RunSegment {
   stream: "stdout" | "stderr"
@@ -17,6 +23,10 @@ export interface RunView {
   exitCode: number | null
   segments: RunSegment[]
   hint: string | null
+  startedAt?: number | null
+  durationMs?: number | null
+  errorSummary?: ErrorSummary | null
+  traceback?: ParsedTraceback | null
 }
 
 export interface RunState {
@@ -36,6 +46,10 @@ export interface RunState {
   close(): void
   /** Forget the cached `python3 --version` probe (W-13). */
   invalidatePythonProbe(): void
+  /** Send stdin text to running process or simulate input (Task 31). */
+  sendInput(text: string): void
+  /** Jump to file and line in the editor (Task 31). */
+  jumpToFile(path: string, line?: number): Promise<void>
 }
 
 export type RunStore = StoreApi<RunState> & {
@@ -71,6 +85,7 @@ interface RunDeps {
   notifications: StoreApi<NotificationsState>
   python: StoreApi<PythonState>
   language?: StoreApi<LanguageState>
+  workspaceRoot?: string | (() => string | null)
 }
 
 export function createRunStore(deps: RunDeps): RunStore {
@@ -140,11 +155,36 @@ export function createRunStore(deps: RunDeps): RunStore {
       activeRunId = null
       flush()
       handle = null
-      set((state) =>
-        state.run
-          ? { ...state, run: { ...state.run, running: false, exitCode, hint: state.run.hint ?? hint } }
-          : state
-      )
+      set((state) => {
+        if (!state.run) return state
+        const durationMs =
+          state.run.startedAt !== null && state.run.startedAt !== undefined
+            ? Math.max(0, Date.now() - state.run.startedAt)
+            : null
+        const allText = state.run.segments.map((s) => s.text).join("")
+        const root =
+          typeof deps.workspaceRoot === "function"
+            ? deps.workspaceRoot() ?? undefined
+            : deps.workspaceRoot
+        const parsed = parseTraceback(allText, root)
+        let errorSummary = parsed.error
+        if (!errorSummary && hint) {
+          const hintParsed = parseTraceback(hint, root)
+          if (hintParsed.error) errorSummary = hintParsed.error
+        }
+        return {
+          ...state,
+          run: {
+            ...state.run,
+            running: false,
+            exitCode,
+            hint: state.run.hint ?? hint,
+            durationMs,
+            errorSummary,
+            traceback: parsed
+          }
+        }
+      })
     }
 
     return {
@@ -246,11 +286,22 @@ export function createRunStore(deps: RunDeps): RunStore {
           handle = null
           buffer = []
           cancelFrame()
+          const startedAt = Date.now()
           set({
             // The spawn is done: a second tap may reopen the sheet from here (W-14).
             starting: false,
             sheetOpen: true,
-            run: { title: name, running: true, exitCode: null, segments: [], hint: null }
+            run: {
+              title: name,
+              running: true,
+              exitCode: null,
+              segments: [],
+              hint: null,
+              startedAt,
+              durationMs: null,
+              errorSummary: null,
+              traceback: null
+            }
           })
 
           const argv = plan?.argv ?? (plan?.interpreter ? [plan.interpreter, name] : ["/system/bin/sh", name])
@@ -304,6 +355,25 @@ export function createRunStore(deps: RunDeps): RunStore {
         // A fresh runtime/venv can land while the app is open; drop the cached
         // status so the next Run sees it (W-13).
         void python.getState().refresh()
+      },
+
+      sendInput(text: string) {
+        const current = get().run
+        if (!current || !current.running) return
+        const line = text.endsWith("\n") ? text : text + "\n"
+        if (handle && typeof (handle as any).write === "function") {
+          (handle as any).write(line)
+        }
+        buffer.push({ stream: "stdout", text: line })
+        flush()
+      },
+
+      async jumpToFile(path: string, line?: number) {
+        await editor.getState().openFile(path)
+        if (line !== undefined) {
+          editorCommand("gotoLine", line)
+          editorCommand("gotoPosition", { line, col: 1 })
+        }
       }
     }
   })

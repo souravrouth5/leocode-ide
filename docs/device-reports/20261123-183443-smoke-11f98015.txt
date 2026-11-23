@@ -1,0 +1,36 @@
+# LeoCode smoke test
+generated: 2026-11-23T13:05:33Z
+serial:    11f98015
+model:     Redmi Note 7S
+api:       28
+apk:       dist/release/leocode-1006.apk
+
+## window focus
+mCurrentFocus: <unavailable>
+old-target-SDK warning dialog: manual observation
+  heuristic from focus: unknown (dumpsys reported no mCurrentFocus)
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+Activity: com.android.settings/.Settings$UsbDetailsActivity
+ThisTime: 954
+TotalTime: 3086
+WaitTime: 3456
+Complete
+
+## verdict
+pid:        30426
+
+## logcat
+--------- beginning of main
+--------- beginning of system
+11-23 18:35:20.913 E/libc    (30245): Access denied finding property "ro.vendor.display.type"
+--------- beginning of crash
+11-23 18:35:24.305 E/libc    (30273): Access denied finding property "ro.vendor.at_library"
+11-23 18:35:25.391 E/libc    (  763): Access denied finding property "persist.sys.display_debug"
+11-23 18:35:25.904 E/libc    (30370): Access denied finding property "ro.vendor.display.type"
+11-23 18:35:28.180 E/libc    (  763): Access denied finding property "persist.sys.display_debug"
+11-23 18:35:28.181 E/libc    (  763): Access denied finding property "persist.sys.display_debug"
+11-23 18:35:28.183 E/libc    (  763): Access denied finding property "persist.sys.display_debug"
+11-23 18:35:28.183 E/libc    (  763): Access denied finding property "persist.sys.display_debug"

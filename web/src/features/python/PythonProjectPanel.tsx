@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
 import { WORKSPACE_SWITCHED_EVENT } from "../workspace/workspaceEvents"
+import { classifyPipError, isPipFailure } from "./pipClassifier"
 
 /**
  * The active project's Python environment (Task 26).
@@ -30,6 +31,16 @@ export function PythonProjectPanel() {
       ? "installed"
       : "not installed"
     : "no requirements.txt"
+
+  const isFailed =
+    !busy &&
+    status?.requirementsExists &&
+    !status?.requirementsInstalled &&
+    log.length > 0
+  const classification =
+    isFailed || (log.length > 0 && isPipFailure(log))
+      ? classifyPipError(log)
+      : null
 
   return (
     <section className="env-section python-project" aria-labelledby="python-project-title">
@@ -113,6 +124,40 @@ export function PythonProjectPanel() {
           Refresh
         </button>
       </div>
+
+      {classification && (
+        <div
+          className="pip-error-summary"
+          role="alert"
+          aria-label="Package installation failure explanation"
+          style={{
+            margin: "12px 0 0",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid var(--danger, #ef4444)",
+            background: "rgba(239, 68, 68, 0.08)",
+            fontSize: "13px",
+            lineHeight: "1.4"
+          }}
+        >
+          <div style={{ fontWeight: 600, color: "var(--danger, #ef4444)", marginBottom: "4px" }}>
+            Installation failed: {classification.kind.replace(/_/g, " ")}
+          </div>
+          <p style={{ margin: "4px 0", color: "var(--foreground, inherit)" }}>
+            {classification.explanation}
+          </p>
+          {classification.package && (
+            <p style={{ margin: "4px 0", color: "var(--muted, #888)" }}>
+              Package: <code>{classification.package}</code>
+            </p>
+          )}
+          {classification.suggestedAction && (
+            <p style={{ margin: "6px 0 0", color: "var(--foreground, inherit)" }}>
+              💡 {classification.suggestedAction}
+            </p>
+          )}
+        </div>
+      )}
 
       {log.length > 0 && (
         <pre className="python-log" aria-label="pip output">

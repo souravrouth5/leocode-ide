@@ -99,4 +99,121 @@ describe("run store (Task 13)", () => {
     expect(run?.running).toBe(false)
     expect(run?.exitCode).toBe(0)
   })
+
+  describe("Task 31: Python run experience, traceback parsing and duration", () => {
+    it("tracks start time and elapsed duration", async () => {
+      const stores = createAppStores(new MockBridge())
+      await stores.editor.getState().openFile("main.py")
+
+      await stores.run.getState().runFile()
+      await settle()
+
+      const run = stores.run.getState().run
+      expect(run?.running).toBe(false)
+      expect(run?.startedAt).toBeTypeOf("number")
+      expect(run?.durationMs).toBeTypeOf("number")
+      expect(run!.durationMs!).toBeGreaterThanOrEqual(0)
+    })
+
+    it("parses traceback and extracts error summary on exception", async () => {
+      const bridge = new MockBridge()
+      bridge.run = async (_argv, _cwd, onEvent) => {
+        onEvent({
+          stream: "stderr",
+          data: `Traceback (most recent call last):
+  File "main.py", line 10, in <module>
+    calc()
+  File "utils.py", line 5, in calc
+    1 / 0
+ZeroDivisionError: division by zero
+`
+        })
+        return 1
+      }
+      const stores = createAppStores(bridge)
+      await stores.editor.getState().openFile("main.py")
+
+      await stores.run.getState().runFile()
+      await settle()
+
+      const run = stores.run.getState().run
+      expect(run?.running).toBe(false)
+      expect(run?.exitCode).toBe(1)
+      expect(run?.traceback?.frames).toHaveLength(2)
+      expect(run?.traceback?.frames[0].file).toBe("main.py")
+      expect(run?.traceback?.frames[1].file).toBe("utils.py")
+      expect(run?.errorSummary).toBeDefined()
+      expect(run?.errorSummary?.type).toBe("ZeroDivisionError")
+      expect(run?.errorSummary?.title).toBe("Division by Zero")
+    })
+
+    it("identifies ModuleNotFoundError and suggests pip install", async () => {
+      const bridge = new MockBridge()
+      bridge.run = async (_argv, _cwd, onEvent) => {
+        onEvent({
+          stream: "stderr",
+          data: `Traceback (most recent call last):
+  File "main.py", line 2, in <module>
+    import httpx
+ModuleNotFoundError: No module named 'httpx'
+`
+        })
+        return 1
+      }
+      const stores = createAppStores(bridge)
+      await stores.editor.getState().openFile("main.py")
+
+      await stores.run.getState().runFile()
+      await settle()
+
+      const run = stores.run.getState().run
+      expect(run?.errorSummary?.type).toBe("ModuleNotFoundError")
+      expect(run?.errorSummary?.title).toContain("httpx")
+      expect(run?.errorSummary?.action?.command).toBe("pip install httpx")
+    })
+
+    it("supports sending stdin input while running", async () => {
+      const stores = createAppStores(new MockBridge())
+      stores.run.setState({
+        run: {
+          title: "script.py",
+          running: true,
+          exitCode: null,
+          segments: [{ stream: "stdout", text: "Enter name: " }],
+          hint: null,
+          startedAt: Date.now(),
+          durationMs: null
+        }
+      })
+
+      stores.run.getState().sendInput("Alice")
+
+      const run = stores.run.getState().run
+      const allText = run?.segments.map((s) => s.text).join("")
+      expect(allText).toContain("Alice\n")
+    })
+
+    it("ignores sendInput when run is not running", () => {
+      const stores = createAppStores(new MockBridge())
+      stores.run.setState({
+        run: {
+          title: "script.py",
+          running: false,
+          exitCode: 0,
+          segments: [],
+          hint: null
+        }
+      })
+
+      stores.run.getState().sendInput("ignored")
+      expect(stores.run.getState().run?.segments).toHaveLength(0)
+    })
+
+    it("jumps to file and line via editor store", async () => {
+      const stores = createAppStores(new MockBridge())
+      await stores.run.getState().jumpToFile("main.py", 8)
+
+      expect(stores.editor.getState().activePath).toBe("main.py")
+    })
+  })
 })
