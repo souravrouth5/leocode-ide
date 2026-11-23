@@ -1,0 +1,35 @@
+# LeoCode Soak Test Report
+device_model:  Virtual LeoCode Soak Target
+device_api:    35
+device_serial: DRY_RUN_EMULATED
+started_at:    2026-11-23T14:26:26Z
+max_cycles:    2
+duration_sec:  0
+batch_size:    5
+dry_run:       1
+---
+Initial Memory Baseline:
+Native Heap: 24500 kB
+Dalvik Heap: 38200 kB
+TOTAL PSS:   98400 kB
+----------------------------------------------------------------------
+cycle: 1, elapsed_s: 0, py_ok: 1
+Native Heap: 24500 kB
+Dalvik Heap: 38200 kB
+TOTAL PSS:   98400 kB
+cycle: 2, elapsed_s: 2, py_ok: 1
+Native Heap: 24500 kB
+Dalvik Heap: 38200 kB
+TOTAL PSS:   98400 kB
+---
+completed_at:    2026-11-23T14:26:29Z
+elapsed_sec:     3
+cycles_run:      2
+python_calls:    10
+python_failures: 0
+crashes:         0
+final_mem:
+Native Heap: 24500 kB
+Dalvik Heap: 38200 kB
+TOTAL PSS:   98400 kB
+SOAK RESULT: PASS

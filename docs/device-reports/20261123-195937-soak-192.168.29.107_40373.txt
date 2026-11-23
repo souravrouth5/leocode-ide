@@ -1,0 +1,49 @@
+# LeoCode Soak Test Report
+device_model:  POCO F1
+device_api:    35
+device_serial: 192.168.29.107:40373
+started_at:    2026-11-23T14:29:37Z
+max_cycles:    5
+duration_sec:  0
+batch_size:    5
+dry_run:       0
+---
+Initial Memory Baseline:
+  Native Heap    13080    13052        0       46    14800    23676    15300     4702
+  Dalvik Heap     7031     6940        0      177     9476    28613     4037    24576
+        TOTAL   113061    71404    21956      398   253348    52289    19337    29278
+         Native Heap:    13052                          14800
+           TOTAL PSS:   113061            TOTAL RSS:   253348       TOTAL SWAP PSS:      398
+----------------------------------------------------------------------
+cycle: 1, elapsed_s: 1, py_ok: 1
+  Native Heap    14231    14212        0       42    15844    24188    17551     2915
+  Dalvik Heap     5225     3088        0       31     9204    28648     4072    24576
+        TOTAL   116709    71936    22156      204   261016    52836    21623    27491
+         Native Heap:    14212                          15844
+           TOTAL PSS:   116709            TOTAL RSS:   261016       TOTAL SWAP PSS:      204
+cycle: 2, elapsed_s: 12, py_ok: 1
+  Native Heap    14339    14320        0       41    15944    24444    17407     3171
+  Dalvik Heap     4945     2808        0       31     8924    28636     4060    24576
+        TOTAL   117967    73124    22392      203   262220    53080    21467    27747
+         Native Heap:    14320                          15944
+           TOTAL PSS:   117967            TOTAL RSS:   262220       TOTAL SWAP PSS:      203
+cycle: 3, elapsed_s: 24, py_ok: 1
+  Native Heap    14011    13992        0       41    15616    24444    17310     3275
+  Dalvik Heap     5069     2932        0       31     9048    28639     4063    24576
+        TOTAL   117822    72760    22428      203   262344    53083    21373    27851
+         Native Heap:    13992                          15616
+           TOTAL PSS:   117822            TOTAL RSS:   262344       TOTAL SWAP PSS:      203
+cycle: 4, elapsed_s: 63, py_ok: 1
+
+cycle: 5, elapsed_s: 122, py_ok: 1
+
+---
+completed_at:    2026-11-23T14:31:58Z
+elapsed_sec:     126
+cycles_run:      5
+python_calls:    25
+python_failures: 0
+crashes:         0
+final_mem:
+
+SOAK RESULT: PASS

@@ -1,0 +1,61 @@
+# LeoCode Soak Test Report
+device_model:  Redmi Note 7S
+device_api:    28
+device_serial: 11f98015
+started_at:    2026-11-23T14:28:23Z
+max_cycles:    5
+duration_sec:  0
+batch_size:    5
+dry_run:       0
+---
+Initial Memory Baseline:
+  Native Heap    15753    15716        4      128    36864    30090     6773
+  Dalvik Heap     3407     3392        0       29     5751     2876     2875
+        TOTAL    88496    42824    38716      272    42615    32966     9648
+         Native Heap:    15716
+               TOTAL:    88496       TOTAL SWAP PSS:      272
+----------------------------------------------------------------------
+cycle: 1, elapsed_s: 1, py_ok: 1
+  Native Heap    19156    19104        8      127    40960    32232     8727
+  Dalvik Heap     3795     2856      856       12     5800     2900     2900
+        TOTAL   100717    50172    43176      248    46760    35132    11627
+         Native Heap:    19104
+               TOTAL:   100717       TOTAL SWAP PSS:      248
+cycle: 2, elapsed_s: 13, py_ok: 1
+  Native Heap    19004    18952        8      127    40960    31769     9190
+  Dalvik Heap     3447     2508      856       12     5826     2913     2913
+        TOTAL    98574    48036    43160      248    46786    34682    12103
+         Native Heap:    18952
+               TOTAL:    98574       TOTAL SWAP PSS:      248
+cycle: 3, elapsed_s: 23, py_ok: 1
+  Native Heap    18984    18932        8      127    40960    31310     9649
+  Dalvik Heap     3443     2504      856       12     5793     2897     2896
+        TOTAL    98163    48148    42644      248    46753    34207    12545
+         Native Heap:    18932
+               TOTAL:    98163       TOTAL SWAP PSS:      248
+cycle: 4, elapsed_s: 33, py_ok: 1
+  Native Heap    18928    18876        8      127    40960    31828     9131
+  Dalvik Heap     3439     2500      856       12     5794     2897     2897
+        TOTAL    99008    48952    42700      248    46754    34725    12028
+         Native Heap:    18876
+               TOTAL:    99008       TOTAL SWAP PSS:      248
+cycle: 5, elapsed_s: 42, py_ok: 1
+  Native Heap    18904    18852        8      127    40960    31823     9136
+  Dalvik Heap     3447     2508      856       12     5795     2898     2897
+        TOTAL    99308    49340    42616      248    46755    34721    12033
+         Native Heap:    18852
+               TOTAL:    99308       TOTAL SWAP PSS:      248
+---
+completed_at:    2026-11-23T14:29:22Z
+elapsed_sec:     51
+cycles_run:      5
+python_calls:    25
+python_failures: 0
+crashes:         0
+final_mem:
+  Native Heap    18904    18852        8      127    40960    31823     9136
+  Dalvik Heap     3447     2508      856       12     5795     2898     2897
+        TOTAL    99308    49340    42616      248    46755    34721    12033
+         Native Heap:    18852
+               TOTAL:    99308       TOTAL SWAP PSS:      248
+SOAK RESULT: PASS
