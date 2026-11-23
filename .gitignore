@@ -9,6 +9,7 @@ android/local.properties
 android/captures/
 web/node_modules/
 web/dist/
+/dist/
 web/.vite/
 
 # runtime artifacts (large, produced by CI, never committed)

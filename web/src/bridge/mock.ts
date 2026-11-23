@@ -61,6 +61,10 @@ import type {
   ThemeMode,
   ThemeState,
   TreeImportResult,
+  UpdateCheck,
+  UpdateInstallHandle,
+  UpdateInstallRequest,
+  UpdateProgress,
   WorkspaceInfo,
   WorkspaceList,
   WorkspaceRef,
@@ -1683,6 +1687,28 @@ export class MockBridge implements Bridge {
       throw new BridgeError("E_NOT_FOUND", `${id} is not installed`)
     }
     this.runtimeInstalled.set(id, false)
+  }
+
+  /** The mock is always current; it never downloads an APK. */
+  async checkForUpdate(): Promise<UpdateCheck> {
+    return {
+      available: false,
+      currentVersion: "0.0.1-mock",
+      versionName: "0.0.1-mock",
+      versionCode: 1,
+      notes: "Mock mode does not update itself.",
+      url: null,
+      sha256: null,
+      size: null
+    }
+  }
+
+  async installUpdate(
+    _request: UpdateInstallRequest,
+    _onProgress: (progress: UpdateProgress) => void,
+    _onStart?: (handle: UpdateInstallHandle) => void
+  ): Promise<void> {
+    throw new BridgeError("E_UNSUPPORTED", "the browser mock cannot install an APK")
   }
 
   // ------------------------------------------------------ trust (Task 26)

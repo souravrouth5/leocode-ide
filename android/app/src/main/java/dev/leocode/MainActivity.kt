@@ -654,6 +654,7 @@ class MainActivity : ComponentActivity(), SafPort {
                 (application as LeoApp).graphOrThrow().termHandler(),
                 (application as LeoApp).graphOrThrow().safHandler(this),
                 (application as LeoApp).graphOrThrow().runtimeHandler(),
+                (application as LeoApp).graphOrThrow().updateHandler(),
                 (application as LeoApp).graphOrThrow().trustHandler(),
                 (application as LeoApp).graphOrThrow().pythonHandler(),
                 (application as LeoApp).graphOrThrow().gitHandler(),

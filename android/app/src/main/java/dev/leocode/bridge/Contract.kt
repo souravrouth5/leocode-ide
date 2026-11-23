@@ -66,6 +66,42 @@ data class ShareRequest(val text: String)
 @Serializable
 data class ShareReply(val shared: Boolean)
 
+/** `update.check`: signed release manifest result (Task 28). */
+@Serializable
+data class UpdateCheckReply(
+    val available: Boolean,
+    val currentVersion: String,
+    val versionName: String? = null,
+    val versionCode: Int? = null,
+    val notes: String? = null,
+    val url: String? = null,
+    val sha256: String? = null,
+    val size: Long? = null
+)
+
+/** `update.install`: the verified manifest fields the user agreed to. */
+@Serializable
+data class UpdateInstallRequest(
+    val url: String,
+    val sha256: String,
+    val size: Long,
+    val versionCode: Int
+)
+
+@Serializable
+data class UpdateInstallReply(val started: Boolean)
+
+/** Streamed while `update.install` downloads and verifies. */
+@Serializable
+data class UpdateProgress(val phase: String, val bytes: Long, val total: Long)
+
+/** Terminal event for `update.install`. */
+@Serializable
+data class UpdateResult(val ok: Boolean, val code: String? = null, val message: String? = null)
+
+@Serializable
+data class UpdateCancelReply(val cancelling: Boolean)
+
 // ---------------------------------------------------------------------- fs
 
 @Serializable

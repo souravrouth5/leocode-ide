@@ -784,6 +784,44 @@ export interface SshHostPrompt {
   previousFingerprint?: string | null
 }
 
+export interface UpdateCheckReply {
+  available: boolean
+  currentVersion: string
+  versionName?: string | null
+  versionCode?: number | null
+  notes?: string | null
+  url?: string | null
+  sha256?: string | null
+  size?: number | null
+}
+
+export interface UpdateInstallRequest {
+  url: string
+  sha256: string
+  size: number
+  versionCode: number
+}
+
+export interface UpdateInstallReply {
+  started: boolean
+}
+
+export interface UpdateProgress {
+  phase: string
+  bytes: number
+  total: number
+}
+
+export interface UpdateResult {
+  ok: boolean
+  code?: string | null
+  message?: string | null
+}
+
+export interface UpdateCancelReply {
+  cancelling: boolean
+}
+
 export interface GitOk {
   ok?: boolean
 }

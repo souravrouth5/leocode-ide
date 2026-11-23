@@ -21,6 +21,7 @@ import dev.leocode.bridge.SecretHandler
 import dev.leocode.bridge.SshHandler
 import dev.leocode.bridge.TermHandler
 import dev.leocode.bridge.ThemePort
+import dev.leocode.bridge.UpdateHandler
 import dev.leocode.bridge.WorkspaceHandler
 import dev.leocode.core.CrashStore
 import dev.leocode.core.Diagnostics
@@ -33,6 +34,8 @@ import dev.leocode.core.PythonProject
 import dev.leocode.core.TerminalRegistry
 import dev.leocode.core.Trash
 import dev.leocode.core.TrustStore
+import dev.leocode.core.UpdateChecker
+import dev.leocode.core.UpdateInstaller
 import dev.leocode.core.Workspace
 import dev.leocode.core.secrets.AndroidSecretCipher
 import dev.leocode.core.secrets.FileSecretStore
@@ -209,6 +212,15 @@ class AppGraph(private val app: Application) {
     )
 
     fun runtimeHandler(): RuntimeHandler = runtimeHandler
+
+    /** Signed release manifest and the system installer (Task 28). */
+    fun updateHandler(): UpdateHandler =
+        UpdateHandler(
+            UpdateChecker(app),
+            UpdateInstaller(app),
+            json,
+            log = { line -> android.util.Log.w("LeoCodeUpdate", line) }
+        )
 
     fun trustHandler(): TrustHandler = trustHandler
 

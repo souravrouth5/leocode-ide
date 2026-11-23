@@ -1,11 +1,12 @@
-# Handoff — LeoCode state after Task 27 (updated 2026-11-22)
+# Handoff — LeoCode state after Task 28 (updated 2026-11-23)
 
 Written for whoever picks this up next. It records what is done, what is open, how to reproduce the
 verification, and the traps that cost time. The task tracker (`PROGRESS.md`) and the device reports
 under `docs/device-reports/` remain the source of truth; this file is the orientation layer.
 
-**Current phase:** Phase G (Python, D-017). Tasks 24, 25, 26 and 27 are done, including the device
-rows on D1 and D2. The next task is 28 (release), which needs an owner decision before it starts.
+**Current phase:** Phase G (Python, D-017). Tasks 24–28 are done, including the device rows on D1
+and D2. The next task is 29 (hardening, soak, accessibility, performance budgets, full matrix,
+0.1 go/no-go), which needs an owner decision before it starts.
 
 ## Where the work is
 
@@ -15,10 +16,11 @@ rows on D1 and D2. The next task is 28 (release), which needs an owner decision 
 | Task 24 | CI and packaging complete; run [44915640602](https://github.com/souravrouth5/leocode-ide/actions/runs/44915640602) green. The signed release is blocked on the protected `python-runtime` environment and `RUNTIME_SIGNING_KEY` (the current PAT gets 403 on environment APIs). |
 | Task 25 | **Done and device-verified on D1 and D2.** Raw evidence: [`device-reports/20261121-task25-D1-D2.txt`](device-reports/20261121-task25-D1-D2.txt). |
 | Task 26 | **Done.** Commit `0a3fc84` plus the `ProcHandler` cwd fix. Both D1 and D2 passed T15 and the full app-UI flow on 2026-11-22. |
-| Task 27 | **Done and device-verified on D1 and D2 (2026-11-22).** Three first-run screens and Settings › About › Diagnostics; Android 425 tests + lint and web 300 tests + typecheck/lint/build are green. D1 (Android 9) and D2 (Android 15) both passed onboarding, the non-skippable trust gate, relaunch, diagnostics, Copy, Share and redaction. |
-| Working tree | Uncommitted Task 27 changes (on top of `cad0bc0`) |
-| Gates | Android 425 unit tests / 0 failures / 1 skipped, `lintDebug`, `assembleDebug`; web 300 tests, typecheck, lint, build |
-| Devices | D1 `192.168.29.26:5555` (Redmi Note 7S, Android 9 / API 28); D2 `10.8.0.94:37485` (POCO F1, Android 15 / API 35; the Wi-Fi serial changes with DHCP) |
+| Task 27 | **Done and device-verified on D1 and D2 (2026-11-22).** Three first-run screens and Settings › About › Diagnostics; D1 (Android 9) and D2 (Android 15) both passed onboarding, the non-skippable trust gate, relaunch, diagnostics, Copy, Share and redaction. |
+| Task 28 | **Done and device-verified on D1 and D2 (2026-11-22/23).** Signed R8 releases from a tag, CycloneDX SBOM, signed nightly prerelease on its own channel, and in-app self-update (signed manifest + signer check + system installer). D2 updated rc1→rc2 and rc2→rc3 in-app; D1 updated rc2→rc3 in-app after the rc1 run exposed an API 28 signer-collection defect that rc2 fixed. Raw evidence: [`device-reports/20261123-task28-D1-D2.txt`](device-reports/20261123-task28-D1-D2.txt). |
+| Working tree | Clean for Task 28 (committed on top of `cad0bc0`) |
+| Gates | Android 435 unit tests / 0 failures / 1 skipped, `lintDebug`; web 315 tests, typecheck, lint, build; `scripts/tests/run-release-script-tests.sh` 17/17 |
+| Devices | D1 `192.168.29.26:5555` (Redmi Note 7S, Android 9 / API 28); D2 `e76846f` over USB (POCO F1, Android 15 / API 35; the Wi-Fi serial changes with DHCP) |
 
 ## What Task 26 added
 
@@ -39,6 +41,17 @@ rows on D1 and D2. The next task is 28 (release), which needs an owner decision 
 | Copy / Share | `features/diagnostics/DiagnosticsSheet.tsx` appends the web recent-error ring and redacts again. Copy uses the clipboard; Share calls `app.share`, which redacts once more and opens the system chooser, with `navigator.share`/Copy as fallbacks. |
 | Errors | `errorsStore.recent` keeps the newest 20 reports with timestamps for the diagnostics screen. |
 | Contract | `DiagnosticsReply`, `ShareRequest`, `ShareReply`; generator seeds updated and `types.gen.ts` regenerated. |
+
+## What Task 28 added
+
+| Layer | Change |
+|---|---|
+| Keys | Release keystore (`~/.config/leocode/release.jks`, RSA 4096, alias `leocode`, cert SHA-256 `2b294e12…bdaf`) and a release-manifest Ed25519 key (`~/.config/leocode/release-signing.pem`). Only the public half is committed: `docs/keys/release-manifest-public.pem` (SPKI fingerprint `87e1a3b8…4142`). Setup and backup steps: [`RELEASING.md`](RELEASING.md). |
+| Build | `android/app/build.gradle.kts`: `versionName`/`versionCode` from `LEOCODE_VERSION_*` (validated), R8 + `proguard-rules.pro` keeps (JGit, SSHD, BouncyCastle, kotlinx-serialization, `net.i2p.crypto.eddsa`), `BuildConfig.UPDATE_MANIFEST_URL`, and `exportReleaseDependencies` for the SBOM. `LEOCODE_REQUIRE_RELEASE_SIGNING=1` fails closed; debug signing needs `LEOCODE_ALLOW_DEBUG_SIGNING=1`. |
+| Update | `core/ReleaseManifest.kt` + `core/UpdateChecker.kt` fetch `release.json` and `release.json.sig`, verify the Ed25519 signature against `core/ReleaseKeys.kt` and bound-check the fields. `core/UpdateInstaller.kt` downloads (resume, disk space, cancel), verifies size/SHA-256/package/`versionCode`, compares the archive signer set with the installed app, and opens the system installer through a `FileProvider` (`${applicationId}.updates`). `bridge/UpdateHandler.kt` exposes `update.check`/`update.install`/`update.cancel` and maps failures to the existing error codes. |
+| Web | `features/update/updateStore.ts`, `UpdatesCard.tsx`, `updateCopy.ts`; the Settings › About **Updates** card shows the installed version, the offered build with notes/size, "Last checked", and check/download/cancel states. |
+| Scripts | `scripts/version-from-tag.sh` (canonical `vX.Y.Z[-rcN]` → code, rejects leading zeros and out-of-range components), `build-release.sh` (local signed build), `make-release-manifest.py`, `sign-release.sh`, `make-sbom.py` (CycloneDX 1.5 from the Gradle dependency report + `package-lock.json`), and `scripts/tests/run-release-script-tests.sh` (17 cases, run in CI's web job). |
+| CI | `.github/workflows/ci.yml`: tag `v*` and a daily 03:00 UTC nightly (+ manual dispatch limited to `main`/tags) build inside the protected `release` environment with step-scoped secrets, verify the APK certificate and version against the tag, sign the manifest, write `SHA256SUMS` + SBOM, and publish. `-rc` tags are prereleases with a per-tag manifest URL; the nightly uses fixed asset names, a code band above every tag code, and a moving `nightly` tag. |
 
 ## Device verification: what is proven, and what is not
 
@@ -85,6 +98,59 @@ result from the other.
 `workspaces/default`. `ProcHandler` now takes the active-root supplier, like the trust/python
 handlers, and `ProcHandlerTest` covers it.
 
+**Task 28 device rows — D1 and D2 PASS (2026-11-22/23).** Both phones installed the R8 release build
+over the previous build and cold-started (rc1: D1 6 936 ms, D2 516 ms; rc3: D1 3 175 ms, D2 686 ms).
+D2 updated rc1→rc2 and rc2→rc3 entirely in-app: the About card showed the installed build, "Check for
+updates" verified the signed manifest and offered the next rc, "Download and install" opened the
+system installer, and after Play Protect the app reported `versionCode` 1003. D1 did the same for
+rc2→rc3, but its Android 9 build showed an "Open with" chooser (several apps handle APKs) and Play
+Protect blocked the first attempt until "More details" → "Install anyway"; both are documented in the
+evidence file. Evidence:
+[`device-reports/20261123-task28-D1-D2.txt`](device-reports/20261123-task28-D1-D2.txt) with the
+screenshots beside it.
+
+**Defect this run found:** on API 28 `PackageManager.getPackageArchiveInfo()` collects archive
+certificates only when `GET_SIGNATURES` is in the flag mask. rc1 asked for `GET_SIGNING_CERTIFICATES`
+alone, so the archive signer set came back empty and the updater rejected its own download with
+`E_INTEGRITY`. rc2 requests both flags and falls back to `PackageInfo.signatures`;
+`UpdateInstallerFlagsTest` pins the mask. This is exactly the class of defect a debug build cannot
+show, because the debug build never exercised the updater against a release-signed archive.
+
+**Known difference, not fixed:** D1's WebView (Chrome 80) logs
+`Uncaught TypeError: Cannot read properties of null (reading 'style')` twice at startup. It predates
+Task 28 (it is in the rc1 smoke log too), does not block the UI, and does not appear on D2. A future
+task can chase it with the WebView console attached.
+
+## Reproducing the Task 28 release + update demo
+
+```bash
+# 1. Build a signed release from a tag-shaped version (owner keys under ~/.config/leocode/).
+scripts/build-release.sh 0.1.0-rc3 1003 file:///sdcard/Download/leocode-update/release.json
+#    -> dist/release/leocode-1003.apk
+
+# 2. Sign the manifest and push the three files to the phone's local mirror.
+python3 scripts/make-release-manifest.py --apk dist/release/leocode-1003.apk \
+  --version-name 0.1.0-rc3 --version-code 1003 \
+  --url file:///sdcard/Download/leocode-update/leocode-1003.apk \
+  --notes "demo" --out dist/release/release.json
+scripts/sign-release.sh dist/release/release.json
+adb -s <serial> push dist/release/leocode-1003.apk dist/release/release.json \
+  dist/release/release.json.sig /sdcard/Download/leocode-update/
+
+# 3. Allow installs and storage, then drive Settings › About › Updates.
+adb -s <serial> shell appops set dev.leocode REQUEST_INSTALL_PACKAGES allow
+adb -s <serial> shell pm grant dev.leocode android.permission.READ_EXTERNAL_STORAGE
+
+# 4. Prove the build: install and cold-start.
+scripts/smoke.sh <serial> dist/release/leocode-1003.apk
+```
+
+The release URL is compiled in (`BuildConfig.UPDATE_MANIFEST_URL`, default
+`https://github.com/souravrouth5/leocode-ide/releases/latest/download/release.json`) and can be
+overridden with `LEOCODE_UPDATE_URL` or `-Pleocode.updateUrl` for a demo build. A tag release uses
+`.../releases/download/<tag>/release.json` for `-rc` tags, because `releases/latest` never points at
+a prerelease.
+
 ## Reproducing the T15 run
 
 ```bash
@@ -126,10 +192,15 @@ adb -s <serial> shell run-as dev.leocode dd \
 
 ## What to do next
 
-1. **Task 24 release (owner action).** Create the protected `python-runtime` environment, upload
+1. **Task 28 release secrets (owner action).** Add `RELEASE_STORE_BASE64`,
+   `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` and `RELEASE_SIGNING_KEY` to
+   the protected `release` environment, restrict that environment to `main` and `v*` tags, and back
+   up `~/.config/leocode/release.jks`, `release.properties` and `release-signing.pem` offline. Until
+   then a tag release fails closed by design and the nightly logs a notice.
+2. **Task 24 release (owner action).** Create the protected `python-runtime` environment, upload
    `RUNTIME_SIGNING_KEY`, and dispatch CI so the release job publishes the tarball, manifest,
    signature, wheel and `SHA256SUMS`.
-2. **Ask before starting Task 28.** Task 27 was explicitly scoped and approved; do not roll into the
+3. **Ask before starting Task 29.** Task 28 was explicitly scoped and approved; do not roll into the
    next Phase G task without confirmation.
 
 ## Traps that cost time (read before debugging a "network" failure)

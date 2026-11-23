@@ -143,6 +143,12 @@ object BridgeTypesGenerator {
         "SshKnownHostListReply" to SshKnownHostListReply.serializer().descriptor,
         "SshKnownHostDeleteRequest" to SshKnownHostDeleteRequest.serializer().descriptor,
         "SshHostPrompt" to SshHostPrompt.serializer().descriptor,
+        "UpdateCheckReply" to UpdateCheckReply.serializer().descriptor,
+        "UpdateInstallRequest" to UpdateInstallRequest.serializer().descriptor,
+        "UpdateInstallReply" to UpdateInstallReply.serializer().descriptor,
+        "UpdateProgress" to UpdateProgress.serializer().descriptor,
+        "UpdateResult" to UpdateResult.serializer().descriptor,
+        "UpdateCancelReply" to UpdateCancelReply.serializer().descriptor,
         "GitOk" to GitOk.serializer().descriptor
     )
 

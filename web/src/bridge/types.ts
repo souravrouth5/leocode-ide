@@ -50,6 +50,9 @@ import type {
   SshKnownHostInfo as GeneratedSshKnownHostInfo,
   StorageInfo as GeneratedStorageInfo,
   TermInfo as GeneratedTermInfo,
+  UpdateCheckReply as GeneratedUpdateCheckReply,
+  UpdateProgress as GeneratedUpdateProgress,
+  UpdateResult as GeneratedUpdateResult,
   WorkspaceInfo as GeneratedWorkspaceInfo
 } from "./types.gen"
 import type { RequestOptions } from "./timeouts"
@@ -239,6 +242,23 @@ export type RuntimeInstallResult = GeneratedRuntimeResult
 
 export interface RuntimeInstallHandle {
   cancel: () => void
+}
+
+// ------------------------------------------------------- updates (Task 28)
+
+export type UpdateCheck = GeneratedUpdateCheckReply
+export type UpdateProgress = GeneratedUpdateProgress
+export type UpdateResult = GeneratedUpdateResult
+
+export interface UpdateInstallHandle {
+  cancel: () => void
+}
+
+export interface UpdateInstallRequest {
+  url: string
+  sha256: string
+  size: number
+  versionCode: number
 }
 
 // ------------------------------------------------------- Python (Task 26)
@@ -455,6 +475,25 @@ export interface Bridge {
     onLine: (line: string) => void,
     options?: RequestOptions
   ): Promise<PythonRequirementsResult>
+
+  // ------------------------------------------------------ updates (Task 28)
+  /**
+   * Fetch and verify the signed release manifest. Resolves with
+   * `available: false` when this build is current; rejects with
+   * `E_BAD_MANIFEST` when the signature does not match.
+   */
+  checkForUpdate?(options?: RequestOptions): Promise<UpdateCheck>
+  /**
+   * Download and verify the APK, then open Android's package installer.
+   * Progress streams through [onProgress]; the promise resolves once the
+   * installer has been opened (the user still confirms there).
+   */
+  installUpdate?(
+    request: UpdateInstallRequest,
+    onProgress: (progress: UpdateProgress) => void,
+    onStart?: (handle: UpdateInstallHandle) => void,
+    options?: RequestOptions
+  ): Promise<void>
 
   /** Device Storage & SAF capabilities */
   getStorageInfo?(options?: RequestOptions): Promise<StorageInfo>

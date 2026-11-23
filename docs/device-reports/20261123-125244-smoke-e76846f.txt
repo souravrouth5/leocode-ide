@@ -1,0 +1,27 @@
+# LeoCode smoke test
+generated: 2026-11-23T07:26:51Z
+serial:    e76846f
+model:     POCO F1
+api:       35
+apk:       dist/release/leocode-1003.apk
+
+## window focus
+mCurrentFocus:   mCurrentFocus=Window{21e5b20 u0 dev.leocode/dev.leocode.MainActivity}
+old-target-SDK warning dialog: manual observation
+  heuristic from focus: app has focus; no system dialog visible in focus
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: dev.leocode/.MainActivity
+TotalTime: 686
+WaitTime: 692
+Complete
+
+## verdict
+pid:        6983
+
+## logcat
+--------- beginning of main
+11-23 12:56:47.462 D/LeoCodeWeb( 6983): The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)

@@ -1,4 +1,5 @@
 import { useState } from "react"
+import type { ReactNode } from "react"
 import type { StorageInfo } from "../bridge"
 import { FONT_FAMILIES, type UserSettings } from "../settings/userSettings"
 import {
@@ -40,6 +41,8 @@ interface Props {
   /** Task 27: redacted support report and the first-run screens. */
   onOpenDiagnostics?: () => void
   onShowOnboarding?: () => void
+  /** Task 28: signed update check card, wired to the update store. */
+  updatesCard?: ReactNode
 }
 
 export function SettingsDialog({
@@ -60,7 +63,8 @@ export function SettingsDialog({
   onOpenSshKeys,
   onOpenRemotes,
   onOpenDiagnostics,
-  onShowOnboarding
+  onShowOnboarding,
+  updatesCard
 }: Props) {
   const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about">("editor")
 
@@ -352,6 +356,8 @@ export function SettingsDialog({
 
         {activeTab === "about" && (
           <div className="settings-panel">
+            {updatesCard}
+
             <div className="settings-card">
               <label className="settings-card-label">Shared storage</label>
               <p className="guide-intro">

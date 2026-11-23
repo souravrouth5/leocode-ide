@@ -232,3 +232,59 @@
   width: 100%;
 }
 
+
+/* ------------------------------------------------------------ updates (Task 28) */
+
+.update-status {
+  margin: 0;
+}
+
+.update-meta {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.update-notes {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-progress {
+  position: relative;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  opacity: 0.35;
+  transition: width 0.2s ease;
+}
+
+.update-progress-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+}

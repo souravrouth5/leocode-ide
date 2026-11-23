@@ -6,6 +6,41 @@ plugins {
 
 val ndkVersionProp = (project.findProperty("leocode.ndk") as String?) ?: "28.2.13676358"
 
+/**
+ * Task 28: release builds take their version and signing key from the tag job.
+ * A local build without these falls back to 0.1.0 / 2 and the debug key, which
+ * is fine for a smoke test but never for a published release.
+ */
+fun envOrProp(env: String, prop: String): String? =
+    (System.getenv(env) ?: (project.findProperty(prop) as String?))?.takeIf { it.isNotBlank() }
+
+val versionNameOverride = envOrProp("LEOCODE_VERSION_NAME", "leocode.versionName")
+val versionCodeRaw = envOrProp("LEOCODE_VERSION_CODE", "leocode.versionCode")
+val versionCodeOverride = versionCodeRaw?.let {
+    it.toIntOrNull() ?: throw GradleException(
+        "LEOCODE_VERSION_CODE must be a positive integer, got '$it'"
+    )
+}
+if (versionCodeOverride != null && versionCodeOverride <= 0) {
+    throw GradleException("LEOCODE_VERSION_CODE must be positive, got $versionCodeOverride")
+}
+val updateManifestUrl = envOrProp("LEOCODE_UPDATE_URL", "leocode.updateUrl")
+    ?: "https://github.com/souravrouth5/leocode-ide/releases/latest/download/release.json"
+val releaseStoreFile = envOrProp("LEOCODE_RELEASE_STORE_FILE", "leocode.release.storeFile")
+val releaseStorePassword =
+    envOrProp("LEOCODE_RELEASE_STORE_PASSWORD", "leocode.release.storePassword")
+val releaseKeyAlias = envOrProp("LEOCODE_RELEASE_KEY_ALIAS", "leocode.release.keyAlias")
+val releaseKeyPassword =
+    envOrProp("LEOCODE_RELEASE_KEY_PASSWORD", "leocode.release.keyPassword")
+val requireReleaseSigning =
+    envOrProp("LEOCODE_REQUIRE_RELEASE_SIGNING", "leocode.requireReleaseSigning") == "1"
+
+if (requireReleaseSigning && releaseStoreFile == null) {
+    throw GradleException(
+        "LEOCODE_REQUIRE_RELEASE_SIGNING=1 but LEOCODE_RELEASE_STORE_FILE is not set"
+    )
+}
+
 // Task 3 T2c control build only, to document the Android 10 W^X block:
 //   ./gradlew assembleDebug -Pleocode.controlTargetSdk=29
 // D-002: shipped builds stay at targetSdk 28. Never raise this property for a release.
@@ -22,8 +57,10 @@ android {
         // D-002: targetSdk 28 is required to execve() downloaded binaries.
         minSdk = 28
         targetSdk = controlTargetSdk ?: 28
-        versionCode = 2
-        versionName = "0.1.0"
+        versionCode = versionCodeOverride ?: 2
+        versionName = versionNameOverride ?: "0.1.0"
+        // Task 28: the signed release manifest URL; override for a mirror/demo.
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
 
         externalNativeBuild {
             cmake {
@@ -43,10 +80,31 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                // v1+v2; the update check compares the certificate set, not the scheme.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug") // phase 0 only
+            // Task 28: R8 with keeps for the reflection-heavy dependencies.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig =
+                signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -122,6 +180,27 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
 
     testImplementation("junit:junit:4.13.2")
+}
+
+/**
+ * Task 28: the resolved release dependency set, for the CycloneDX SBOM.
+ * `scripts/make-sbom.py` turns this plus `web/package-lock.json` into JSON.
+ */
+tasks.register("exportReleaseDependencies") {
+    group = "release"
+    description = "Write the resolved releaseRuntimeClasspath coordinates for the SBOM"
+    doLast {
+        val output = layout.buildDirectory.file("reports/release-dependencies.txt").get().asFile
+        output.parentFile.mkdirs()
+        val coordinates = configurations.getByName("releaseRuntimeClasspath")
+            .resolvedConfiguration
+            .resolvedArtifacts
+            .map { it.moduleVersion.id.toString() }
+            .distinct()
+            .sorted()
+        output.writeText(coordinates.joinToString("\n") + "\n")
+        println("wrote ${coordinates.size} coordinates to ${output.absolutePath}")
+    }
 }
 
 /**

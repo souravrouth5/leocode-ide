@@ -375,15 +375,22 @@ is recorded rather than inferred.
 
 ## Release (Tasks 28–29)
 
-| Test | D1 | D2 |
-|---|---|---|
-| R8 release build passes `smoke.sh` | | |
-| Signed rc installs over previous build | | |
-| In-app update check finds next rc | | |
-| 4 h soak (Wi-Fi ADB) | | |
-| Accessibility: 48 dp, 200 % font | | |
-| Keystroke-to-glyph < 50 ms | | |
-| Editor RSS < 120 MB | | |
+| Test | D1 (A9) | D2 (A15) | Notes |
+|---|---|---|---|
+| Signed rc installs over the previous build | **PASS** (2026-11-22) | **PASS** (2026-11-22) | rc1 `adb install -r`; release cert `2b294e12…bdaf`, `versionCode` 1001 |
+| R8 release build passes `smoke.sh` | **PASS** (2026-11-23) | **PASS** (2026-11-23) | rc3: 3 175 ms / 686 ms cold start |
+| In-app update check finds the next rc | **PASS** (2026-11-23) | **PASS** (2026-11-22, 2026-11-23) | signed `release.json` + `.sig` verified; offered `0.1.0-rc3` with size and notes |
+| System installer opens from the update card | **PASS** (2026-11-23) | **PASS** (2026-11-23) | D1 shows Android 9's "Open with" chooser (several APK handlers) → Package installer; D2 opens the installer directly |
+| Update installs and the app runs the new build | **PASS** (2026-11-23) | **PASS** (2026-11-23) | `versionCode` 1002 → 1003 on both; D2 rc1→rc2 too |
+| Update rejected when the archive signer differs | INFO | INFO | unit test (`UpdateInstallerFlagsTest`, installer tests); the API 28 empty-signer path was seen live on D1 in rc1 and fixed in rc2 |
+| 4 h soak (Wi-Fi ADB) | | | Task 29 |
+| Accessibility: 48 dp, 200 % font | | | Task 29 |
+| Keystroke-to-glyph < 50 ms | | | Task 29 |
+| Editor RSS < 120 MB | | | Task 29 |
+
+Evidence: [`device-reports/20261123-task28-D1-D2.txt`](device-reports/20261123-task28-D1-D2.txt)
+with screenshots from both phones. D1's Play Protect blocked the first sideload
+until "More details" → "Install anyway"; D2 showed the softer "Scan app" dialog.
 
 ## Legend
 

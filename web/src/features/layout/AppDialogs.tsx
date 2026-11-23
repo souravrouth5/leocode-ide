@@ -18,6 +18,7 @@ import { RemoteSheet } from "../git/RemoteSheet"
 import { SshKeysSheet } from "../git/SshKeysSheet"
 import { resetOnboarding } from "../onboarding/onboarding"
 import { submitPrompt } from "../shell/promptActions"
+import { UpdatesCard } from "../update/UpdatesCard"
 
 /** All sheets/dialogs, wired to their stores. */
 export function AppDialogs({ version }: { version: string }) {
@@ -178,6 +179,7 @@ export function AppDialogs({ version }: { version: string }) {
             resetOnboarding()
             shell.getState().openOnboarding()
           }}
+          updatesCard={<UpdatesCard version={version} />}
         />
       </PaneBoundary>
 

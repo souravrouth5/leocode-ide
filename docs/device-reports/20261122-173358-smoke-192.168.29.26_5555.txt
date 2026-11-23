@@ -1,0 +1,39 @@
+# LeoCode smoke test
+generated: 2026-11-22T12:07:20Z
+serial:    192.168.29.26:5555
+model:     Redmi Note 7S
+api:       28
+apk:       dist/release/leocode-1001.apk
+
+## window focus
+mCurrentFocus:   mCurrentFocus=Window{951118b u0 dev.leocode/dev.leocode.MainActivity}
+old-target-SDK warning dialog: manual observation
+  heuristic from focus: app has focus; no system dialog visible in focus
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+Activity: dev.leocode/.MainActivity
+ThisTime: 6936
+TotalTime: 6936
+WaitTime: 7017
+Complete
+
+## verdict
+pid:        22464
+
+## logcat
+--------- beginning of main
+--------- beginning of system
+11-22 17:37:00.404 E/libc    (22328): Access denied finding property "ro.vendor.display.type"
+--------- beginning of crash
+11-22 17:37:02.874 E/libc    (22326): Access denied finding property "ro.vendor.at_library"
+11-22 17:37:03.652 E/libc    (  763): Access denied finding property "persist.sys.display_debug"
+11-22 17:37:12.107 E/libc    (22464): Access denied finding property "vendor.camera.aux.packagelist"
+11-22 17:37:12.107 E/libc    (22464): Access denied finding property "vendor.camera.aux.packagelist"
+11-22 17:37:12.107 E/libc    (22464): Access denied finding property "vendor.camera.aux.packagelist"
+11-22 17:37:12.108 E/libc    (22464): Access denied finding property "vendor.camera.aux.packagelist"
+11-22 17:37:12.109 E/libc    (22464): Access denied finding property "vendor.camera.aux.packagelist"
+11-22 17:37:14.353 D/LeoCodeWeb(22464): Uncaught TypeError: Cannot read properties of null (reading 'style')  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:1)
+11-22 17:37:14.354 D/LeoCodeWeb(22464): Uncaught TypeError: Cannot read properties of null (reading 'style')  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:1)
+11-22 17:37:14.413 D/LeoCodeWeb(22464): The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)

@@ -79,6 +79,7 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 | Search | `fs.search` | 60 s (the reply is the summary after the stream) |
 | Control | `fs.search.cancel`, `git.cancel` | 2 s |
 | Install | `runtime.install`, `runtime.repair` | reply on start within 10 s (`{ id, started }`); then `runtime.progress` events and one terminal `runtime.result`; no overall client timeout; cancel with `runtime.cancel` |
+| Update | `update.install` | reply on start within 10 s (`{ started }`); then `update.progress` events and one terminal `update.result`; no overall client timeout; cancel with `update.cancel` |
 
 Git notes:
 
@@ -212,6 +213,9 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `runtime.cancel` | `{ id }` → `{ cancelling }` | live | Flags the running job; polled during download, extract, configure and health |
 | `runtime.repair` | `{ id }` → `{ id, started }`, then events as `runtime.install` | live (Task 25) | Keeps the current tree until the new one passes its health check |
 | `runtime.uninstall` | `{ id }` → `{}` | live (Task 25) | Removes the tree only when its marker names `id`; clears the rollback counter |
+| `update.check` | `{}` → `{ available, currentVersion, versionName?, versionCode?, notes?, url?, sha256?, size? }` | live (Task 28) | Fetches and verifies the signed `release.json`; `available` compares version codes |
+| `update.install` | `{ url, sha256, size, versionCode }` → `{ started }`, then `update.progress` events and one `update.result` | live (Task 28) | Downloads, checks SHA-256/size/package/version/signer set, then opens the system installer |
+| `update.cancel` | `{}` → `{ cancelling }` | live (Task 28) | Flags the running download; safe when idle |
 | `language.list` | `{}` → `[{ id, name, extensions[], runtimeId, hasRepl, template }]` | planned (Task 30) | Language providers (D-017); Python is the first |
 | `trust.check` | `{ project?, action, path? }` → `{ trusted, action, fingerprint }` | live (Task 26) | Scripts, pip, venv, Git hooks; host computes the fingerprint |
 | `trust.grant` | `{ project?, action, path? }` → `{ trusted: true, action, fingerprint }` | live (Task 26) | Remembers the decision for the current files |
@@ -244,6 +248,16 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 > `RUNTIME_SIGNING_KEY` from the protected `python-runtime` environment; `scripts/sign-manifest.sh`
 > does the same locally. A manifest whose `versionCode` is below the recorded install is refused
 > (rollback protection).
+
+> **Release manifests.** `update.check` fetches `release.json` and `release.json.sig` from
+> `BuildConfig.UPDATE_MANIFEST_URL` (default: the latest GitHub release; `LEOCODE_UPDATE_URL`
+> overrides it at build time). The signature is Ed25519 over the exact bytes, verified against
+> `ReleaseKeys.RELEASE`; the manifest must also match this package and a supported `minSdk`.
+> `update.install` re-checks the SHA-256 and size, the APK's package and version code, and the
+> APK signer set against the installed app before it opens Android's package installer. A host
+> compromise therefore cannot install a different app or a differently signed build, and the user
+> still confirms in the system dialog. The installer permission is declared as
+> `REQUEST_INSTALL_PACKAGES`; LeoCode never installs silently.
 
 ## Git and SSH (Phase F, Tasks 19–23)
 
@@ -352,6 +366,8 @@ material. `E_INTERNAL` keeps its correlation id.
 | `git.progress` | `{ op, opId?, task, done, total }` — `op` is `clone`, `fetch`, `pull` or `push` | `git.clone/fetch/pull/push` |
 | `ssh.hostkey.prompt` | `{ promptId, host, port, keyType, fingerprintSha256, changed, previousFingerprint? }` | SSH connect; blocks until `ssh.hostkey.answer` or 120 s |
 | `runtime.progress` | `{ phase, bytes, total }` | `runtime.install` |
+| `update.progress` | `{ phase, bytes, total }` — `download`, `verify` or `install` | `update.install` |
+| `update.result` | `{ ok, code?, message? }` | `update.install` |
 | `saf.progress` | `{ phase: "import" \| "export" \| "restore", files, bytes }` | `saf.importTree` / `saf.exportWorkspace` / `saf.restoreArchive` |
 | `app.lowMemory` | `{}` | `onTrimMemory` |
 | `app.restored` | `{ reason: "renderer" \| "crash" }` | Task 8 — shows the "Restored after a problem" banner |

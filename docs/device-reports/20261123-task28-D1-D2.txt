@@ -1,0 +1,154 @@
+Task 28 — signed release pipeline, signed self-update, SBOM, nightly
+Devices: D1 = Redmi Note 7S (Android 9 / API 28, 192.168.29.26:5555)
+         D2 = POCO F1 (Android 15 / API 35, USB e76846f)
+Date: 2026-11-22 / 2026-11-23
+Branch: feat/phase-g
+
+Every row below was run separately on each phone. No result is inferred from
+the other device.
+
+Builds
+------
+rc1  0.1.0-rc1  code 1001  dist/release/leocode-1001.apk  18,854,615 bytes
+     sha256 ea34e6e8f579f717b870ef4fa062df98c793de53f410d6f4f1829532c24e4b5a
+rc2  0.1.0-rc2  code 1002  dist/release/leocode-1002.apk  18,854,787 bytes
+     sha256 7a6142cfab54f41443ca4eb3a6e73541e2cc928ae9d787508b40d316b30a1ea0
+rc3  0.1.0-rc3  code 1003  dist/release/leocode-1003.apk  18,882,229 bytes
+     sha256 62a9445bf46f98fb77f8b21525edfa357b6cf2002ae1d515cb2550e158ab949d
+
+All three are R8/minified release builds signed by the release keystore:
+
+  Signer #1 certificate DN: CN=LeoCode, OU=Release, O=LeoCode, L=Bengaluru,
+                           ST=Karnataka, C=IN
+  Signer #1 certificate SHA-256 digest:
+    2b294e12d96db87448e6ed32019dc529dd2ecedc0d587ecbc9889c737ab6bdaf
+
+rc3 badging:
+
+  package: name='dev.leocode' versionCode='1003' versionName='0.1.0-rc3'
+           platformBuildVersionName='14' platformBuildVersionCode='34'
+           compileSdkVersion='34' compileSdkVersionCodename='14'
+
+The manifests are Ed25519-signed by the release manifest key (SPKI fingerprint
+87e1a3b8f4f5ebb9045ae06d617b42104b02211a01964b03a232c0c46b204142) and served
+from a local mirror so the demo does not depend on GitHub:
+
+  $ python3 scripts/make-release-manifest.py --apk dist/release/leocode-1003.apk \
+      --version-name 0.1.0-rc3 --version-code 1003 \
+      --url file:///sdcard/Download/leocode-update/leocode-1003.apk \
+      --notes "Signed self-update demo: rc2 to rc3 through the in-app update card." \
+      --out dist/release/release.json
+  wrote dist/release/release.json (62a9445bf46f98fb77f8b21525edfa357b6cf2002ae1d515cb2550e158ab949d)
+  $ scripts/sign-release.sh dist/release/release.json
+  Signature Verified Successfully
+  verified against docs/keys/release-manifest-public.pem
+
+The copy pushed to both phones matches the host hash:
+
+  62a9445bf46f98fb77f8b21525edfa357b6cf2002ae1d515cb2550e158ab949d
+    /sdcard/Download/leocode-update/leocode-1003.apk
+
+Both phones had `appops set dev.leocode REQUEST_INSTALL_PACKAGES allow` and
+`READ_EXTERNAL_STORAGE` granted before the in-app runs.
+
+D2 — POCO F1 (API 35)
+---------------------
+T28.1 R8 release build installs and launches (rc1 over the previous demo build)
+  PASS  scripts/smoke.sh e76846f dist/release/leocode-1001.apk
+        TotalTime 516 ms, LaunchState COLD
+        docs/device-reports/20261122-174447-smoke-10.8.0.115_39239.txt
+
+T28.2 In-app self-update rc1 -> rc2
+  PASS  Settings > About > Updates > "Check for updates" found 0.1.0-rc2,
+        "Download and install" opened com.android.packageinstaller,
+        Update -> Play Protect "Scan app" -> installed.
+        dumpsys package dev.leocode: versionCode=1002 versionName=0.1.0-rc2
+        (The screenshots from this run were lost to a host reboot; the
+        rc2 -> rc3 run below exercises the same path with captured evidence.)
+
+T28.3 R8 release build installs and launches (rc3)
+  PASS  scripts/smoke.sh e76846f dist/release/leocode-1003.apk
+        TotalTime 686 ms, LaunchState COLD
+        docs/device-reports/20261123-125244-smoke-e76846f.txt
+
+T28.4 In-app self-update rc2 -> rc3 (start state rc2 / 1002)
+  PASS  About card showed the installed build 0.1.0-rc2:
+        docs/device-reports/20261123-task28-d2-about-rc2.png
+        "Check for updates" verified the signed manifest and offered 0.1.0-rc3
+        (size 18.0 MB, notes, "Last checked"):
+        docs/device-reports/20261123-task28-d2-check-rc3.png
+        "Download and install" opened the system installer directly:
+        docs/device-reports/20261123-task28-d2-installer-rc3.png
+        focus: com.android.packageinstaller/...PackageInstallerActivity
+        Update -> Play Protect scan:
+        docs/device-reports/20261123-task28-d2-scan-rc3.png
+        focus: com.android.vending/...PlayProtectDialogsActivity
+        Play Protect details, then install:
+        docs/device-reports/20261123-task28-d2-scan-details.png
+        docs/device-reports/20261123-task28-d2-installed-rc3.png
+        After the installer finished:
+        docs/device-reports/20261123-task28-d2-after-install-rc3.png
+        dumpsys package dev.leocode: versionCode=1003 versionName=0.1.0-rc3
+        App running on rc3:
+        docs/device-reports/20261123-task28-d2-rc3-running.png
+
+D1 — Redmi Note 7S (API 28)
+---------------------------
+T28.1 R8 release build installs and launches (rc1 over the previous demo build)
+  PASS  scripts/smoke.sh 192.168.29.26:5555 dist/release/leocode-1001.apk
+        TotalTime 6936 ms, LaunchState COLD
+        docs/device-reports/20261122-173358-smoke-192.168.29.26_5555.txt
+
+T28.2 In-app self-update rc1 -> rc2 (FAILED on rc1, fixed in rc2)
+  FAIL  rc1's updater rejected its own download with E_INTEGRITY.
+        Root cause: on API 28 `getPackageArchiveInfo()` only collects archive
+        certificates when `GET_SIGNATURES` is in the flag mask; rc1 asked for
+        `GET_SIGNING_CERTIFICATES` alone, so the archive signer set came back
+        empty and the integrity check failed closed.
+        Fix in rc2: request both flags and fall back to `PackageInfo.signatures`
+        (regression test `UpdateInstallerFlagsTest`). rc2 was then installed
+        over rc1 with `adb install -r` to continue the demo.
+
+T28.3 R8 release build installs and launches (rc3)
+  PASS  scripts/smoke.sh 192.168.29.26:5555 dist/release/leocode-1003.apk
+        TotalTime 3175 ms, LaunchState COLD
+        docs/device-reports/20261123-131857-smoke-192.168.29.26_5555.txt
+
+T28.4 In-app self-update rc2 -> rc3 (start state rc2 / 1002)
+  PASS  About card showed the installed build 0.1.0-rc2:
+        docs/device-reports/20261123-task28-d1-about-rc2.png
+        "Check for updates" verified the signed manifest and offered 0.1.0-rc3
+        ("LeoCode 0.1.0-rc3 is available", 18.0 MB, notes, "Last checked 13:08:34"):
+        docs/device-reports/20261123-task28-d1-check-rc3.png
+        "Download and install" produced Android 9's "Open with" chooser because
+        this phone has several apps registered for APK files:
+        docs/device-reports/20261123-task28-d1-chooser.png
+        "Package installer" then showed the update prompt ("Your existing data
+        will not be lost"):
+        docs/device-reports/20261123-task28-d1-install-prompt.png
+        Play Protect blocked the first attempt ("Harmful app blocked"), so the
+        run continued through "More details" -> "Install anyway":
+        docs/device-reports/20261123-task28-d1-playprotect-block.png
+        docs/device-reports/20261123-task28-d1-playprotect-details.png
+        After the install:
+        dumpsys package dev.leocode: versionCode=1003 versionName=0.1.0-rc3
+
+Notes and known issues
+----------------------
+* D1's "Open with" chooser: Android 9 shows a chooser when more than one
+  installed app handles `application/vnd.android.package-archive`. Picking
+  "Package installer" completes the update, so the row passes, but the extra
+  step is a real UX difference from D2 (which opens the installer directly).
+  A future task can move to `PackageInstaller` sessions, which never show a
+  chooser.
+* D1 Play Protect blocked the sideload once and needed "More details" ->
+  "Install anyway"; D2 showed the softer "Scan app" dialog. This is Play
+  Protect policy for an app Google has not seen, not an APK signature problem
+  (Android's own update prompt already verified the signer matches).
+* D1's WebView is Chrome 80 (`com.google.android.webview` 80.0.3987.99) and
+  logs `Uncaught TypeError: Cannot read properties of null (reading 'style')`
+  twice during startup. It is pre-existing (also present in the rc1 smoke log)
+  and does not block the UI: the cold start passes and the app is usable.
+  D2 logs no such error. Left as a follow-up; not introduced by Task 28.
+* D1's download/resume row from the runtime matrix is N/A for transport reasons
+  and was not toggled. Neither phone is rooted, so no Phase E rows were run.

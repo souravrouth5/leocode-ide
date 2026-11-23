@@ -63,6 +63,11 @@ import {
   type ThemeMode,
   type ThemeState,
   type TreeImportResult,
+  type UpdateCheck,
+  type UpdateInstallHandle,
+  type UpdateInstallRequest,
+  type UpdateProgress,
+  type UpdateResult,
   type WorkspaceList,
   type WorkspaceRef,
   type WriteResult
@@ -87,7 +92,8 @@ export const BACKGROUND_CONTEXT = {
   terminalResize: "The terminal size is not reaching the shell",
   terminalClose: "The terminal could not be closed",
   stopProcess: "The process could not be stopped",
-  cancelInstall: "The install could not be cancelled"
+  cancelInstall: "The install could not be cancelled",
+  cancelUpdate: "The update could not be cancelled"
 } as const
 
 export interface AndroidBridgeOptions {
@@ -901,6 +907,66 @@ export class AndroidBridge implements Bridge {
 
   async uninstallRuntime(id: string, options?: RequestOptions): Promise<void> {
     await this.request("runtime.uninstall", { id }, options)
+  }
+
+  // ------------------------------------------------------ updates (Task 28)
+
+  async checkForUpdate(options?: RequestOptions): Promise<UpdateCheck> {
+    return this.request<UpdateCheck>("update.check", {}, options)
+  }
+
+  async installUpdate(
+    request: UpdateInstallRequest,
+    onProgress: (progress: UpdateProgress) => void,
+    onStart?: (handle: UpdateInstallHandle) => void,
+    options?: RequestOptions
+  ): Promise<void> {
+    let finish: { resolve: () => void; reject: (error: AppError) => void } | null = null
+    const done = new Promise<void>((resolve, reject) => {
+      finish = { resolve, reject }
+    })
+    done.catch(() => {})
+
+    const { id: requestId, result } = this.send<{ started: boolean }>(
+      "update.install",
+      request,
+      (event, payload) => {
+        if (event === "update.progress") {
+          onProgress(payload as UpdateProgress)
+          return
+        }
+        if (event === "update.result") {
+          const outcome = payload as UpdateResult
+          if (outcome.ok) {
+            finish?.resolve()
+          } else {
+            finish?.reject(
+              new AppError(
+                isErrorCode(outcome.code) ? outcome.code : "E_INTERNAL",
+                outcome.message ?? "the update could not be installed"
+              )
+            )
+          }
+        }
+      },
+      options
+    )
+
+    try {
+      await result
+      this.streamFailures.set(requestId, (error) => finish?.reject(error))
+      onStart?.({
+        cancel: () => {
+          void this.request("update.cancel", {}).catch((error: unknown) => {
+            this.background(error, BACKGROUND_CONTEXT.cancelUpdate)
+          })
+        }
+      })
+      await done
+    } finally {
+      this.streamFailures.delete(requestId)
+      this.streams.delete(requestId)
+    }
   }
 
   // ------------------------------------------------------ trust (Task 26)

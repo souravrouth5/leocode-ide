@@ -3,8 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Nightly preview build (03:00 UTC).
+    - cron: "0 3 * * *"
 
 # Least privilege by default; jobs opt in to what they need.
 permissions: {}
@@ -43,6 +47,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Release script tests
+        run: bash ../scripts/tests/run-release-script-tests.sh
+
       - name: Build
         run: npm run build
 
@@ -66,6 +73,9 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Clear the committed web bundle
+        run: rm -rf android/app/src/main/assets/web/*
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -125,30 +135,254 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
 
-  # Temporary nightly channel. Task 28 replaces this with a signed prerelease.
-  nightly:
-    name: Nightly APK release
+  # Task 28: signed releases. A `v*` tag publishes that version; pushes to
+  # `main`, the nightly schedule and manual dispatch publish a signed nightly
+  # prerelease. Both use the protected `release` environment, so the keystore
+  # and manifest key are never available to pull requests. Without the secrets
+  # a nightly reports a notice and stops; a tag release fails closed.
+  release:
+    name: Signed release
     runs-on: ubuntu-latest
-    needs: android
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [web, android]
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'))
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    environment:
+      name: release
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          name: leocode-debug-apk
-          path: dist
+          fetch-depth: 0
 
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - name: Check the signing secrets
+        id: signing
+        env:
+          RELEASE_STORE_BASE64: ${{ secrets.RELEASE_STORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_STORE_BASE64" ] || [ -z "$RELEASE_STORE_PASSWORD" ] ||
+             [ -z "$RELEASE_KEY_ALIAS" ] || [ -z "$RELEASE_KEY_PASSWORD" ] ||
+             [ -z "$RELEASE_SIGNING_KEY" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::Release secrets are required to publish a tag release."
+              exit 1
+            fi
+            echo "::notice::Release secrets are not configured; skipping the signed release."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.signing.outputs.available == 'true'
         with:
-          tag_name: nightly
-          name: "LeoCode IDE (Nightly Build)"
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Clear the committed web bundle
+        if: steps.signing.outputs.available == 'true'
+        run: rm -rf android/app/src/main/assets/web/*
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.signing.outputs.available == 'true'
+        with:
+          name: web-dist
+          path: android/app/src/main/assets/web
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        if: steps.signing.outputs.available == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        if: steps.signing.outputs.available == 'true'
+
+      - name: Install SDK packages
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;${NDK_VERSION}"
+
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        if: steps.signing.outputs.available == 'true'
+
+      - name: Resolve the version
+        id: version
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # v0.1.0-rc1 -> 0.1.0-rc1 / 1001. The script is the single source
+            # of truth; a malformed tag aborts here instead of falling back to
+            # the Gradle default version.
+            out="$(scripts/version-from-tag.sh "$GITHUB_REF_NAME")"
+            eval "$out"
+            if [[ ! "$VERSION_CODE" =~ ^[0-9]+$ ]] || [[ -z "$VERSION_NAME" ]]; then
+              echo "::error::Could not resolve $GITHUB_REF_NAME to a version."
+              exit 1
+            fi
+            echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+            echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "asset=leocode-$VERSION_CODE" >> "$GITHUB_OUTPUT"
+            if [[ "$GITHUB_REF_NAME" == *-rc* ]]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              # `releases/latest` excludes prereleases, so an rc must point at
+              # its own release or rc-to-rc updates would never be offered.
+              echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/release.json" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release.json" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            # Nightly is a separate preview channel with a fixed asset name, so
+            # each run overwrites the same files instead of accumulating them.
+            # Its code lives above every tag code (the tag maximum is
+            # 2,099,099,999) so nightly-to-nightly updates always move forward.
+            VERSION_NAME="0.0.0-nightly.${GITHUB_RUN_NUMBER}"
+            VERSION_CODE=$((2100000000 + GITHUB_RUN_NUMBER))
+            echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+            echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+            echo "tag=nightly" >> "$GITHUB_OUTPUT"
+            echo "asset=leocode-nightly" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "update_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/release.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the signed APK
+        if: steps.signing.outputs.available == 'true'
+        env:
+          LEOCODE_RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
+          RELEASE_STORE_BASE64: ${{ secrets.RELEASE_STORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$RELEASE_STORE_BASE64" | base64 -d > "$LEOCODE_RELEASE_STORE_FILE"
+          chmod 600 "$LEOCODE_RELEASE_STORE_FILE"
+          export LEOCODE_RELEASE_STORE_PASSWORD="$RELEASE_STORE_PASSWORD"
+          export LEOCODE_RELEASE_KEY_ALIAS="$RELEASE_KEY_ALIAS"
+          export LEOCODE_RELEASE_KEY_PASSWORD="$RELEASE_KEY_PASSWORD"
+          export LEOCODE_REQUIRE_RELEASE_SIGNING=1
+          export LEOCODE_VERSION_NAME="${{ steps.version.outputs.name }}"
+          export LEOCODE_VERSION_CODE="${{ steps.version.outputs.code }}"
+          export LEOCODE_UPDATE_URL="${{ steps.version.outputs.update_url }}"
+          (cd android && ./gradlew --no-daemon :app:assembleRelease :app:exportReleaseDependencies)
+
+      - name: Verify the signed APK
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          bt="$ANDROID_HOME/build-tools/35.0.0"
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          cert="$("$bt/apksigner" verify --print-certs "$apk" |
+            awk -F': ' '/SHA-256 digest/{print tolower($2); exit}')"
+          expected="2b294e12d96db87448e6ed32019dc529dd2ecedc0d587ecbc9889c737ab6bdaf"
+          if [ "$cert" != "$expected" ]; then
+            echo "::error::Release APK is signed by '$cert', expected the documented release key."
+            exit 1
+          fi
+          badging="$("$bt/aapt" dump badging "$apk" | head -1)"
+          if ! grep -q "versionCode='${{ steps.version.outputs.code }}'" <<<"$badging"; then
+            echo "::error::APK versionCode does not match the tag: $badging"
+            exit 1
+          fi
+          if ! grep -q "versionName='${{ steps.version.outputs.name }}'" <<<"$badging"; then
+            echo "::error::APK versionName does not match the tag: $badging"
+            exit 1
+          fi
+          echo "verified ${{ steps.version.outputs.name }} / ${{ steps.version.outputs.code }} by $cert"
+
+      - name: Assemble the signed manifest, SBOM and checksums
+        if: steps.signing.outputs.available == 'true'
+        env:
+          LEOCODE_RELEASE_KEY: ${{ runner.temp }}/release-signing.pem
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$LEOCODE_RELEASE_KEY"
+          chmod 600 "$LEOCODE_RELEASE_KEY"
+
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk \
+            "dist/${{ steps.version.outputs.asset }}.apk"
+
+          scripts/make-release-manifest.py \
+            --apk "dist/${{ steps.version.outputs.asset }}.apk" \
+            --version-name "${{ steps.version.outputs.name }}" \
+            --version-code "${{ steps.version.outputs.code }}" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.version.outputs.tag }}/${{ steps.version.outputs.asset }}.apk" \
+            --notes "Automated release from $GITHUB_SHA on $GITHUB_REF_NAME." \
+            --out dist/release.json
+          scripts/sign-release.sh dist/release.json
+
+          python3 scripts/make-sbom.py \
+            --android-deps android/app/build/reports/release-dependencies.txt \
+            --web-lock web/package-lock.json \
+            --version "${{ steps.version.outputs.name }}" \
+            --out "dist/${{ steps.version.outputs.asset }}.cdx.json"
+
+          (cd dist && sha256sum *.apk release.json release.json.sig *.cdx.json > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Move the nightly tag
+        if: steps.signing.outputs.available == 'true' && steps.version.outputs.tag == 'nightly'
+        run: |
+          git tag -f nightly "$GITHUB_SHA"
+          git push -f origin refs/tags/nightly
+
+      - name: Remove stale nightly assets
+        if: steps.signing.outputs.available == 'true' && steps.version.outputs.tag == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fixed asset names are overwritten below; this clears names left by
+          # older nightly runs so the release holds exactly the current five.
+          # A missing release is fine (first nightly).
+          gh release view nightly --json assets --jq '.assets[].name' 2>/dev/null |
+            while read -r name; do
+              case "$name" in
+                release.json|release.json.sig|SHA256SUMS|leocode-nightly.apk|leocode-nightly.cdx.json) ;;
+                *) gh release delete-asset nightly "$name" --yes || true ;;
+              esac
+            done || true
+
+      - name: Publish the signed release
+        if: steps.signing.outputs.available == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag == 'nightly' && 'LeoCode IDE (Nightly)' || format('LeoCode IDE {0}', steps.version.outputs.name) }}
           body: |
-            Automated **debug** APK build from commit ${{ github.sha }} on `main`.
-            Unsigned-for-release and not shrunk: see plan v9 Task 28.
-          files: dist/*.apk
+            Signed, R8-shrunk LeoCode build from commit ${{ github.sha }}.
+
+            * `release.json` / `release.json.sig` — the Ed25519-signed update manifest.
+            * `*.cdx.json` — CycloneDX SBOM of the resolved Maven and npm dependencies.
+            * `SHA256SUMS` — checksums for every asset.
+
+            The APK is signed with the key whose SHA-256 certificate fingerprint
+            is published in `docs/RELEASING.md`. Android only accepts this APK
+            as an update to a build signed with the same key.
+          files: |
+            dist/*.apk
+            dist/release.json
+            dist/release.json.sig
+            dist/*.cdx.json
+            dist/SHA256SUMS
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
           draft: false
-          prerelease: false
 
   python-runtime:
     name: Python runtime artifact
