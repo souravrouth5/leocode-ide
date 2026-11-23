@@ -1,0 +1,41 @@
+# LeoCode smoke test
+generated: 2026-11-23T13:49:00Z
+serial:    11f98015
+model:     Redmi Note 7S
+api:       28
+apk:       dist/release/leocode-1007.apk
+
+## window focus
+mCurrentFocus: <unavailable>
+old-target-SDK warning dialog: manual observation
+  heuristic from focus: unknown (dumpsys reported no mCurrentFocus)
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+Activity: dev.leocode/.MainActivity
+ThisTime: 7929
+TotalTime: 7929
+WaitTime: 8297
+Complete
+
+## verdict
+pid:        5492
+
+## logcat
+--------- beginning of main
+--------- beginning of system
+11-23 19:18:42.932 E/libc    ( 5335): Access denied finding property "ro.vendor.display.type"
+--------- beginning of crash
+11-23 19:18:46.617 E/libc    ( 5368): Access denied finding property "ro.vendor.at_library"
+11-23 19:18:47.843 E/libc    (  763): Access denied finding property "persist.sys.display_debug"
+11-23 19:18:52.748 E/libc    ( 5570): Access denied finding property "ro.vendor.display.type"
+11-23 19:18:56.423 E/libc    ( 5492): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 19:18:56.423 E/libc    ( 5492): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 19:18:56.423 E/libc    ( 5492): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 19:18:56.423 E/libc    ( 5492): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 19:18:56.424 E/libc    ( 5492): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 19:18:56.424 E/libc    ( 5492): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 19:18:58.419 D/LeoCodeWeb( 5492): Uncaught TypeError: Cannot read properties of null (reading 'style')  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:1)
+11-23 19:18:58.420 D/LeoCodeWeb( 5492): Uncaught TypeError: Cannot read properties of null (reading 'style')  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:1)
+11-23 19:18:58.431 D/LeoCodeWeb( 5492): The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)

@@ -1346,7 +1346,7 @@ internal object InsetsScript {
         "--inset-right" to rightPx,
         "--ime-bottom" to imeBottomPx
     ).joinToString(separator = "") { (name, value) ->
-        "document.documentElement.style.setProperty('$name','${pixels(value)}px');"
+        "if(document.documentElement&&document.documentElement.style)document.documentElement.style.setProperty('$name','${pixels(value)}px');"
     }
 
     /** Locale-independent fixed precision, one decimal place. */
