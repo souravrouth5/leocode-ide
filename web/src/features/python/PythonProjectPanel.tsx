@@ -1,8 +1,10 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
 import { WORKSPACE_SWITCHED_EVENT } from "../workspace/workspaceEvents"
 import { classifyPipError, isPipFailure } from "./pipClassifier"
+import { createPythonProjectTemplate } from "./pythonTemplate"
+import { CompatibilityView } from "./CompatibilityView"
 
 /**
  * The active project's Python environment (Task 26).
@@ -12,10 +14,34 @@ import { classifyPipError, isPipFailure } from "./pipClassifier"
  * with the trust prompt and pip output visible.
  */
 export function PythonProjectPanel() {
-  const { python, notifications } = useStores()
+  const { bridge, files, python, notifications } = useStores()
   const status = useStore(python, (state) => state.status)
   const busy = useStore(python, (state) => state.busy)
   const log = useStore(python, (state) => state.installLog)
+  const [showCompatibility, setShowCompatibility] = useState(false)
+  const [creatingTemplate, setCreatingTemplate] = useState(false)
+
+  const handleCreateTemplate = async () => {
+    setCreatingTemplate(true)
+    try {
+      const created = await createPythonProjectTemplate(bridge)
+      notifications.getState().enqueue({
+        kind: "info",
+        message: `Created Python project template: ${created.join(", ")}`,
+        durationMs: 4_000
+      })
+      await files.getState().refresh()
+      await python.getState().refresh()
+    } catch (err) {
+      notifications.getState().enqueue({
+        kind: "error",
+        message: `Failed to create template: ${err instanceof Error ? err.message : String(err)}`,
+        durationMs: 4_000
+      })
+    } finally {
+      setCreatingTemplate(false)
+    }
+  }
 
   useEffect(() => {
     void python.getState().refresh()
@@ -108,6 +134,19 @@ export function PythonProjectPanel() {
         </button>
         <button
           className="btn ghost small"
+          disabled={busy || creatingTemplate}
+          onClick={() => void handleCreateTemplate()}
+        >
+          {creatingTemplate ? "Creating..." : "Create Python project"}
+        </button>
+        <button
+          className="btn ghost small"
+          onClick={() => setShowCompatibility(true)}
+        >
+          Compatibility
+        </button>
+        <button
+          className="btn ghost small"
           disabled={busy}
           onClick={() => {
             void python.getState().refresh().then(() => {
@@ -163,6 +202,13 @@ export function PythonProjectPanel() {
         <pre className="python-log" aria-label="pip output">
           {log.join("\n")}
         </pre>
+      )}
+
+      {showCompatibility && (
+        <CompatibilityView
+          isOpen={showCompatibility}
+          onClose={() => setShowCompatibility(false)}
+        />
       )}
     </section>
   )

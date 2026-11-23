@@ -51,6 +51,12 @@ import {
 import { RedoIcon, RefreshIcon, SparklesIcon, UndoIcon } from "./Icons"
 import type { FindReplaceCommand } from "../features/editor/commands"
 import {
+  isPythonFile,
+  pythonIndentExtension,
+  PYTHON_ACCESSORY_SNIPPETS,
+  resolveTabSize
+} from "../features/editor/pythonIndent"
+import {
   EDITOR_THEMES,
   type EditorThemeId,
   getEditorThemeExtension
@@ -117,7 +123,7 @@ export function getLanguageExtension(path: string): Extension {
     case ".markdown":
       return markdown()
     case ".py":
-      return python()
+      return [python(), pythonIndentExtension({ tabSize: 4 })]
     case ".php":
     case ".phtml":
     case ".php3":
@@ -200,6 +206,13 @@ export async function formatDocument(
   view: EditorView,
   path: string
 ): Promise<{ success: boolean; message?: string }> {
+  if (isPythonFile(path)) {
+    return {
+      success: false,
+      message: "Python formatting deferred for v0.1 (see D-018)"
+    }
+  }
+
   const parser = getPrettierParser(path)
   if (!parser) {
     return {
@@ -287,6 +300,9 @@ export function EditorPane({
   const effectiveTheme: EditorThemeId =
     propEditorTheme ?? resolveInitialTheme(dark)
 
+  const isPython = isPythonFile(path)
+  const effectiveTabSize = resolveTabSize(path, tabSize)
+
   const [currentTheme, setCurrentTheme] = useState<EditorThemeId>(effectiveTheme)
   const [formatting, setFormatting] = useState(false)
 
@@ -345,7 +361,7 @@ export function EditorPane({
         lineWrappingCompartment.current.of(
           wordWrap ? EditorView.lineWrapping : []
         ),
-        tabSizeCompartment.current.of(EditorState.tabSize.of(tabSize)),
+        tabSizeCompartment.current.of(EditorState.tabSize.of(effectiveTabSize)),
         readOnlyCompartment.current.of([
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly)
@@ -458,10 +474,10 @@ export function EditorPane({
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: tabSizeCompartment.current.reconfigure(
-        EditorState.tabSize.of(tabSize)
+        EditorState.tabSize.of(effectiveTabSize)
       )
     })
-  }, [tabSize])
+  }, [effectiveTabSize])
 
   // Reconfigure editing when large-file mode is entered or left
   useEffect(() => {
@@ -680,7 +696,17 @@ export function EditorPane({
             </option>
           ))}
         </select>
-        <button onClick={() => insert("  ")}>Tab</button>
+        <button onClick={() => insert(" ".repeat(effectiveTabSize))}>Tab</button>
+        {isPython &&
+          PYTHON_ACCESSORY_SNIPPETS.map((snippet) => (
+            <button
+              key={snippet.label}
+              onClick={() => insert(snippet.insertText)}
+              title={snippet.description}
+            >
+              {snippet.label}
+            </button>
+          ))}
         <button onClick={() => command(cursorLineUp)} aria-label="Line up">
           ↑
         </button>
