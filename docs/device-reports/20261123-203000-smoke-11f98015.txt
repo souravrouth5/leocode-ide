@@ -1,0 +1,36 @@
+# LeoCode smoke test
+generated: 2026-11-23T15:00:38Z
+serial:    11f98015
+model:     Redmi Note 7S
+api:       28
+apk:       dist/release/leocode-1008.apk
+
+## window focus
+mCurrentFocus: <unavailable>
+old-target-SDK warning dialog: manual observation
+  heuristic from focus: unknown (dumpsys reported no mCurrentFocus)
+
+## am start -W
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+Status: ok
+Activity: dev.leocode/.MainActivity
+ThisTime: 3793
+TotalTime: 3793
+WaitTime: 4070
+Complete
+
+## verdict
+pid:        11744
+
+## logcat
+--------- beginning of main
+--------- beginning of crash
+--------- beginning of system
+11-23 20:30:26.206 E/libc    (11600): Access denied finding property "ro.vendor.display.type"
+11-23 20:30:29.818 E/libc    (11621): Access denied finding property "ro.vendor.at_library"
+11-23 20:30:34.922 E/libc    (11744): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 20:30:34.922 E/libc    (11744): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 20:30:34.923 E/libc    (11744): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 20:30:34.923 E/libc    (11744): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 20:30:34.923 E/libc    (11744): Access denied finding property "vendor.camera.aux.packagelist"
+11-23 20:30:36.579 D/LeoCodeWeb(11744): The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)
