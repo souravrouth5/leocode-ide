@@ -291,7 +291,8 @@ Raw report: [`docs/device-reports/20261111-141335-device.txt`](docs/device-repor
 | `scripts/build-python.sh` custom CPython build | 24 — retired 2026-11-21 (official python.org artifact + NDK launcher) |
 | Python prototype defects P-01…P-10 (unsigned install, laptop-built launcher, unsafe extraction, non-atomic swap, staging shebangs, global `LD_LIBRARY_PATH`, no on-device run) — see Phase A report §4 | 24, 25, 26, 30 |
 | Phase A script/evidence defects A-01…A-10 — see Phase A report §3 | Phase A fix-ups |
-| Debug APK 28.8 MB, R8 off, release signed with debug key, public debug APK on push | 28 |
+| Debug APK 28.8 MB, R8 off, release signed with debug key, public debug APK on push | 28 — fixed 2026-11-23 (R8 + release keystore + signed nightly) |
+| Release secrets not yet in the protected `release` environment (`RELEASE_STORE_BASE64`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`, `RELEASE_SIGNING_KEY`); a tag release fails closed until they exist | 28 (owner action) |
 | `targetSdk 28` lint rule intentionally disabled — **do not "fix"** (D-002) | — |
 
 Fixed by Phase A: JDK path moved to `~/.gradle/gradle.properties`; CI pins actions and the NDK,
