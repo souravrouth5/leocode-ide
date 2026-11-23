@@ -99,6 +99,12 @@ Every channel publishes fixed asset names and moves its tag (`rc`, `nightly`) on
 URL never changes; the versioned `v*` release keeps the per-tag assets. A channel never offers an
 older code than the installed one, and `versionCode` only ever increases within a line.
 
+The repository must be public (or the assets mirrored somewhere anonymously readable): GitHub
+serves release assets of a **private** repository only to authenticated clients, so an installed app
+asking for the manifest gets `HTTP 404`. `UpdateChecker` reports that as `E_OFFLINE` ("the update
+server answered HTTP 404"). A private repository therefore needs a public releases-only mirror and
+a publish token; that is a deployment decision, not a code change.
+
 Nightly builds are a separate preview channel: `0.0.0-nightly.<run_number>`, code
 `2_100_000_000 + run_number`, published under the moving `nightly` tag with fixed asset names
 (`leocode-nightly.apk`, `leocode-nightly.cdx.json`). A nightly is built on the daily 03:00 UTC
