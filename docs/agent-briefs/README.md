@@ -18,6 +18,30 @@ Run them **one at a time, in this order**. Each brief builds on the APIs of the 
 
 ## Rules for every brief (from `AGENTS.md`)
 
+### Parallel mode (B2 + B3 together)
+
+When the owner asks for briefs to run in parallel, the **parent session** works like this. The
+parallel rules below override the "no commit / no branches" rule, for the parent only.
+
+1. **Contract lock (parent, before any subagent starts).** It goes on local branch `phase-e-root`:
+   - `Contract.kt`: `RootLostEvent(sessionId: String? = null, jobId: String? = null, reason: String = "revoked")`,
+     with a KDoc saying `reason` is `"denied"` or `"revoked"`.
+   - `RootHandler.kt`: **signature only**:
+     `class RootHandler(private val rootManager: RootManager, private val json: Json = BridgeJson.value, private val onDisabled: () -> Unit = {}, private val log: (String) -> Unit = {})`.
+   - `./gradlew generateBridgeTypes`, then `compileDebugKotlin`, then one local commit.
+2. **Worktrees inside the repo**, so the reviewer can read them over the mount:
+   `.worktrees/b2` (branch `phase-e-b2`) and `.worktrees/b3` (branch `phase-e-b3`), both from
+   `phase-e-root`. Add `.worktrees/` to `.git/info/exclude`, then copy `android/local.properties`
+   into each. If a worktree needs web tooling, symlink `web/node_modules`.
+3. **Subagents** (at most 3) each work in **one** worktree, touch only their brief's files, and
+   **never commit**. `Contract.kt`, `types.gen.ts` and `RootManager.kt` are frozen for them.
+4. **One Gradle build at a time.** The laptop has little RAM, so every Gradle call is wrapped:
+   `flock /tmp/leocode-gradle.lock ./gradlew --no-daemon …`.
+5. **Merge (parent).** Check each worktree's diff against its brief. Commit each worktree on its
+   branch, then `git merge --no-ff` both into `phase-e-root`. Run the full gates on the merge
+   result and write `reports/B2-B3-merge.md`. **No push.** The reviewer checks `phase-e-root`
+   before anything moves on.
+
 - **Touch only the files listed in the brief.** If something outside scope must change, stop and
   write it under "Open questions" in the report. Don't edit it.
 - **Do not commit, push, rebase or create branches.** Only the owner commits.

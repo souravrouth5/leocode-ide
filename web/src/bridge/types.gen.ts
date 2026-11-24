@@ -362,6 +362,8 @@ export interface RootRequestReply {
 
 export interface RootLostEvent {
   sessionId?: string | null
+  jobId?: string | null
+  reason?: string
 }
 
 export interface SafOpenRequest {

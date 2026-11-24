@@ -364,9 +364,15 @@ data class RootRequestReply(
     val granted: Boolean
 )
 
+/**
+ * Emitted when root privileges are lost or denied.
+ * [reason] is either "denied" (su refused a new root operation) or "revoked" (superuser grant was dropped).
+ */
 @Serializable
 data class RootLostEvent(
-    val sessionId: String? = null
+    val sessionId: String? = null,
+    val jobId: String? = null,
+    val reason: String = "revoked"
 )
 
 // --------------------------------------------------------------------- saf

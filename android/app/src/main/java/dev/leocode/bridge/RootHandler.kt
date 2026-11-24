@@ -14,7 +14,9 @@ import kotlinx.serialization.json.JsonObject
  */
 class RootHandler(
     private val rootManager: RootManager,
-    private val json: Json = BridgeJson.value
+    private val json: Json = BridgeJson.value,
+    private val onDisabled: () -> Unit = {},
+    private val log: (String) -> Unit = {}
 ) : BridgeHandler {
 
     companion object {
