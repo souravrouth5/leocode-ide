@@ -14,7 +14,7 @@ Android coding IDE. **Source of truth.** Supersedes [v8](LeoCode_Implementation_
 7. **Code structure fixed**: manual DI (`AppGraph`), per-domain bridge handlers, Zustand feature stores (D-015).
 8. 16 KB page-size support, a foreground session service, and Android 12+ process-killer handling are now explicit tasks.
 9. **Python is the primary language (D-017, added 2026-11-11).** LeoCode's main purpose is writing and running code, so one language must work end to end before any other is added. Python is that language. Python tasks (24–26 plus new 30–33) move ahead of Git/SSH and root mode, and "well supported" is defined by an acceptance suite (§9.1). Node.js, Java and PHP stay deferred behind a language-provider interface.
-10. **D2 is not rooted yet** (verified 2026-11-11: no `su`, no root manager). The owner will root it (Magisk) before Phase E. Everything else treats D2 as an unrooted Android 15 phone until then.
+10. **D2 is not rooted yet** (verified 2026-11-11: no `su`, no root manager). The owner will root it (Magisk) before Phase E. Everything else treats D2 as an unrooted Android 15 phone until then. *(Note added 2026-11-23: D2 was rooted with Magisk 31.1 on 2026-11-23; Phase E root mode verified on device 2026-11-24).*
 
 **Reading order:** §1 decisions → §4 execution model → §5–7 architecture and errors → §15 tasks.
 
@@ -25,12 +25,12 @@ Android coding IDE. **Source of truth.** Supersedes [v8](LeoCode_Implementation_
 | ID | Device | Android | Root | Role | Connection |
 |---|---|---|---|---|---|
 | **D1** | Redmi Note 7S (`lavender`), 4 GB, MIUI V11 | 9 (API 28) | No | Old-Android, low-RAM, MIUI reference; regression baseline | Wi-Fi ADB |
-| **D2** | POCO F1 (`beryllium`), LineageOS build `lineage_beryllium-user` | 15 (API 35) | **Not yet.** Owner will root (Magisk) before Phase E | New-Android behaviour, 16 KB check; root mode once rooted | USB |
+| **D2** | POCO F1 (`beryllium`), LineageOS build `lineage_beryllium-user` | 15 (API 35) | **Rooted (Magisk 31.1)** *(rooted 2026-11-23)* | New-Android behaviour, 16 KB check; root mode once rooted | USB |
 | X1 | Snapdragon 695 phone | 11 | No | Optional, not available | — |
 | X2 | Stock Android 14+ phone | 14+ | No | Optional, not available | — |
 
 - "No device integrity" does not matter: LeoCode uses no Play Integrity or SafetyNet.
-- **D2 is unrooted today** (checked with read-only `adb` commands: no `su`, no Magisk/KernelSU/APatch package). Until it is rooted, D2 is the unrooted Android 15 reference. After rooting, unrooted behaviour is re-checked by denying `su` to LeoCode (Magisk DenyList / revoke).
+- **D2 is unrooted today** (checked with read-only `adb` commands: no `su`, no Magisk/KernelSU/APatch package). Until it is rooted, D2 is the unrooted Android 15 reference. After rooting, unrooted behaviour is re-checked by denying `su` to LeoCode (Magisk DenyList / revoke). *(Dated note: D2 was rooted with Magisk 31.1 on 2026-11-23; unrooted behaviour re-checked and verified under Magisk deny policy).*
 - Both phones report 4096-byte pages. **No device exercises 16 KB pages at runtime**; 16 KB support is verified only by the static ELF/`zipalign` check in CI.
 - **Android 10–14 are not verified on hardware.** They sit between D1 and D2; release notes say so (§4.2).
 - **No emulators.** The laptop is too weak. Heavy builds (CPython, wheels, signed releases) run on GitHub Actions.

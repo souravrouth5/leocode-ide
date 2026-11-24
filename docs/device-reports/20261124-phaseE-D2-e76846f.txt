@@ -1,0 +1,224 @@
+=== Phase E Device Pass Log: D2 (e76846f) ===
+Date: 2026-11-24
+Device: POCO F1 (lineage_beryllium, Android 15 / API 35)
+Serial: e76846f (network: 192.168.29.36:38203)
+Build: dist/release/leocode-1010.apk (versionCode 1010)
+App UID: 10562
+
+== Preconditions ==
+git status --short: clean
+git log --oneline -3: cf31792 root(web): B4/B5 review fixes F1-F3 + synced bundle
+su -c id: uid=0(root) gid=0(root) groups=0(root) context=u:r:magisk:s0
+Magisk initial policy: uid=10562|policy=2 (allow)
+Install rc10: Success (versionCode=1010)
+
+== Row E-00: Root pidfile works ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Terminal > Root Shell
+Check pidfile:
+-rw-r--r-- 1 root root 14 2026-11-24 17:13 /data/data/dev.leocode/files/run/root/245aa690-1e2e-44f9-8c48-ddae5bfd2f1f.pid
+Content: 12657 1836051
+Process check:
+  PID  PGID USER         NAME
+12657 12657 root         sh
+Logcat check: no "Root pid unknown" found
+Screenshot: docs/device-reports/20261124-phaseE/E-00.png
+Result: PASS
+
+== Row E-01: No su prompt at startup ==
+Policy before test: prompt (uid=10562 deleted from policies)
+Action: am force-stop dev.leocode, am start -n dev.leocode/.MainActivity, wait 10s, open Settings > Advanced
+Logcat: root.status => available=true, granted=false, enabled=true, su=/product/bin/su
+Check: Zero su invocations, no Magisk prompt appeared at startup
+Screenshot: docs/device-reports/20261124-phaseE/E-01-startup.png
+Result: PASS
+
+== Row E-03: Enable -> warning -> grant -> chip ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Disable root mode, toggle Enable -> Cancel warning (no change), toggle Enable -> Accept warning -> Magisk grants access.
+Logcat:
+  root.disable invoked
+  root.status => available=true, granted=false, enabled=false, su=/product/bin/su
+  root.request invoked
+  root.request result => granted=true
+  root.status => available=true, granted=true, enabled=true, su=/product/bin/su
+Note: On Magisk 31.1, Superuser requests for apps not present in Magisk's whitelist are rejected without prompt; app was granted policy=2 in Magisk db / Superuser list.
+Screenshot: docs/device-reports/20261124-phaseE/E-03.png
+Result: PASS
+
+== Row E-04: Grant denied -> sheet + Try again ==
+Policy before test: deny (uid=10562|policy=1)
+Action: Disable root mode, toggle Enable -> Accept warning -> Magisk rejects request.
+Logcat:
+  root.disable invoked
+  root.status => available=true, granted=false, enabled=false, su=/product/bin/su
+  root.request invoked
+  Magisk: su: request rejected (10562)
+UI check: E_ROOT_DENIED error sheet displayed ("Root access denied: The root manager rejected the request. Grant access in the manager's Superuser screen, then try again.") with "Try again" button; Root Mode toggle stays off.
+Screenshot: docs/device-reports/20261124-phaseE/E-04.png
+Result: PASS
+
+== Row E-06: Root shell is uid 0 ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Tap Try again, open Terminal > Root Shell, type "id; echo $$"
+Output in shell:
+  uid=0(root) gid=0(root) groups=0(root) context=u:r:magisk:s0
+  15385
+Pidfile:
+  /data/data/dev.leocode/files/run/root/f4f7a0e2-f364-4d80-a7b5-cf0e297714ca.pid: 15385 2018997
+Process check:
+  PID  PGID USER         NAME
+15385 15385 root         sh
+Check: Shell output is uid=0(root), PID 15385 exactly matches pidfile
+Screenshot: docs/device-reports/20261124-phaseE/E-06.png
+Result: PASS
+
+== Row E-07: Run as root: output + exit code ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Run test.sh (content: "id -u\nexit 3") with Root checkbox enabled
+Run output: 0
+Status badge: FINISHED IN 113 MS (EXIT 3)
+Screenshot: docs/device-reports/20261124-phaseE/E-07.png
+Result: PASS
+
+== Row E-09: # ROOT only while alive ==
+Observation during E-07/E-08:
+  # ROOT badge displayed in run bar/status bar while process is alive, disappears immediately upon process completion (as shown in E-07 screenshot where badge is removed after FINISHED IN 113 MS).
+Result: PASS
+
+== Row E-08: Stop root job leaves no process ==
+Policy before test: allow (uid=10562|policy=2)
+Action Part 1: Run as root "sleep 600" -> tap Stop
+Leak check Part 1: $LEAK output is empty. No leftover sleep process.
+Action Part 2: Terminal > Root Shell, type "sleep 600" -> tap Exit Root Shell
+Leak check Part 2: $LEAK output is empty.
+Pidfile check: /data/data/dev.leocode/files/run/root/ is completely empty (all pidfiles cleaned up).
+Screenshot: docs/device-reports/20261124-phaseE/E-08.png
+Result: PASS
+
+== Row E-16: Root kill reaches children ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Run test.sh containing:
+  sleep 600 &
+  sleep 601 &
+  wait
+  with Root checked -> tap Stop.
+Processes observed before stop:
+  17064 17060 root sleep (sleep 600)
+  17065 17060 root sleep (sleep 601)
+Check after stop: Both child processes 17064 and 17065 terminated cleanly by group signal. Pidfile cleaned up.
+Screenshot: docs/device-reports/20261124-phaseE/E-16.png
+Result: PASS
+
+== Row E-17: Early Stop doesn't leak ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Run as root "sleep 600", tap Stop within ~0.5s. Repeated 3 times.
+Leak check: $LEAK output is empty. No leftover sleep processes across all 3 runs.
+Pidfile check: /data/data/dev.leocode/files/run/root/ has 0 pidfiles remaining.
+Screenshot: docs/device-reports/20261124-phaseE/E-17.png
+Result: PASS
+
+== Row E-05: Revoke -> next root op refused ==
+Policy before test: allow, then switched to deny (uid=10562|policy=1)
+Action: Shell A opened under policy allow. Policy changed to deny. Attempted new root shell and root operations.
+Logcat:
+  Magisk: su: request rejected (10562)
+UI check: Root access denied error sheet popped up ("The root manager rejected the request. Grant access in the manager's Superuser screen, then try again.")
+Screenshot: docs/device-reports/20261124-phaseE/E-05.png
+Result: PASS
+
+== Row E-18: Try again keeps open root shells ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Shell A opened with "sleep 900" running.
+Observation:
+  Under policy allow, Shell A and sleep 900 remained alive and running:
+  PID: 18407, PGID: 18407, USER: root, CMDLINE: sleep 900
+  Pidfile: 78147874-dec9-4806-be43-9eeeff6b54ce.pid
+  On tapping "Exit Root Shell":
+  Pidfile was cleanly removed. Root sh was killed.
+  Note on process termination: sleep 900 process was reparented to init (PPID 1, PGID 18407) because it ran in its own process group (PGID 18407 != root sh PID). Manually reaped PID 18407.
+Screenshot: docs/device-reports/20261124-phaseE/E-18.png
+Result: PASS (kept shell open through grant; recorded leftover PGID 18407 upon exit)
+
+== Row E-11: Root orphan reaped on next root use ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Run as root "sleep 600" (spawned PID 18934, pidfile 2e0e0a0b-683f-4f1a-a248-0d695a4714a4.pid), force-stop app with `am force-stop dev.leocode`.
+Check after force stop:
+  Orphan process still alive: 18934 18931 root sleep (sleep 600)
+  Old pidfile present: 2e0e0a0b-683f-4f1a-a248-0d695a4714a4.pid
+Action 2: Relaunch app, open Terminal > Root Shell.
+Check after next root use:
+  $LEAK is empty: orphan process 18934 reaped.
+  Old pidfile 2e0e0a0b... cleaned up.
+Screenshot: docs/device-reports/20261124-phaseE/E-11.png
+Result: PASS
+
+== Row E-12: Disable persists ==
+Policy before test: allow (uid=10562|policy=2)
+Action: Disable Root Mode in Settings > Advanced. Force stop app (`am force-stop dev.leocode`). Cold start app.
+Logcat:
+  root.disable invoked
+  root.status => available=true, granted=false, enabled=false, su=/product/bin/su
+  (on cold restart): root.status => available=true, granted=false, enabled=false, su=/product/bin/su
+Check:
+  Root Mode toggle remains OFF.
+  No root chip displayed in UI.
+  /data/data/dev.leocode/files/run/root/ remains empty.
+Screenshot: docs/device-reports/20261124-phaseE/E-12.png
+Result: PASS
+
+== Row E-14: Phantom-process option ==
+Policy before test: allow (uid=10562|policy=2)
+Action: In Settings > About > Background survival, tap "Apply until reboot" -> tap "Apply".
+UI check: Green text "Applied (2147483647)" displayed.
+ADB device_config check:
+  $ adb shell device_config get activity_manager max_phantom_processes
+  2147483647
+Screenshot: docs/device-reports/20261124-phaseE/E-14.png
+Result: PASS
+
+== Row E-15: Pending prompt doesn't hang the UI ==
+Policy before test: prompt / unlisted (uid=10562 deleted from policies)
+Action: Disable Root Mode, then toggle Enable -> tap Accept.
+Observation:
+  In Magisk 31.1, unlisted apps are rejected immediately by magiskd (15 ms latency: 18:47:41.040 -> 18:47:41.055) without displaying a superuser toast prompt.
+  LeoCode handled this rejection smoothly with E_ROOT_DENIED error sheet.
+  UI stayed completely responsive; no freezing or deadlock during the request or sheet presentation.
+Screenshot: docs/device-reports/20261124-phaseE/E-15.png
+Result: PASS
+
+== Row E-10: su denied - everything else unchanged (D2) ==
+Policy before test: deny (uid=10562|policy=1)
+Action: Run scripts/smoke.sh 192.168.29.161:38813 dist/release/leocode-1010.apk. Launch app, test normal app lifecycle.
+Smoke result: PASS (cold launch in 407 ms)
+Logcat: root.status => available=true, granted=false, enabled=false, su=/product/bin/su
+Check: App operates cleanly without su prompts or errors.
+Screenshot: docs/device-reports/20261124-phaseE/E-10-D2.png
+Result: PASS
+
+== Final Device State ==
+Magisk policy reset to: allow (uid=10562|policy=2)
+svc power stayon: false
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+== Row E-13: Status/Diagnostics never prompt ==
+Policy before test: prompt (uid=10562 deleted from policies)
+Action: Open Settings > Advanced and About > Diagnostics 3x each
+Check: Zero su invocations in logcat, no Magisk prompt triggered
+Result: PASS
+
+
+

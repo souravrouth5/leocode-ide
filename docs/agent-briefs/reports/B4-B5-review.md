@@ -1,5 +1,13 @@
 # B4 + B5 review (branch `phase-e-root`)
 
+> **Follow-up (B4-B5-fix, `cf31792`): accepted.** Checked in the code: F1 `lastLost: null` on
+> `requestRoot` success and `disableRoot` success. F2 the mock `rootDisable` closes sessions and
+> sends no `root.lost`. F3 `runStore` matches only `event.jobId === current.jobId`. Web 494/494
+> (agent's report). This round only ran `assembleDebug` on Android (no Kotlin changes, so the
+> 511-pass count carries over). Next: `DEVICE-phase-e.md`.
+
+---
+
 **Verdict: accept after three small web fixes (F1–F3).** The merge is clean and the gates are
 green (web 491/491, Android 511 passed / 0 failed / 1 skipped, APK built, per the agent's merge
 report). The structure matches the briefs. The three fixes are about state that never resets,

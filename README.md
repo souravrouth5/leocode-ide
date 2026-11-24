@@ -3,12 +3,11 @@
 An Android coding IDE: file explorer, CodeMirror editor, terminal, Git/SSH, and
 on-demand language runtimes — running entirely on the phone, rooted or unrooted.
 
-> **Status: plan v9, Phases A–F complete; Phase G (Python) next.** The IDE shell runs on Android 9
-> (D1) and Android 15 (D2); both phones pass the Phase F Git/SSH rows. Both are currently **unrooted**
-> (no `su`), so root mode (Phase E) waits for a root manager. Not production-grade yet.
+> **Status: plan v9, Phases A–H done.** The IDE shell runs on Android 9 (D1) and Android 15 (D2).
+> Root mode (Phase E) is verified on D2 (rooted with Magisk 31.1); D1 remains unrooted as reference.
+> Not production-grade yet; see [`docs/RELEASE-READINESS.md`](docs/RELEASE-READINESS.md).
 > Live task list: [`PROGRESS.md`](PROGRESS.md) · Plan: [`docs/LeoCode_Implementation_Plan_v9.md`](docs/LeoCode_Implementation_Plan_v9.md)
-> · Picking this up? Start with [`docs/HANDOFF.md`](docs/HANDOFF.md)
-> · How far from release: [`docs/RELEASE-READINESS.md`](docs/RELEASE-READINESS.md).
+> · Picking this up? Start with [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## Key decisions
 
@@ -21,7 +20,7 @@ on-demand language runtimes — running entirely on the phone, rooted or unroote
 | Git/SSH | JGit + Apache MINA SSHD + Bouncy Castle (no native binaries) |
 | Python | official python.org Android CPython + our NDK launcher (D-012) |
 | Terminal | xterm.js over our own JNI PTY — no GPL code |
-| Android | 9 – 16 (API 28–36), arm64-v8a; measured on Android 9 (unrooted) and 15 (currently unrooted) |
+| Android | 9 – 16 (API 28–36), arm64-v8a; measured on Android 9 (unrooted) and 15 (rooted with Magisk 31.1) |
 | Root | optional, opt-in root mode; never prompts at startup (D-011) |
 
 ## Layout

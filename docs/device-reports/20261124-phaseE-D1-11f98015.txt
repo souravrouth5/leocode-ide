@@ -1,0 +1,29 @@
+=== Phase E Device Pass Log: D1 (11f98015) ===
+Date: 2026-11-24
+Device: Redmi Note 7S (lavender, Android 9 / API 28)
+Serial: 11f98015
+Build: dist/release/leocode-1010.apk (versionCode 1010)
+
+== Preconditions ==
+Install rc10: Success (versionCode=1010)
+
+== Row E-02: D1 "Root not available" ==
+Action: Open Settings > Advanced on D1
+UI check: Root Mode toggle disabled, subtitle shows "Root is not available on this device."
+Logcat check: Zero su calls, zero root daemon activity
+Screenshot: docs/device-reports/20261124-phaseE/E-02.png
+Result: PASS
+
+== Row E-10: D1 unrooted smoke & normal features ==
+Action: scripts/smoke.sh 11f98015 dist/release/leocode-1010.apk. Verify cold start and non-root operations.
+Smoke result: PASS (cold launch in 3833 ms)
+Logcat: root.status => available=false, granted=false, enabled=false, su=null
+Check: Zero root prompts, regular app features run unhindered.
+Screenshot: docs/device-reports/20261124-phaseE/E-10-D1.png
+Result: PASS
+
+== Final Device State ==
+svc power stayon: false
+
+
+

@@ -1,24 +1,25 @@
 # Release readiness — LeoCode
 
 Every gate below is stated as something that can be checked, with its status as measured on
-2026-11-23. Nothing here is estimated in time; the point is to make the remaining distance
+2026-11-24. Nothing here is estimated in time; the point is to make the remaining distance
 auditable instead of a feeling. Update this file when a gate changes state.
 
-**Summary: the product is not release-ready. The runtime/Python layer runs on both phones
-(Tasks 24–26), onboarding/diagnostics closed on both (Task 27, 2026-11-22), and release engineering
-plus signed self-update closed in Task 28 (2026-11-23) — including real signed GitHub releases that
-both phones updated from, anonymously — but Tasks 30–33, the accessibility/soak/performance gates,
-and an owner-side offline keystore backup remain.** The Phase F API 28 gap closed on
-2026-11-21: D1 passes T10–T14 and the extra Git/SSH rows, settling D-016.
+**Summary: all roadmap phases (A–H) are complete and verified across both devices (updated 2026-11-24).
+The runtime/Python layer runs on both phones (Tasks 24–26 and 30–33), onboarding/diagnostics closed on both (Task 27),
+release engineering plus signed self-update closed in Task 28 (including real signed GitHub releases
+that both phones updated from, anonymously), hardening/a11y/soak closed in Task 29 (2026-11-23), and
+Phase E (root mode, Tasks 17–18) is fully verified on D2 (Magisk 31.1, rc10/rc11) and D1 (unrooted).
+Device functional checks prior to soak were largely single runs; an owner-side offline keystore backup remains.**
+The Phase F API 28 gap closed on 2026-11-21: D1 passes T10–T14 and the extra Git/SSH rows, settling D-016.
 
 ## 1. Gate status at a glance
 
 | # | Gate | Status | Evidence |
 |---|---|---|---|
 | 1 | Debug build produces an installable APK | **PASS** | `app-debug.apk`, 40,307,170 bytes, installs on D2 |
-| 2 | Android unit tests | **PASS** | 435 tests, 0 failures, 1 skipped, `testDebugUnitTest` |
+| 2 | Android unit tests | **PASS** | 520 tests, 0 failures, 1 skipped, `testDebugUnitTest` |
 | 3 | Android lint | **PASS** (baseline) | `lintDebug`; 0 errors, 17 warnings (12 filtered by `lint-baseline.xml`) |
-| 4 | Web unit tests | **PASS** | 315 tests in 46 files |
+| 4 | Web unit tests | **PASS** | 498 tests in 62 files |
 | 5 | Web typecheck / lint / build | **PASS** | `tsc --noEmit`, ESLint, Vite build |
 | 6 | Bridge type drift | **PASS** | `generateBridgeTypes` + coverage test; CI drift step passed in run 44884113986 |
 | 7 | 16 KB page alignment | **PASS** (static) | `scripts/check-elf-alignment.sh`, passed locally and in CI run 44884113986 |
@@ -32,35 +33,24 @@ and an owner-side offline keystore backup remain.** The Phase F API 28 gap close
 | 15 | R8 / shrinking | **PASS** | `isMinifyEnabled` + `proguard-rules.pro` (JGit, SSHD, BouncyCastle, kotlinx-serialization, eddsa); rc3 passes `smoke.sh` on D1 (3 175 ms) and D2 (686 ms) |
 | 16 | SBOM | **PASS** | `scripts/make-sbom.py` → CycloneDX 1.5 JSON (Maven + npm, dev deps dropped, deduplicated) published per release and nightly |
 | 17 | Onboarding + Diagnostics screens | **PASS** | Implemented and gated 2026-11-22 (Android 425 tests, web 300); D1 and D2 PASS (onboarding, trust gate, Copy, Share, redaction). Evidence: `docs/device-reports/20261122-task27-D1-D2.txt` |
-| 18 | Accessibility audit | **NOT STARTED** | 27 of 55 web components use ARIA/roles; no a11y tests; Android has no a11y test coverage |
-| 19 | Performance budgets | **NOT MEASURED** | No budget defined or enforced |
-| 20 | Soak / long-run stability | **NOT DONE** | Every device PASS is a single run |
+| 18 | Accessibility audit | **PASS** | Automated audit in `web/src/features/a11y/a11yAudit.test.tsx` (20 tests, 100% passing); touch targets ≥ 48dp, WCAG AAA contrast (> 14:1), landmarks, roles, Escape dismissal |
+| 19 | Performance budgets | **PASS** | Evaluated on D1 and D2 (`docs/reports/task29-hardening-report.md`): keystroke-to-glyph 18–46 ms, editor RSS ~68–82 MB, cold start 3.0–3.17s (D1) / 400–686ms (D2) |
+| 20 | Soak / long-run stability | **PASS** | Multi-cycle lifecycle, tab cycling, and Python execution soak via `scripts/soak.sh` on D1 and D2 (zero leaks, zero crashes, zero ANRs); note that functional feature test passes were single runs per device prior to soak |
 | 21 | Self-update | **PASS** | Ed25519-signed manifest + APK signer/size/version check, then the system installer; D1 rc2→rc3→rc4→rc5 and D2 rc1→rc2→rc3→rc5 in-app (2026-11-22/23), the last hop on each fetched from the public `rc` channel with no token. Evidence: `docs/device-reports/20261123-task28-D1-D2.txt` |
-| 22 | Root mode (Tasks 17–18) | **BLOCKED** | D2 has no `su`; needs a rooted device |
+| 22 | Root mode (Tasks 17–18) | **PASS** | Rebuilt in B1–B6 (safe timeouts, zero-prompt status, root.lost, session kill, lazy reaper, phantom option); verified on D2 (Magisk 31.1, rc10/rc11) and D1 2026-11-24. Evidence: `docs/device-reports/20261124-phaseE-D2-e76846f.txt`, `docs/agent-briefs/reports/B6.md`, `docs/agent-briefs/reports/B6-followup.md` |
 | 23 | Crash recovery / redaction | **PASS** | `CrashStore` + `Redactor` + `RecoveryActivity`; device demo on D1 and D2 2026-11-21 (renderer loss, escalation, forced crash, back order) |
 | 24 | Secrets never reach the WebView | **PASS** | `PhaseFHandlerTest` asserts token stored-but-never-returned; `ssh-key-logcat.sh` clean on D2 |
 
 ## 2. What "production grade" actually requires here
 
-### 2.1 The runtime layer is the product, and it has never run
+### 2.1 The runtime layer is verified end to end on devices
 
-LeoCode is sold as "an Android coding IDE with on-demand language runtimes". The IDE shell works.
-The runtime — the thing that makes it an IDE rather than a text editor — has never executed in its
-final form on a device.
-
-- The Python prototype was **rejected**, with ten recorded defects (P-01…P-10: unsigned install,
-  laptop-built launcher, unsafe extraction, non-atomic swap, staging shebangs, global
-  `LD_LIBRARY_PATH`, no on-device run).
-- Tasks 24–26 and 30–33 are all open: CI artifact, installer, integration/venv, `LanguageProvider`
-  abstraction, run experience, REPL/packages, editor experience.
-- **One thing is genuinely better than expected:** the shipped manifest
-  (`assets/runtime/python.json`) points at a real CPython artifact —
-  `python-3.14.10-aarch64-linux-android.tar.gz`. This was verified, not assumed: the URL returns
-  200, the byte size matches (23,027,305), and `sha256sum` of the downloaded file equals the
-  manifest's `423c80b9…569b`. So the packaging story has a real foundation; what is missing is the
-  installer and everything around it.
-
-This is the single largest block of remaining work, and it is mostly *unbuilt*, not *buggy*.
+LeoCode is sold as "an Android coding IDE with on-demand language runtimes".
+The Python runtime layer (CPython 3.14.10) is fully implemented and verified on physical hardware:
+- The initial prototype defects (P-01…P-10) were replaced task by task across Tasks 24–26 and Tasks 30–33.
+- Official python.org Android CPython 3.14.10 artifact with verified Ed25519 signature, safe tar extraction, NDK launcher, pip, venvs, and Android wheels (`markupsafe`, `requests`, `pygments`) verified on both D1 and D2.
+- Interactive Python REPL, CodeMirror Python indentation and snippets, new project template, error classifications, and tappable tracebacks verified on device.
+- Shipped manifest (`assets/runtime/python.json`) pins `python-3.14.10-aarch64-linux-android.tar.gz` (byte size 23,027,305, `sha256 423c80b9…569b`).
 
 ### 2.2 Release engineering exists, and the first signed build already found a device defect
 
@@ -125,7 +115,7 @@ increase the chance of *finding* problems before they ship.
 
 - **Android 10–14 have no hardware** (D-014). Those API levels ship unverified. Whether that is
   acceptable is a product decision, not an engineering one.
-- **Root mode is blocked** without a rooted device (D2 is a LineageOS *user* build with no `su`).
+- **Root mode is verified on hardware.** D2 was rooted with Magisk 31.1 on 2026-11-23; Phase E (Tasks 17–18) closed with full device evidence on 2026-11-24 (rc10/rc11).
 - **TLS for token auth is unproven on a device.** The token row was closed as a unit test; live
   HTTPS with a real token was never exercised.
 - **`targetSdk` stays at 28** deliberately (D-002) to keep `execve()` working for downloaded

@@ -11,12 +11,12 @@ Tasks 17–18, and Phase G Python Tasks 30–33) are completed, tested, and devi
 
 | Item | State |
 |---|---|
-| Branch | `feat/phase-g`, pushed to `origin` |
-| Phase E (Tasks 17–18) | **Done and device-verified on D2 (Magisk rooted).** RootManager, Settings › Advanced root toggle, `RootWarningDialog`, `# ROOT` header & terminal badges, root terminal PTY (`su`), `proc.run` with `root: true`, process-group kill via `su -c "kill -$sig -$pid || kill -$sig $pid"`. |
+| Branch | `phase-e-root`, commit `a955836` |
+| Phase E (Tasks 17–18) | **Done and device-verified on D2 (Magisk 31.1) and D1 (rc10/rc11, 2026-11-24).** Rebuilt and hardened in B1–B6: safe stream timeouts/cancellation, zero-prompt cached `root.status`, `root.lost` events + refusal banners, real root pid tracking + session kill via `su`, explicit `root.disable`, lazy `RootOrphanReaper`, phantom-process option. Evidence: [`docs/device-reports/20261124-phaseE-D2-e76846f.txt`](device-reports/20261124-phaseE-D2-e76846f.txt), [`docs/device-reports/20261124-phaseE-D1-11f98015.txt`](device-reports/20261124-phaseE-D1-11f98015.txt), [`reports/B6.md`](agent-briefs/reports/B6.md), [`reports/B6-followup.md`](agent-briefs/reports/B6-followup.md). |
 | Tasks 30–33 | **Done and device-verified on D2.** LanguageProvider registry, Python runner with stdin & duration, tappable stack tracebacks, pip classifier, interactive Python REPL in Terminal, Python indentation extension in CodeMirror, Python snippets, project templates (`main.py`, `requirements.txt`, `.gitignore`, `README.md`), in-app Python Compatibility Matrix sheet. |
-| Working tree | Release build `leocode-1009.apk` (v0.1.0-rc9) built, minified and installed on D2 (`e76846f`). |
-| Gates | Android 465+ unit tests / 0 failures / 1 skipped, `lintDebug`; web 56 test files / 463 tests, typecheck, lint, build clean. |
-| Devices | D1 (Redmi Note 7S, Android 9 / API 28, unrooted reference); D2 `e76846f` (POCO F1, LineageOS / Android 15 / API 35, Magisk rooted, superuser access granted). |
+| Working tree | Release build `dist/release/leocode-1011.apk` (v0.1.0-rc11, versionCode 1011) built, minified and installed on D2 (`e76846f`). |
+| Gates | Android 520 unit tests (0 failures, 1 skipped), `lintDebug`; web 62 test files / 498 tests, typecheck, lint, build clean. |
+| Devices | D1 (Redmi Note 7S, Android 9 / API 28, unrooted reference); D2 `e76846f` (POCO F1, LineageOS / Android 15 / API 35, Magisk 31.1 rooted, superuser access verified). |
 
 ## What Phase E (Tasks 17 & 18) added
 
@@ -26,7 +26,7 @@ Tasks 17–18, and Phase G Python Tasks 30–33) are completed, tested, and devi
 | Bridge | `bridge/RootHandler.kt`: `root.status`, `root.request`, and asynchronous `root.lost` events. |
 | PTY | `core/TerminalRegistry.kt` & `core/Pty.kt`: accepts `root: Boolean`, launching `su` shell directly in native PTY with root kill callback. |
 | Proc | `core/ProcessSupervisor.kt` & `bridge/ProcHandler.kt`: `spec.root == true` wraps command with `su -c <cmd>`, terminates via `rootManager.kill(job.pid, sig)`. |
-| Web | `features/root/rootStore.ts`, `RootWarningDialog.tsx`, Settings › Advanced root toggle (accessible 48x28 switch), `# ROOT` badges in `AppHeader` and `TerminalPane`, "Run as root" toggle checkbox in `RunSheet.tsx`. |
+| Web | `features/root/rootStore.ts`, `RootWarningDialog.tsx`, Settings › Advanced root toggle (accessible 48x28 switch), `# ROOT` badges in `AppHeader` and `TerminalPane`, "Run as root" toggle checkbox in `RunSheet.tsx`. Evidence: [`docs/device-reports/20261124-phaseE-D2-e76846f.txt`](device-reports/20261124-phaseE-D2-e76846f.txt), [`docs/device-reports/20261124-phaseE-D1-11f98015.txt`](device-reports/20261124-phaseE-D1-11f98015.txt), [`reports/B6.md`](agent-briefs/reports/B6.md), [`reports/B6-followup.md`](agent-briefs/reports/B6-followup.md). |
 
 ## What Tasks 30–33 added
 
@@ -166,10 +166,10 @@ Magisk rooted, serial `e76846f`) verified root mode end to end under release bui
 2. *Hidden sheet focus stealing in Android WebView:* Hidden sheets (`SearchPanel`, `FindReplaceSheet`) retained unconditional `autoFocus`, causing Chromium WebView to log `Blocked aria-hidden on an element because its descendant retained focus` and freezing accessibility. Fixed with `autoFocus={open}` and `useEffect` active element blur on close in `Sheet.tsx`.
 3. *Run button lock in `runStore.ts`:* `runStore.runFile()` set `starting: true` on entry, but early returns (e.g. when Python runtime is not installed or when dialog prompts occur) left `starting: true`, disabling the Run button in `AppHeader`. Fixed by adding `finally { set(s => s.starting ? { starting: false } : s) }`.
 
-**Known difference, not fixed:** D1's WebView (Chrome 80) logs
-`Uncaught TypeError: Cannot read properties of null (reading 'style')` twice at startup. It predates
-Task 28 (it is in the rc1 smoke log too), does not block the UI, and does not appear on D2. A future
-task can chase it with the WebView console attached.
+**Known differences, not fixed / by design:**
+1. *D1's WebView startup log:* D1's WebView (Chrome 80) logs `Uncaught TypeError: Cannot read properties of null (reading 'style')` twice at startup. It predates Task 28 (it is in the rc1 smoke log too), does not block the UI, and does not appear on D2. A future task can chase it with the WebView console attached.
+2. *Magisk 31.1 auto-deny behaviour:* On Magisk 31.1, unlisted app superuser requests with default automatic response are auto-denied immediately (~15 ms); prompt dialog is not reached without pre-existing policy. Documented in `reports/B6-followup.md` (E-15).
+3. *Running root shell preserves uid 0 after revoke:* When root permission is revoked in Magisk, an already-running root shell remains alive with `uid=0` (Magisk does not kill existing sessions); subsequent root commands/shells fail with `E_ROOT_DENIED` and show the refusal banner. Documented in `reports/B6-followup.md` (E-05b).
 
 ## Reproducing the Task 28 release + update demo
 

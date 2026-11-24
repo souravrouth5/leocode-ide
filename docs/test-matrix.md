@@ -8,16 +8,17 @@ Device policy: [plan v9 §Devices](LeoCode_Implementation_Plan_v9.md#devices) an
 | # | Model | Android | Root | SELinux | ABI | Userspace | PAGE_SIZE | WebView | ROM / skin | Storage free | RAM |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | **D1** | Redmi Note 7S (`lavender`) | 9 (SDK 28, patch 2020-02-05) | No | enforcing, `untrusted_app` | arm64-v8a (+v7a,abi) | toybox, no unzip/git/python | **4096** | Chrome **137.0.7151.115** | MIUI V11 (code 9) | 15 786 MB / 51 205 MB | 3.8 GB (heap 256 MB, `docs/device-reports/20261111-harness-D1-192.168.29.26_5555.txt:13`) |
-| **D2** | POCO F1 (`beryllium`) | 15 (SDK 35, patch 2025-09-01) | **No `su`** (LineageOS user build; Magisk/KernelSU not installed) | enforcing, `untrusted_app_27` | arm64-v8a (+v7a) | toybox incl. unzip/curl; no git/python/su | **4096** | WebView **156.0.8078.47** | LineageOS, build `BP1A.250505.005`, `lineage_beryllium-user` | 101 021 MB free / 115 797 MB | 5.7 GB (heap 256 MB, `docs/device-reports/20261111-harness-D2-e76846f.txt:11`) |
+| **D2** | POCO F1 (`beryllium`) | 15 (SDK 35, patch 2025-09-01) | **Rooted (Magisk 31.1)** (verified 2026-11-23; Phase E verified 2026-11-24) | enforcing, `untrusted_app_27` | arm64-v8a (+v7a) | toybox incl. unzip/curl; no git/python/su | **4096** | WebView **156.0.8078.47** | LineageOS, build `BP1A.250505.005`, `lineage_beryllium-user` | 101 021 MB free / 115 797 MB | 5.7 GB (heap 256 MB, `docs/device-reports/20261111-harness-D2-e76846f.txt:11`) |
 | X1 | SD695 phone (optional, unavailable) | 11 | No | | | | | | | | |
 | X2 | Stock Android 14+ (optional, unavailable) | 14+ | No | | | | | | | | |
 
 Raw reports: D1 [`device-reports/20261108-131918-device.txt`](device-reports/20261108-131918-device.txt); D2 [`device-reports/20261111-141335-device.txt`](device-reports/20261111-141335-device.txt). Smoke logs: `docs/device-reports/*-smoke-*.txt`.
 
-**D2 root status (2026-11-11).** `su` is absent and `ro.debuggable=0`, so D2 is **unrooted** as
-measured. D-014/Phase E expect root on D2: install a root manager (Magisk or KernelSU) and record
-it here before Task 17. Until then root-mode rows stay blocked, and unrooted Android 15 is exactly
-the state Task 3 needs.
+**D2 root status (updated 2026-11-24).** D2 POCO F1 was rooted with Magisk 31.1 on 2026-11-23.
+Phase E root mode was fully implemented and verified on D2 (rc10/rc11, 2026-11-24) across rows E-00…E-19;
+D1 provides the unrooted reference where root toggle is disabled. Evidence:
+`docs/device-reports/20261124-phaseE-D2-e76846f.txt`, `docs/device-reports/20261124-phaseE-D1-11f98015.txt`,
+`docs/agent-briefs/reports/B6.md`, `docs/agent-briefs/reports/B6-followup.md`.
 
 **D2 page size.** 4096 B, so 16 KB hardware behaviour is not measurable here. The local and CI APK
 check (`scripts/check-elf-alignment.sh`, CI run 44884113986) covers static alignment.
@@ -32,7 +33,7 @@ D1 measured 2026-11-08, `app-debug.apk` targetSdk 28, driven by
 `adb shell am start -n dev.leocode/.HarnessActivity --es run all`.
 The harness lives in the debug source set only; release builds do not contain it (Task 4).
 
-| Test | D1 (A9) | D2 (A15, unrooted) | Notes |
+| Test | D1 (A9) | D2 (A15, rooted (Magisk 31.1)) | Notes |
 |---|---|---|---|
 | Install targetSdk-28 APK | **PASS** | **PASS** | D2: Android 15 floor is targetSdk 24 |
 | Old-target warning dialog at launch | not recorded | **No dialog** (observed manually; no screenshot) | D2 app opened straight to the IDE on the `20261111` run |
@@ -252,27 +253,39 @@ screenshots are optional but useful for the host-key prompt.
 | terminal title sanitised | | |
 | ANR count during session | | |
 
-## Root mode (Tasks 17–18, D2 only)
+## Root mode (Tasks 17–18, D2 rooted Magisk 31.1, D1 unrooted)
 
-> **Blocked on D2 (2026-11-11):** `su` is absent (`ro.debuggable=0`, LineageOS user build).
-> Every D2 cell in this table is therefore **blocked until a root manager is installed and
-> recorded** in the devices table. D1 correctly reports "no su" and never prompts.
+> **Verified on device (2026-11-24, rc10/rc11):** D2 POCO F1 (`e76846f`, Android 15 / LineageOS 22 / API 35, Magisk 31.1)
+> and D1 Redmi Note 7S (`11f98015`, Android 9 / API 28, unrooted).
+> Raw logs: [`device-reports/20261124-phaseE-D2-e76846f.txt`](device-reports/20261124-phaseE-D2-e76846f.txt),
+> [`device-reports/20261124-phaseE-D1-11f98015.txt`](device-reports/20261124-phaseE-D1-11f98015.txt),
+> [`agent-briefs/reports/B6.md`](agent-briefs/reports/B6.md), [`agent-briefs/reports/B6-followup.md`](agent-briefs/reports/B6-followup.md).
 
-| Test | D1 | D2 |
-|---|---|---|
-| No `su` prompt at startup | **N/A** (no `su`) | blocked: D2 not rooted |
-| Toggle shows "Root not available" | | blocked: D2 not rooted |
-| Enable → warning sheet → grant | N/A | blocked: D2 not rooted |
-| Grant denied → `E_ROOT_DENIED` sheet | N/A | blocked: D2 not rooted |
-| Grant revoked → next root shell / Run as root fails with `E_ROOT_DENIED` + `root.lost` banner; running root shell unaffected (documented) | N/A | blocked: D2 not rooted |
-| Root session `id` shows `uid=0` | N/A | blocked: D2 not rooted |
-| Run as root: output + exit code | N/A | blocked: D2 not rooted |
-| Stop root job leaves no process (`su -c ps`) | N/A | blocked: D2 not rooted |
-| ROOT badge visible while root process alive | N/A | blocked: D2 not rooted |
-| `su` denied: all non-root features unchanged | N/A | blocked: D2 not rooted |
-| Disable persists across relaunch | | |
-| `root.status`/Diagnostics never prompt | | |
-| Root orphan reaped on next root use after a force-stop | | |
+| Row | Test | D1 (A9, unrooted) | D2 (A15, Magisk 31.1) | Evidence |
+|---|---|---|---|---|
+| E-00 | Step 0: `su` discovery + root `sh` session leader | **N/A** (no `su`) | **PASS** — `su=/product/bin/su`, root `sh` session leader (`Ss`, SID = PID = pidfile pid) | B6 report Step 0 |
+| E-01 | No `su` prompt at startup / onboarding / settings | **PASS** — no prompt (`root.status` `available=false`) | **PASS** — no prompt, no unsolicited `su` exec (`root.status` `available=true, granted=false, enabled=false`) | `20261124-phaseE-D1-11f98015.txt`, `20261124-phaseE-D2-e76846f.txt` |
+| E-02 | Toggle shows "Root not available on this device" | **PASS** — toggle disabled with message | **N/A** (`su` available) | `20261124-phaseE-D1-11f98015.txt` |
+| E-03 | Enable → warning sheet → grant → header `# ROOT` badge | **N/A** (no `su`) | **PASS** — warning sheet Cancel/Enable works; grant sets `granted=true, enabled=true`; `# ROOT` badge shown | `20261124-phaseE-D2-e76846f.txt` |
+| E-04 | Grant denied → `E_ROOT_DENIED` sheet + Try again | **N/A** | **PASS** — Magisk policy deny shows error sheet with `E_ROOT_DENIED` + Try again | `20261124-phaseE-D2-e76846f.txt` |
+| E-04b | Failed Try again error reporting | **N/A** | **PASS** — Try again under deny reports `context: "Request root"` without unhandled rejection | B6 report E-04b |
+| E-05 | Grant revoked → next root op fails `E_ROOT_DENIED` + `root.lost` banner | **N/A** | **PASS** — shell B shows "Root access was refused. The root session ended."; running shell A keeps uid=0 | `20261124-phaseE-D2-e76846f.txt`, B6 report |
+| E-05b | Running Shell A uid 0 across deny + Run sheet refusal banner | **N/A** | **PASS** — Shell A 2nd `id` output `uid=0(root)`; Run sheet rendered `"Root access was refused. The process ended."` | `reports/B6-followup.md` E-05b |
+| E-06 | Root session `id` shows `uid=0` | **N/A** | **PASS** — `uid=0(root) gid=0(root) groups=0(root) context=u:r:magisk:s0` | `20261124-phaseE-D2-e76846f.txt` |
+| E-07 | Run as root: output + exit code | **N/A** | **PASS** — script `id -u; exit 3` prints `0` and `EXIT 3` | `20261124-phaseE-D2-e76846f.txt` |
+| E-08 | Stop root job leaves no process | **N/A** | **PASS** — `sleep 600` killed by `RootManager.killSession`, `ps` shows 0 sleep processes | `20261124-phaseE-D2-e76846f.txt` |
+| E-08b | Exit Root Shell kills foreground child | **N/A** | **PASS** — foreground `sleep 600` (PGID 10960) reaped on Exit Root Shell, pidfile removed | B6 report E-08b |
+| E-09 | ROOT badge visible only while root process alive | **N/A** | **PASS** — header has mode badge; tab / status bar show red `# ROOT` only while process is running | `20261124-phaseE-D2-e76846f.txt` |
+| E-10 | `su` denied: non-root features unchanged | **PASS** | **PASS** — smoke, Python execution, PTY terminal, Git operations all pass under `su` deny | `20261124-phaseE-D1-11f98015.txt`, `20261124-phaseE-D2-e76846f.txt` |
+| E-11 | Root orphan reaped on next root use after force-stop | **N/A** | **PASS** — root sleep survived force-stop; reaped within 3 s on next root shell launch | `20261124-phaseE-D2-e76846f.txt` |
+| E-12 | Disable persists across relaunch (`root.disable`) | **N/A** | **PASS** — disabled in Settings, force-stopped, relaunched: toggle stayed off, root ops return `E_ROOT_DENIED` | `20261124-phaseE-D2-e76846f.txt` |
+| E-13 | `root.status` / diagnostics never prompt | **PASS** | **PASS** — policy=prompt: opening Settings and Diagnostics makes 0 `su` calls, 0 prompts | `20261124-phaseE-D1-11f98015.txt`, `20261124-phaseE-D2-e76846f.txt` |
+| E-14 | Phantom-process option (`max_phantom_processes`) | **N/A** | **PASS** — applied `2147483647`, confirmed via `device_config get activity_manager max_phantom_processes` | `20261124-phaseE-D2-e76846f.txt` |
+| E-15 | Bridge timeouts hold during pending prompt | **N/A** | **NOT REACHABLE ON DEVICE** — Magisk 31.1 auto-denies unlisted apps in ~15 ms (default policy); timeout verified by unit test `RootManagerTest › ProcessShellRunner timeout destroys process forcibly and returns timeout result` | `reports/B6-followup.md` E-15 |
+| E-16 | Root kill reaches spawned children | **N/A** | **PASS** — `sleep 600 & sleep 601 & wait` killed; both child sleeps gone | `20261124-phaseE-D2-e76846f.txt` |
+| E-17 | Early Stop doesn't leak | **N/A** | **PASS** — Stop within 0.5 s of launch cleanly terminates process; no pidfile or orphan left | `20261124-phaseE-D2-e76846f.txt` |
+| E-18 | Re-request root keeps open root shells; foreground job killed on exit | **N/A** | **PASS** — foreground `sleep 900` survived policy deny -> allow, then killed cleanly on Exit Root Shell via session kill | B6 report E-18 |
+| E-19 | Background `sleep 700 &` + foreground `sleep 701` session kill on restart | **N/A** | **PASS** — both sleeps survived force-stop; both reaped within 3 s by `RootOrphanReaper` session kill on relaunch; old pidfile unlinked | `reports/B6-followup.md` E-19 |
 
 ## Background survival and lifecycle (Task 10)
 

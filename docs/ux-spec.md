@@ -107,7 +107,7 @@ Root mode is **not** part of onboarding; it is never mentioned to users whose de
     an inline banner: "Root access was refused. The root session ended." with **Try again**
     (`requestRoot`) and **Open normal shell**.
   - A `root.lost` whose `jobId` matches the current run displays an inline banner in the run sheet
-    with **Try again**.
+    with **Try again**. Note: run-sheet Try again re-runs the file directly (`onRetryRoot = runFile`) without requesting root first; after a loss the host returns `E_ROOT_DENIED` right away, whose error-sheet retry then triggers `retryRoot`.
 - **Phantom-process option (R-09):**
   - In Settings › About under Background survival: on Android 12+ (SDK ≥ 31) when root mode is enabled
     and the store is not in a lost state, shows an **Apply until reboot** button.
