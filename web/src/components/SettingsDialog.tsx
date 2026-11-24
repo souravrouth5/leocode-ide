@@ -1,6 +1,12 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
-import type { StorageInfo } from "../bridge"
+import { useStores } from "../app/stores"
+import type { Bridge, StorageInfo } from "../bridge"
+import {
+  shouldShowPhantomOption,
+  applyPhantomLimit,
+  queryAndroidSdk
+} from "../features/root/phantom"
 import { FONT_FAMILIES, type UserSettings } from "../settings/userSettings"
 import {
   EDITOR_THEMES,
@@ -18,6 +24,25 @@ import {
   TypeIcon
 } from "./Icons"
 import { Sheet } from "./Sheet"
+
+function useOptionalStores() {
+  try {
+    return useStores()
+  } catch {
+    return null
+  }
+}
+
+function useRootStoreState(stores: ReturnType<typeof useOptionalStores>) {
+  const root = stores?.root
+  const [state, setState] = useState(() => root?.getState() ?? null)
+  useEffect(() => {
+    if (!root) return
+    setState(root.getState())
+    return root.subscribe((next) => setState(next))
+  }, [root])
+  return state
+}
 
 interface Props {
   open: boolean
@@ -50,6 +75,13 @@ interface Props {
   rootLoading?: boolean
   onRequestRoot?: () => void
   onDisableRoot?: () => void
+  /** Phase E (Task 10/R-09): Phantom limit support */
+  androidSdk?: number | null
+  bridge?: Bridge
+  rootLost?: boolean
+  onApplyPhantomSuccess?: (value: string) => void
+  onApplyPhantomError?: (error: unknown) => void
+  initialTab?: "editor" | "appearance" | "git" | "about" | "advanced"
 }
 
 export function SettingsDialog({
@@ -76,9 +108,75 @@ export function SettingsDialog({
   rootEnabled = false,
   rootLoading = false,
   onRequestRoot,
-  onDisableRoot
+  onDisableRoot,
+  androidSdk,
+  bridge: bridgeProp,
+  rootLost: rootLostProp,
+  onApplyPhantomSuccess,
+  onApplyPhantomError,
+  initialTab = "editor"
 }: Props) {
-  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about" | "advanced">("editor")
+  const [activeTab, setActiveTab] = useState<"editor" | "appearance" | "git" | "about" | "advanced">(initialTab)
+
+  const stores = useOptionalStores()
+  const rootStoreState = useRootStoreState(stores)
+  const isRootEnabled = rootEnabled ?? rootStoreState?.enabled ?? false
+  const isRootLost = rootLostProp ?? (rootStoreState ? rootStoreState.lastLost !== null : false)
+
+  const effectiveBridge = bridgeProp ?? stores?.bridge
+  const [detectedSdk, setDetectedSdk] = useState<number | null>(androidSdk ?? null)
+  const [confirmPhantomOpen, setConfirmPhantomOpen] = useState(false)
+  const [phantomApplying, setPhantomApplying] = useState(false)
+  const [phantomAppliedValue, setPhantomAppliedValue] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (androidSdk !== undefined) {
+      setDetectedSdk(androidSdk)
+      return
+    }
+    if (!effectiveBridge) {
+      setDetectedSdk(null)
+      return
+    }
+    let active = true
+    queryAndroidSdk(effectiveBridge).then((val) => {
+      if (active) setDetectedSdk(val)
+    })
+    return () => {
+      active = false
+    }
+  }, [androidSdk, effectiveBridge])
+
+  const showPhantomOption = shouldShowPhantomOption({
+    sdk: detectedSdk,
+    enabled: isRootEnabled,
+    lost: isRootLost
+  })
+
+  const handleApplyPhantom = async () => {
+    if (!effectiveBridge || phantomApplying) return
+    setPhantomApplying(true)
+    try {
+      const val = await applyPhantomLimit(effectiveBridge)
+      setPhantomAppliedValue(val || "2147483647")
+      setConfirmPhantomOpen(false)
+      if (stores?.notifications) {
+        stores.notifications.getState().enqueue({
+          kind: "success",
+          message: `Phantom-process limit applied: ${val || "2147483647"}`
+        })
+      }
+      onApplyPhantomSuccess?.(val)
+    } catch (err) {
+      setConfirmPhantomOpen(false)
+      if (stores?.errors) {
+        stores.errors.getState().report(err, { context: "Apply phantom limit" })
+      }
+      onApplyPhantomError?.(err)
+    } finally {
+      setPhantomApplying(false)
+    }
+  }
 
   const changeFontSize = (delta: number) => {
     const current = settings.fontSize
@@ -499,6 +597,23 @@ export function SettingsDialog({
                   <strong>Rooted phones:</strong> keep more background children with
                   <code>device_config put activity_manager max_phantom_processes 2147483647</code>
                   (reverts on reboot).
+                  {showPhantomOption && (
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() => setConfirmPhantomOpen(true)}
+                        disabled={phantomApplying}
+                      >
+                        Apply until reboot
+                      </button>
+                      {phantomAppliedValue && (
+                        <span style={{ fontSize: 13, color: "var(--color-success, #22c55e)" }}>
+                          Applied ({phantomAppliedValue})
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </li>
               </ul>
             </div>
@@ -580,6 +695,40 @@ export function SettingsDialog({
           </div>
         )}
       </div>
+
+      {confirmPhantomOpen && (
+        <Sheet
+          open={confirmPhantomOpen}
+          onClose={() => setConfirmPhantomOpen(false)}
+          title="Phantom-process limit"
+          className="phantom-confirm-sheet"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+              Raises Android&apos;s background child-process limit until the next reboot.
+              LeoCode runs this as root: <code>device_config put activity_manager max_phantom_processes 2147483647</code>.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn ghost secondary-btn"
+                onClick={() => setConfirmPhantomOpen(false)}
+                disabled={phantomApplying}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={handleApplyPhantom}
+                disabled={phantomApplying}
+              >
+                {phantomApplying ? "Applying..." : "Apply"}
+              </button>
+            </div>
+          </div>
+        </Sheet>
+      )}
     </Sheet>
   )
 }

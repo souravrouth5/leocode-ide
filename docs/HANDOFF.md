@@ -22,7 +22,7 @@ Tasks 17–18, and Phase G Python Tasks 30–33) are completed, tested, and devi
 
 | Layer | Change |
 |---|---|
-| Host | `core/RootManager.kt`: non-intrusive `su` binary lookup (`/product/bin/su`, `/system/bin/su`, `/system/xbin/su`, `/sbin/su`, `/vendor/bin/su`, `/data/adb/ksu/bin/su`), non-blocking permission checking, explicit user permission requests (`su -c id`), command escaping for POSIX shells, and root process group termination via `su -c "kill -$sig -$pid || kill -$sig $pid"`. |
+| Host | `core/RootManager.kt`: non-intrusive `su` binary lookup matching `RootManager.DEFAULT_SU_PATHS` (`/product/bin/su`, `/system/bin/su`, `/system/xbin/su`, `/sbin/su`, `/su/bin/su`, `/system/bin/.ext/.su`, `/vendor/bin/su`, `/debug_ramdisk/su`, `/system_ext/bin/su`, `/data/local/xbin/su`, `/data/local/bin/su`, `/data/local/su`; only Magisk is tested; no `/data/adb/ksu/bin/su` as app sandbox cannot stat `/data/adb`), non-blocking permission checking, explicit user permission requests (`su -c id`), command escaping for POSIX shells, and root process group termination via `su -c "kill -$sig -$pid || kill -$sig $pid"`. |
 | Bridge | `bridge/RootHandler.kt`: `root.status`, `root.request`, and asynchronous `root.lost` events. |
 | PTY | `core/TerminalRegistry.kt` & `core/Pty.kt`: accepts `root: Boolean`, launching `su` shell directly in native PTY with root kill callback. |
 | Proc | `core/ProcessSupervisor.kt` & `bridge/ProcHandler.kt`: `spec.root == true` wraps command with `su -c <cmd>`, terminates via `rootManager.kill(job.pid, sig)`. |
@@ -242,18 +242,7 @@ adb -s <serial> shell run-as dev.leocode dd \
 
 ## What to do next
 
-1. **Back up the release keys (owner action).** The five `release` environment secrets are
-   configured and restricted to `main` + `v*`, and rc1/rc4/rc5 published from them. What is still
-   owner-only is an offline backup of `~/.config/leocode/release.jks`, `release.properties` and
-   `release-signing.pem`, plus a rotation decision. The updater compares the archive's current
-   signers with the installed app's, so replacing the keystore would reject updates for everyone
-   until they reinstall by hand; treat the keystore as permanent. The pinned expected certificate in
-   the CI release job (`2b294e12…bdaf`) must be updated in the same commit as any new keystore.
-2. **Task 24 release (owner action).** Create the protected `python-runtime` environment, upload
-   `RUNTIME_SIGNING_KEY`, and dispatch CI so the release job publishes the tarball, manifest,
-   signature, wheel and `SHA256SUMS`.
-3. **Ask before starting Task 29.** Task 28 was explicitly scoped and approved; do not roll into the
-   next Phase G task without confirmation.
+See [`docs/REMAINING-WORK-PLAN.md`](REMAINING-WORK-PLAN.md) §5 for the remaining execution plan (Phase E root device passes on D1 and D2, doc reconciliation, and remaining Phase G items).
 
 ## Traps that cost time (read before debugging a "network" failure)
 
