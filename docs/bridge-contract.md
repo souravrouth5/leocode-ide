@@ -71,7 +71,7 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 
 | Class | Methods | Default |
 |---|---|---|
-| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `root.status`, `draft.list/read`, `workspace.list`, `git.status/diff/log/branch.list/remote.list`, `ssh.keys.list`, `ssh.hostkey.list`, `secrets.token.list` | 10 s |
+| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `root.status`, `root.disable`, `draft.list/read`, `workspace.list`, `git.status/diff/log/branch.list/remote.list`, `ssh.keys.list`, `ssh.hostkey.list`, `secrets.token.list` | 10 s |
 | Write | `fs.write`, `workspace.*`, `draft.save/delete`, `git.init/add/reset/commit/branch.create/branch.delete/checkout/remote.set/remote.remove/conflict/resolve`, `ssh.keys.generate/import/delete`, `ssh.hostkey.delete`, `secrets.token.set/delete` | 20 s |
 | User-wait | `saf.*`, `storage.requestPermission`, `root.request`, `ssh.hostkey.answer` | none (user-driven; cancellable) |
 | Long, streamed | `proc.run` | reply on start within 10 s; then events, no overall timeout |
@@ -175,8 +175,9 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `term.close` | `{ sessionId }` → `{ closed }` | live | Kills the process group (via `su` for root sessions) |
 | `proc.run` | `{ cwd, argv[], env?, timeoutMs?, root? }` → `{ jobId, pid }` | live (`root` Task 18) | Events `proc.stdout/stderr/exit`; env keys allowlisted; no timeout by default |
 | `proc.cancel` | `{ jobId }` → `{}` | live (grace period Task 6) | SIGTERM → 2 s → SIGKILL on the group |
-| `root.status` | `{}` → `{ available, granted, enabled }` | planned (Task 17) | Never prompts |
-| `root.request` | `{}` → `{ granted }` | planned (Task 17) | User-wait; `E_ROOT_UNAVAILABLE` / `E_ROOT_DENIED` |
+| `root.status` | `{}` → `{ available, granted, enabled }` | live (Task 17) | Never prompts |
+| `root.request` | `{}` → `{ granted }` | live (Task 17) | User-wait; `E_ROOT_UNAVAILABLE` / `E_ROOT_DENIED` |
+| `root.disable` | `{}` → `{ available, granted, enabled }` | live (Task 17) | Clears the preference, ends root sessions and jobs, never prompts |
 | `git.init` | `{ path?, branch? }` → `GitStatusReply` | live (Task 19–23) | Creates `.git`; default branch from config or `main` |
 | `git.status` | `{ path? }` → `GitStatusReply` | live (Task 19–23) | Groups staged / changed / untracked / conflicts; ahead/behind from upstream |
 | `git.add` | `{ path?, paths[] }` → `GitStatusReply` | live (Task 19–23) | Paths are repo-relative; `.`/`*` staged by the UI as individual paths |
@@ -371,7 +372,7 @@ material. `E_INTERNAL` keeps its correlation id.
 | `saf.progress` | `{ phase: "import" \| "export" \| "restore", files, bytes }` | `saf.importTree` / `saf.exportWorkspace` / `saf.restoreArchive` |
 | `app.lowMemory` | `{}` | `onTrimMemory` |
 | `app.restored` | `{ reason: "renderer" \| "crash" }` | Task 8 — shows the "Restored after a problem" banner |
-| `root.lost` | `{ sessionId? }` | Task 18 — grant revoked mid-session |
+| `root.lost` | `{ sessionId?, jobId?, reason }` | Sent on the stream of the root terminal session or root job it concerns, when `su` refuses a new root operation (`denied`) or the grant is gone (`revoked`). A root shell that is already running keeps uid 0 after a revoke in Magisk; the loss shows up on the next root operation. |
 
 ## Versioning
 
