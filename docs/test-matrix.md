@@ -264,12 +264,15 @@ screenshots are optional but useful for the host-key prompt.
 | Toggle shows "Root not available" | | blocked: D2 not rooted |
 | Enable → warning sheet → grant | N/A | blocked: D2 not rooted |
 | Grant denied → `E_ROOT_DENIED` sheet | N/A | blocked: D2 not rooted |
-| Grant revoked in root manager mid-session → session ends + banner | N/A | blocked: D2 not rooted |
+| Grant revoked → next root shell / Run as root fails with `E_ROOT_DENIED` + `root.lost` banner; running root shell unaffected (documented) | N/A | blocked: D2 not rooted |
 | Root session `id` shows `uid=0` | N/A | blocked: D2 not rooted |
 | Run as root: output + exit code | N/A | blocked: D2 not rooted |
 | Stop root job leaves no process (`su -c ps`) | N/A | blocked: D2 not rooted |
 | ROOT badge visible while root process alive | N/A | blocked: D2 not rooted |
 | `su` denied: all non-root features unchanged | N/A | blocked: D2 not rooted |
+| Disable persists across relaunch | | |
+| `root.status`/Diagnostics never prompt | | |
+| Root orphan reaped on next root use after a force-stop | | |
 
 ## Background survival and lifecycle (Task 10)
 

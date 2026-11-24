@@ -93,13 +93,30 @@ Root mode is **not** part of onboarding; it is never mentioned to users whose de
 - **Enabling:** toggle → warning sheet ("Commands run as root can change or break your system.
   LeoCode cannot undo them.") with **Enable root mode** / Cancel → system `su` grant dialog.
   Denied → sheet with `E_ROOT_DENIED` copy and **Try again**.
+- **Badge semantics (R-10):**
+  - **Header:** displays a small `ROOT MODE` chip whenever root mode is enabled (mode indication).
+  - **Terminal tabs, run sheet, and status bar:** display the red `# ROOT` badge **only while a root process is alive** (`liveRootCount > 0`, or that specific tab/job is root and running).
 - **Root terminal:** terminal session chip menu gains "New root session". Root tabs use a red-tinted
-  chip and a **ROOT** badge; the prompt shows `#`.
+  chip and a `# ROOT` badge while alive; the prompt shows `#`.
 - **Run as root:** a toggle on the run sheet, off by default, reset per run. When on, the Run button
   label becomes "Run as root".
-- **Status bar:** a ROOT badge is visible while any root process is alive.
-- **Revoked grant:** the session ends, a banner says "Root access was revoked. The root session was
-  closed." with **Open settings**.
+- **Loss behaviour (R-03 / R-05):**
+  - A running root shell keeps uid 0 after a revoke; the next root operation fails with
+    `E_ROOT_DENIED` and a `root.lost` banner.
+  - A `root.lost` whose `sessionId` matches the current root terminal marks that tab ended and shows
+    an inline banner: "Root access was refused. The root session ended." with **Try again**
+    (`requestRoot`) and **Open normal shell**.
+  - A `root.lost` whose `jobId` matches the current run displays an inline banner in the run sheet
+    with **Try again**.
+- **Phantom-process option (R-09):**
+  - In Settings › About under Background survival: on Android 12+ (SDK ≥ 31) when root mode is enabled
+    and the store is not in a lost state, shows an **Apply until reboot** button.
+  - Tap → confirm dialog: "Raises Android's background child-process limit until the next reboot.
+    LeoCode runs this as root: `device_config put activity_manager max_phantom_processes 2147483647`."
+    Buttons: Apply / Cancel.
+  - Apply runs `proc.run { argv: ["/system/bin/sh", "-c", "device_config put activity_manager max_phantom_processes 2147483647 && device_config get activity_manager max_phantom_processes"], root: true, timeoutMs: 15000 }`
+    and shows success with the value read back, or routes errors through normal error routing.
+  - Never run automatically, and never persisted across reboots.
 - **Never:** prompt at startup, browse files as root, or remember "Run as root" across runs.
 
 ## Error surfaces
