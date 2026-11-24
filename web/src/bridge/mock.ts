@@ -1992,9 +1992,8 @@ export class MockBridge implements Bridge {
   async rootDisable(): Promise<RootStatus> {
     this.rootEnabled = false
     this.rootGranted = false
-    for (const [sessionId, session] of this.mockRootSessions) {
+    for (const [, session] of this.mockRootSessions) {
       session.close()
-      this.emitRootLost({ sessionId, reason: "revoked" })
     }
     this.mockRootSessions.clear()
     return {

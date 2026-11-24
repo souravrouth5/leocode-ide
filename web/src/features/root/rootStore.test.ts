@@ -163,4 +163,25 @@ describe("rootStore", () => {
     store.getState().rootProcessEnded()
     expect(store.getState().liveRootCount).toBe(0)
   })
+
+  it("clears lastLost when requestRoot succeeds and when disableRoot succeeds", async () => {
+    const bridge = createMockBridge()
+    const store = createRootStore(bridge)
+
+    // Simulate prior loss
+    store.setState({ lastLost: { reason: "denied", at: Date.now() }, enabled: true, granted: false })
+    expect(store.getState().lastLost).not.toBeNull()
+
+    // Successful requestRoot resets lastLost to null
+    await store.getState().requestRoot()
+    expect(store.getState().lastLost).toBeNull()
+
+    // Simulate another loss
+    store.setState({ lastLost: { reason: "revoked", at: Date.now() } })
+    expect(store.getState().lastLost).not.toBeNull()
+
+    // Successful disableRoot resets lastLost to null
+    await store.getState().disableRoot()
+    expect(store.getState().lastLost).toBeNull()
+  })
 })

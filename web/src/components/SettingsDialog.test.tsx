@@ -177,4 +177,28 @@ describe("SettingsDialog phantom option (R-09)", () => {
       expect(onError).toHaveBeenCalledWith(expect.any(Error))
     })
   })
+
+  it("shows phantom option button again after a loss when root is re-requested successfully", () => {
+    // Loss state -> rootLost true -> button hidden
+    const { rerender } = render(
+      <SettingsDialog
+        {...baseProps}
+        androidSdk={34}
+        rootEnabled={true}
+        rootLost={true}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Apply until reboot" })).toBeNull()
+
+    // Successful requestRoot -> lastLost reset to null -> rootLost false -> button visible again
+    rerender(
+      <SettingsDialog
+        {...baseProps}
+        androidSdk={34}
+        rootEnabled={true}
+        rootLost={false}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Apply until reboot" })).toBeDefined()
+  })
 })

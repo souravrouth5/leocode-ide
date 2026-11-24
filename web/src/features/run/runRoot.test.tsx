@@ -117,4 +117,46 @@ describe("RunSheet root mode & loss UX (B4)", () => {
 
     expect(onRetry).toHaveBeenCalledTimes(1)
   })
+
+  it("ignores root.lost event with a different jobId while a root run is active", async () => {
+    const bridge = new MockBridge()
+    const stores = createAppStores(bridge)
+    const runStore = stores.run
+
+    runStore.setState({
+      sheetOpen: true,
+      runAsRoot: true,
+      run: {
+        title: "test.py",
+        running: true,
+        exitCode: null,
+        segments: [],
+        hint: null,
+        jobId: "active-root-job-123",
+        rootLost: false
+      }
+    })
+
+    render(
+      <StoresProvider stores={stores}>
+        <RunSheet
+          open={true}
+          title="test.py"
+          running={true}
+          exitCode={null}
+          segments={[]}
+          onStop={() => {}}
+          onClose={() => {}}
+        />
+      </StoresProvider>
+    )
+
+    // Fire root lost for a different job (e.g. phantom apply)
+    bridge.emitRootLost({ jobId: "other-phantom-job-456", reason: "denied" })
+
+    // Active run must remain running and rootLost false
+    expect(runStore.getState().run?.running).toBe(true)
+    expect(runStore.getState().run?.rootLost).toBe(false)
+    expect(screen.queryByText(/Root access was refused. The process ended./)).toBeNull()
+  })
 })

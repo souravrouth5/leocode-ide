@@ -59,7 +59,7 @@ export function createRootStore(bridge: Bridge) {
         try {
           const res = await bridge.rootRequest()
           if (res.granted) {
-            set({ granted: true, enabled: true, loading: false })
+            set({ granted: true, enabled: true, loading: false, lastLost: null })
             await get().checkStatus()
             return true
           }
@@ -79,7 +79,8 @@ export function createRootStore(bridge: Bridge) {
             available: status.available,
             granted: status.granted,
             enabled: status.enabled,
-            loading: false
+            loading: false,
+            lastLost: null
           })
         } catch (error) {
           set({ loading: false })

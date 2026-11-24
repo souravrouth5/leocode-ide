@@ -109,13 +109,16 @@ describe("MockBridge parity (W-36)", () => {
       lostEvent = evt
     })
 
+    let exited = false
     const term = await bridge.openTerminal({
       cwd: ".",
       cols: 80,
       rows: 24,
       root: true,
       onData: () => {},
-      onExit: () => {}
+      onExit: () => {
+        exited = true
+      }
     })
     expect(term).not.toBeNull()
     expect(term?.sessionId).toBeTruthy()
@@ -124,9 +127,9 @@ describe("MockBridge parity (W-36)", () => {
     expect(statusAfter.enabled).toBe(false)
     expect((await bridge.rootStatus()).enabled).toBe(false)
 
-    expect(lostEvent).not.toBeNull()
-    expect(lostEvent.sessionId).toBe(term?.sessionId)
-    expect(lostEvent.reason).toBe("revoked")
+    // Root sessions exit through normal close; root.lost is NOT emitted on disable
+    expect(exited).toBe(true)
+    expect(lostEvent).toBeNull()
 
     // After disable, root openTerminal rejects with E_ROOT_DENIED
     await expect(

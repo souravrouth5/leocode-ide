@@ -119,7 +119,7 @@ export function createRunStore(deps: RunDeps): RunStore {
     bridge.onRootLost?.((event) => {
       const current = get().run
       if (!current) return
-      if (event.jobId && (event.jobId === current.jobId || runningRoot)) {
+      if (event.jobId && event.jobId === current.jobId) {
         if (runningRoot) {
           runningRoot = false
           boundRootStore?.getState().rootProcessEnded()
