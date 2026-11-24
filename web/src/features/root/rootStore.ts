@@ -7,6 +7,8 @@ export interface RootState {
   enabled: boolean
   loading: boolean
   warningOpen: boolean
+  lastLost: { reason: string; at: number } | null
+  liveRootCount: number
   checkStatus: () => Promise<void>
   requestRoot: () => Promise<boolean>
   disableRoot: () => void
@@ -29,6 +31,8 @@ export function createRootStore(bridge: Bridge) {
       enabled: false,
       loading: false,
       warningOpen: false,
+      lastLost: null,
+      liveRootCount: 0,
 
       openWarning: () => set({ warningOpen: true }),
       closeWarning: () => set({ warningOpen: false }),
