@@ -273,7 +273,7 @@ screenshots are optional but useful for the host-key prompt.
 | E-05b | Running Shell A uid 0 across deny + Run sheet refusal banner | **N/A** | **PASS** — Shell A 2nd `id` output `uid=0(root)`; Run sheet rendered `"Root access was refused. The process ended."` | `reports/B6-followup.md` E-05b |
 | E-06 | Root session `id` shows `uid=0` | **N/A** | **PASS** — `uid=0(root) gid=0(root) groups=0(root) context=u:r:magisk:s0` | `20261124-phaseE-D2-e76846f.txt` |
 | E-07 | Run as root: output + exit code | **N/A** | **PASS** — script `id -u; exit 3` prints `0` and `EXIT 3` | `20261124-phaseE-D2-e76846f.txt` |
-| E-08 | Stop root job leaves no process | **N/A** | **PASS** — `sleep 600` killed by `RootManager.killSession`, `ps` shows 0 sleep processes | `20261124-phaseE-D2-e76846f.txt` |
+| E-08 | Stop root job leaves no process | **N/A** | **PASS** — `sleep 600` killed by `RootManager.kill`, `ps` shows 0 sleep processes | `20261124-phaseE-D2-e76846f.txt` |
 | E-08b | Exit Root Shell kills foreground child | **N/A** | **PASS** — foreground `sleep 600` (PGID 10960) reaped on Exit Root Shell, pidfile removed | B6 report E-08b |
 | E-09 | ROOT badge visible only while root process alive | **N/A** | **PASS** — header has mode badge; tab / status bar show red `# ROOT` only while process is running | `20261124-phaseE-D2-e76846f.txt` |
 | E-10 | `su` denied: non-root features unchanged | **PASS** | **PASS** — smoke, Python execution, PTY terminal, Git operations all pass under `su` deny | `20261124-phaseE-D1-11f98015.txt`, `20261124-phaseE-D2-e76846f.txt` |

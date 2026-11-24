@@ -4,12 +4,23 @@ Every gate below is stated as something that can be checked, with its status as 
 2026-11-24. Nothing here is estimated in time; the point is to make the remaining distance
 auditable instead of a feeling. Update this file when a gate changes state.
 
-**Summary: all roadmap phases (A–H) are complete and verified across both devices (updated 2026-11-24).
-The runtime/Python layer runs on both phones (Tasks 24–26 and 30–33), onboarding/diagnostics closed on both (Task 27),
-release engineering plus signed self-update closed in Task 28 (including real signed GitHub releases
-that both phones updated from, anonymously), hardening/a11y/soak closed in Task 29 (2026-11-23), and
-Phase E (root mode, Tasks 17–18) is fully verified on D2 (Magisk 31.1, rc10/rc11) and D1 (unrooted).
-Device functional checks prior to soak were largely single runs; an owner-side offline keystore backup remains.**
+**Summary:** Phases A–D, F, G, H, and Phase E (root mode) are implemented and backed by tests and device runs:
+- Phase F Git/SSH closed on both D1 and D2 (settling D-016).
+- Python runtime packaging & integration (Tasks 25–26) verified on D1 and D2.
+- Tasks 30–33 implemented, with Tasks 31–33 device-verified on D2 (D1 parity pending).
+- Onboarding and diagnostics (Task 27) verified on both D1 and D2.
+- Signed release builds and self-update (Task 28) verified on both D1 and D2.
+- Phase E root mode (Tasks 17–18) rebuilt and verified on D2 (Magisk 31.1, rc10/rc11) and D1 (unrooted).
+- Hardening, automated a11y, and 25-cycle soak (Task 29) executed. Note: `docs/reports/task29-hardening-report.md` "GO" verdict (2026-11-23) predates the Phase E rebuild and the open items below.
+
+**Before v0.1.0:**
+1. **D1 parity for Tasks 31–33** on a release candidate build (M-1).
+2. **Task 24 signed Python runtime release** on GitHub Releases (`python-runtime` environment + `RUNTIME_SIGNING_KEY`, owner action, M-3).
+3. **Offline backup of release keys** (`release.jks`, `release-signing.pem`, owner action, M-2).
+4. **GitHub PAT rotation** in `.git/config` to credential helper (owner action, M-4).
+5. **PR to `main` and green CI** on the release commit (M-5).
+6. **Accepted standing gaps:** Gate 9 (instrumented on-device tests absent) and Gate 12 (Android 10–14 no hardware, accepted per D-014).
+
 The Phase F API 28 gap closed on 2026-11-21: D1 passes T10–T14 and the extra Git/SSH rows, settling D-016.
 
 ## 1. Gate status at a glance
@@ -25,17 +36,17 @@ The Phase F API 28 gap closed on 2026-11-21: D1 passes T10–T14 and the extra G
 | 7 | 16 KB page alignment | **PASS** (static) | `scripts/check-elf-alignment.sh`, passed locally and in CI run 44884113986 |
 | 8 | CI runs green on GitHub | **PASS** (two runs) | Runs [44884113986](https://github.com/souravrouth5/leocode-ide/actions/runs/44884113986) (dispatch, `7e62c71`) and [44888183932](https://github.com/souravrouth5/leocode-ide/actions/runs/44888183932) (PR, `53274ea`): `web` + `android` green, artifacts uploaded |
 | 9 | Instrumented (on-device) tests | **ABSENT** | `android/app/src/androidTest` does not exist |
-| 10 | Device matrix: D2 (Android 15) | **PARTIAL** | Phases B–F verified; Phase G Python (Task 26) verified 2026-11-22; onboarding/diagnostics (Task 27) and signed self-update (Task 28) verified 2026-11-22/23 |
-| 11 | Device matrix: D1 (Android 9 / API 28) | **PARTIAL** | Phases B–F verified; Phase F T10–T14 plus the extra Git/SSH rows passed on 2026-11-21 (D-016 settled); Phase G Python (Task 26) verified 2026-11-22; Task 27 and Task 28 verified 2026-11-22/23 |
+| 10 | Device matrix: D2 (Android 15) | **PARTIAL** | Phases B–F verified; Tasks 25–26 and 31–33 verified; Task 27, Task 28, Task 29 soak, and Phase E root mode (E-00…E-19, rc10/rc11) verified. Kept PARTIAL pending M-1 D1 parity |
+| 11 | Device matrix: D1 (Android 9 / API 28) | **PARTIAL** | Phases B–F verified (D-016 settled); Tasks 25–26, 27, 28, and Task 29 soak verified; Phase E unrooted rows (E-02, E-10) verified. Kept PARTIAL pending Tasks 31–33 parity on release build (M-1) |
 | 12 | Device matrix: Android 10–14 | **NO HARDWARE** | D-014 accepts the gap; it cannot be closed by effort alone |
-| 13 | Runtime/Python works on a device | **PARTIAL** | Tasks 24–26 verified on D1 and D2 (2026-11-22); Tasks 30–33 open |
+| 13 | Runtime/Python works on a device | **PARTIAL** | Tasks 24–26 on D1+D2; 30–33 done, with 31–33 device-verified on D2 only (D1 pending, M-1); Task 24 signed release pending (M-3) |
 | 14 | Release signing | **PASS** | Release keystore (RSA 4096, cert `2b294e12…bdaf`); `LEOCODE_REQUIRE_RELEASE_SIGNING=1` fails closed, the debug fallback needs an explicit opt-in. All five secrets (`RELEASE_STORE_BASE64`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`, `RELEASE_SIGNING_KEY`) are in the protected `release` environment, restricted to `main` + `v*`; rc1/rc4/rc5 built and published from it. Only an offline keystore backup stays owner-side |
 | 15 | R8 / shrinking | **PASS** | `isMinifyEnabled` + `proguard-rules.pro` (JGit, SSHD, BouncyCastle, kotlinx-serialization, eddsa); rc3 passes `smoke.sh` on D1 (3 175 ms) and D2 (686 ms) |
 | 16 | SBOM | **PASS** | `scripts/make-sbom.py` → CycloneDX 1.5 JSON (Maven + npm, dev deps dropped, deduplicated) published per release and nightly |
 | 17 | Onboarding + Diagnostics screens | **PASS** | Implemented and gated 2026-11-22 (Android 425 tests, web 300); D1 and D2 PASS (onboarding, trust gate, Copy, Share, redaction). Evidence: `docs/device-reports/20261122-task27-D1-D2.txt` |
 | 18 | Accessibility audit | **PASS** | Automated audit in `web/src/features/a11y/a11yAudit.test.tsx` (20 tests, 100% passing); touch targets ≥ 48dp, WCAG AAA contrast (> 14:1), landmarks, roles, Escape dismissal |
-| 19 | Performance budgets | **PASS** | Evaluated on D1 and D2 (`docs/reports/task29-hardening-report.md`): keystroke-to-glyph 18–46 ms, editor RSS ~68–82 MB, cold start 3.0–3.17s (D1) / 400–686ms (D2) |
-| 20 | Soak / long-run stability | **PASS** | Multi-cycle lifecycle, tab cycling, and Python execution soak via `scripts/soak.sh` on D1 and D2 (zero leaks, zero crashes, zero ANRs); note that functional feature test passes were single runs per device prior to soak |
+| 19 | Performance budgets | **PARTIAL** | All budgets met except D1 cold start (3.0–3.17 s vs 2.5 s budget; evaluated on D1 and D2 in `docs/reports/task29-hardening-report.md`); keystroke-to-glyph 18–46 ms, editor RSS ~68–82 MB, cold start 3.0–3.17 s (D1) / 400–686 ms (D2) |
+| 20 | Soak / long-run stability | **PASS** | Multi-cycle lifecycle, tab cycling, and Python execution soak via `scripts/soak.sh` on D1 and D2 (25 executions per device in `20261123-*-soak-*.txt`, zero leaks, zero crashes, zero ANRs); functional feature test passes were single runs per device prior to soak |
 | 21 | Self-update | **PASS** | Ed25519-signed manifest + APK signer/size/version check, then the system installer; D1 rc2→rc3→rc4→rc5 and D2 rc1→rc2→rc3→rc5 in-app (2026-11-22/23), the last hop on each fetched from the public `rc` channel with no token. Evidence: `docs/device-reports/20261123-task28-D1-D2.txt` |
 | 22 | Root mode (Tasks 17–18) | **PASS** | Rebuilt in B1–B6 (safe timeouts, zero-prompt status, root.lost, session kill, lazy reaper, phantom option); verified on D2 (Magisk 31.1, rc10/rc11) and D1 2026-11-24. Evidence: `docs/device-reports/20261124-phaseE-D2-e76846f.txt`, `docs/agent-briefs/reports/B6.md`, `docs/agent-briefs/reports/B6-followup.md` |
 | 23 | Crash recovery / redaction | **PASS** | `CrashStore` + `Redactor` + `RecoveryActivity`; device demo on D1 and D2 2026-11-21 (renderer loss, escalation, forced crash, back order) |
