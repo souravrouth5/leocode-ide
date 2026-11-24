@@ -1578,7 +1578,36 @@ export class MockBridge implements Bridge {
     return () => this.themeListeners.delete(listener)
   }
 
-  async openTerminal(_options: TerminalOptions): Promise<TerminalHandle | null> {
+  async openTerminal(options: TerminalOptions): Promise<TerminalHandle | null> {
+    if (options.root) {
+      if (!this.rootEnabled) {
+        throw new BridgeError("E_ROOT_DENIED", "root mode is not enabled")
+      }
+      const sessionId = `mock-term-${++this.mockSessionSeq}`
+      let alive = true
+      const session = {
+        close: () => {
+          if (!alive) return
+          alive = false
+          options.onExit(-1)
+        }
+      }
+      this.mockRootSessions.set(sessionId, session)
+      const handle: TerminalHandle = {
+        sessionId,
+        get alive() {
+          return alive
+        },
+        write: (_data) => {},
+        resize: (_cols, _rows) => {},
+        close: () => {
+          session.close()
+          this.mockRootSessions.delete(sessionId)
+        },
+        detach: () => {}
+      }
+      return handle
+    }
     return null
   }
 
@@ -1600,7 +1629,10 @@ export class MockBridge implements Bridge {
     _options?: RunOptions
   ): Promise<number> {
     this.lastRunOptions = _options
-    onStart?.({ cancel: () => {} })
+    if (_options?.root && !this.rootEnabled) {
+      throw new BridgeError("E_ROOT_DENIED", "root mode is not enabled")
+    }
+    onStart?.({ jobId: "mock-job-1", cancel: () => {} })
     const emit = (data: string, stream: ProcessEvent["stream"] = "stdout") =>
       onEvent({ stream, data })
 
@@ -1932,7 +1964,13 @@ export class MockBridge implements Bridge {
   private rootAvailable = true
   private rootGranted = false
   private rootEnabled = false
+  private mockSessionSeq = 0
+  private readonly mockRootSessions = new Map<string, { close: () => void }>()
   private readonly rootLostListeners = new Set<(event: RootLostEvent) => void>()
+
+  emitRootLost(event: RootLostEvent): void {
+    this.rootLostListeners.forEach((l) => l(event))
+  }
 
   async rootStatus(): Promise<RootStatus> {
     return {
@@ -1949,6 +1987,21 @@ export class MockBridge implements Bridge {
     this.rootGranted = true
     this.rootEnabled = true
     return { granted: true }
+  }
+
+  async rootDisable(): Promise<RootStatus> {
+    this.rootEnabled = false
+    this.rootGranted = false
+    for (const [sessionId, session] of this.mockRootSessions) {
+      session.close()
+      this.emitRootLost({ sessionId, reason: "revoked" })
+    }
+    this.mockRootSessions.clear()
+    return {
+      available: this.rootAvailable,
+      granted: this.rootGranted,
+      enabled: this.rootEnabled
+    }
   }
 
   onRootLost(listener: (event: RootLostEvent) => void): () => void {

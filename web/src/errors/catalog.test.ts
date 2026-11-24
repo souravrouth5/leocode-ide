@@ -24,6 +24,9 @@ describe("error catalog (Task 12)", () => {
     expect(ERROR_CATALOG.E_DISK_FULL.surface).toBe("sheet")
     expect(ERROR_CATALOG.E_NOT_FOUND.surface).toBe("snackbar")
     expect(ERROR_CATALOG.E_BRIDGE_DISCONNECTED.action.kind).toBe("reload")
+    expect(ERROR_CATALOG.E_ROOT_DENIED.surface).toBe("sheet")
+    expect(ERROR_CATALOG.E_ROOT_DENIED.action.kind).toBe("retry")
+    expect(ERROR_CATALOG.E_ROOT_UNAVAILABLE.surface).toBe("banner")
   })
 
   it("wraps unknown errors as E_INTERNAL", () => {

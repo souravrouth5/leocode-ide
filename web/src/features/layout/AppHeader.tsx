@@ -86,7 +86,7 @@ export function AppHeader() {
                 marginLeft: 4
               }}
             >
-              ROOT
+              ROOT MODE
             </span>
           )}
         </div>

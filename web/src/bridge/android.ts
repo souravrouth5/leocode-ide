@@ -729,6 +729,7 @@ export class AndroidBridge implements Bridge {
     }
 
     onStart?.({
+      jobId: reply.jobId,
       cancel: () => {
         void this.request("proc.cancel", { jobId: reply.jobId }).catch((error: unknown) => {
           // Best effort: the exit event is authoritative, but a failure to stop
@@ -1493,6 +1494,10 @@ export class AndroidBridge implements Bridge {
 
   async rootRequest(options?: RequestOptions): Promise<RootRequestResult> {
     return this.request<RootRequestResult>("root.request", {}, options)
+  }
+
+  async rootDisable(options?: RequestOptions): Promise<RootStatus> {
+    return this.request<RootStatus>("root.disable", {}, options)
   }
 
   onRootLost(listener: (event: RootLostEvent) => void): () => void {

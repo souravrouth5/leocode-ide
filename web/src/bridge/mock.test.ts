@@ -97,4 +97,47 @@ describe("MockBridge parity (W-36)", () => {
     const entry = (await bridge.list(".")).find((item) => item.name === "unicode.txt")
     expect(entry?.size).toBe(2)
   })
+
+  it("handles root mode disable and enforces E_ROOT_DENIED on root openTerminal", async () => {
+    const bridge = new MockBridge()
+    await bridge.rootRequest()
+    const statusBefore = await bridge.rootStatus()
+    expect(statusBefore.enabled).toBe(true)
+
+    let lostEvent: any = null
+    bridge.onRootLost((evt) => {
+      lostEvent = evt
+    })
+
+    const term = await bridge.openTerminal({
+      cwd: ".",
+      cols: 80,
+      rows: 24,
+      root: true,
+      onData: () => {},
+      onExit: () => {}
+    })
+    expect(term).not.toBeNull()
+    expect(term?.sessionId).toBeTruthy()
+
+    const statusAfter = await bridge.rootDisable()
+    expect(statusAfter.enabled).toBe(false)
+    expect((await bridge.rootStatus()).enabled).toBe(false)
+
+    expect(lostEvent).not.toBeNull()
+    expect(lostEvent.sessionId).toBe(term?.sessionId)
+    expect(lostEvent.reason).toBe("revoked")
+
+    // After disable, root openTerminal rejects with E_ROOT_DENIED
+    await expect(
+      bridge.openTerminal({
+        cwd: ".",
+        cols: 80,
+        rows: 24,
+        root: true,
+        onData: () => {},
+        onExit: () => {}
+      })
+    ).rejects.toMatchObject({ code: "E_ROOT_DENIED" })
+  })
 })

@@ -5,7 +5,7 @@ import { redact } from "../../errors/redact"
 import { isDirty } from "../editor/model"
 
 export function AppStatusBar() {
-  const { bridge, editor, files, shell, errors } = useStores()
+  const { bridge, editor, files, shell, errors, root } = useStores()
   const view = useStore(shell, (state) => state.view)
   const status = useStore(shell, (state) => state.status)
   const cwd = useStore(files, (state) => state.cwd)
@@ -15,6 +15,7 @@ export function AppStatusBar() {
     errors,
     (state) => state.banner?.error.message ?? state.sheet?.error.message ?? null
   )
+  const liveRootCount = useStore(root, (state) => state.liveRootCount)
   // The status bar is a message sink too: never echo a raw token or path (W-09).
   const statusError = errorText ? redact(errorText) : null
 
@@ -27,6 +28,7 @@ export function AppStatusBar() {
       path={statusError ? "error" : path}
       dirty={activeDoc ? isDirty(activeDoc) : false}
       message={statusError ?? status}
+      rootActive={liveRootCount > 0}
     />
   )
 }

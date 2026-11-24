@@ -101,6 +101,7 @@ export type AppInfo = Omit<GeneratedAppInfo, "mode" | "theme"> & {
 export interface RunHandle {
   /** Ask the host to kill the process group. */
   cancel: () => void
+  jobId?: string
 }
 
 export interface TerminalOptions {
@@ -634,6 +635,7 @@ export interface Bridge {
   // ------------------------------------------------------------------ root (Tasks 17–18)
   rootStatus(options?: RequestOptions): Promise<RootStatus>
   rootRequest(options?: RequestOptions): Promise<RootRequestResult>
+  rootDisable(options?: RequestOptions): Promise<RootStatus>
   onRootLost?(listener: (event: RootLostEvent) => void): () => void
 }
 
