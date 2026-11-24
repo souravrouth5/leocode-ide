@@ -75,11 +75,19 @@ class PtySession private constructor(
     private val descriptor: ParcelFileDescriptor,
     override val pid: Int,
     val isRoot: Boolean = false,
-    private val onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null
+    private val onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
+    private val isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
 ) : PtyProcess {
+    data class RootPid(val pid: Int, val startTime: Long)
+
+    @Volatile
+    var rootPid: RootPid? = null
+
     companion object {
         private const val DESTROY_GRACE_MS = 1_500L
         private const val DESTROY_POLL_MS = 25L
+        private const val DESTROY_ROOT_GRACE_MS = 2_000L
+        private const val DESTROY_ROOT_POLL_MS = 200L
 
         /** Opens an interactive `/system/bin/sh -i` or root shell in a new session/process group. */
         fun openShell(
@@ -89,10 +97,36 @@ class PtySession private constructor(
             cols: Int,
             root: Boolean = false,
             suPath: String? = null,
-            onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null
+            rootCommand: String? = null,
+            awaitRootPid: (() -> RootPid?)? = null,
+            onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
+            isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
         ): PtySession? {
-            val cmd = if (root) "exec ${suPath ?: "/product/bin/su"}" else "exec /system/bin/sh -i"
-            return open(cmd, cwd, env, rows, cols, isRoot = root, onKillRoot = onKillRoot)
+            val cmd = if (root) {
+                rootCommand ?: "exec ${suPath ?: "/product/bin/su"}"
+            } else {
+                "exec /system/bin/sh -i"
+            }
+            val session = open(
+                cmd,
+                cwd,
+                env,
+                rows,
+                cols,
+                isRoot = root,
+                onKillRoot = onKillRoot,
+                isRootPidAlive = isRootPidAlive
+            ) ?: return null
+
+            if (root && awaitRootPid != null) {
+                kotlin.concurrent.thread(isDaemon = true, name = "leocode-pty-rootpid-${session.pid}") {
+                    val rp = awaitRootPid()
+                    if (rp != null) {
+                        session.rootPid = rp
+                    }
+                }
+            }
+            return session
         }
 
         fun open(
@@ -102,7 +136,8 @@ class PtySession private constructor(
             rows: Int,
             cols: Int,
             isRoot: Boolean = false,
-            onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null
+            onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
+            isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
         ): PtySession? {
             if (!NativePty.available()) return null
             val pairs = env.map { (k, v) -> "$k=$v" }.toTypedArray()
@@ -113,7 +148,13 @@ class PtySession private constructor(
             } catch (e: Throwable) {
                 return null
             }
-            return PtySession(descriptor, result[0], isRoot = isRoot, onKillRoot = onKillRoot)
+            return PtySession(
+                descriptor,
+                result[0],
+                isRoot = isRoot,
+                onKillRoot = onKillRoot,
+                isRootPidAlive = isRootPidAlive
+            )
         }
     }
 
@@ -181,24 +222,54 @@ class PtySession private constructor(
         // ignores it (L-17). Called on the pump thread after waitFor() the pid is
         // already gone, so this normally returns immediately.
         if (isRoot) {
-            onKillRoot?.invoke(pid, OsConstants.SIGTERM)
+            val rp = rootPid
+            if (rp != null) {
+                onKillRoot?.invoke(rp.pid, OsConstants.SIGTERM)
+                var waited = 0L
+                while (waited < DESTROY_ROOT_GRACE_MS && isRootPidAlive?.invoke(rp.pid, rp.startTime) == true) {
+                    try {
+                        Thread.sleep(DESTROY_ROOT_POLL_MS)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                    waited += DESTROY_ROOT_POLL_MS
+                }
+                if (isRootPidAlive?.invoke(rp.pid, rp.startTime) == true) {
+                    onKillRoot?.invoke(rp.pid, OsConstants.SIGKILL)
+                }
+            } else {
+                runCatching {
+                    android.util.Log.w("LeoCodePty", "Root pid unknown for pty session; falling back to client kill")
+                }
+                onKillRoot?.invoke(pid, OsConstants.SIGTERM)
+                var waited = 0L
+                while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
+                    try {
+                        Thread.sleep(DESTROY_POLL_MS)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                    waited += DESTROY_POLL_MS
+                }
+                if (ProcessStartTime.read(pid) != null) {
+                    onKillRoot?.invoke(pid, OsConstants.SIGKILL)
+                }
+            }
         } else {
             NativePty.killGroup(pid, OsConstants.SIGTERM)
-        }
-        var waited = 0L
-        while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
-            try {
-                Thread.sleep(DESTROY_POLL_MS)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                break
+            var waited = 0L
+            while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
+                try {
+                    Thread.sleep(DESTROY_POLL_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+                waited += DESTROY_POLL_MS
             }
-            waited += DESTROY_POLL_MS
-        }
-        if (ProcessStartTime.read(pid) != null) {
-            if (isRoot) {
-                onKillRoot?.invoke(pid, OsConstants.SIGKILL)
-            } else {
+            if (ProcessStartTime.read(pid) != null) {
                 NativePty.killGroup(pid, OsConstants.SIGKILL)
             }
         }

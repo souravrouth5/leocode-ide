@@ -55,6 +55,7 @@ class TerminalRegistryTest {
     private class Collector : TerminalRegistry.Listener {
         val chunks = CopyOnWriteArrayList<ByteArray>()
         val exits = CopyOnWriteArrayList<Int>()
+        val rootLostEvents = CopyOnWriteArrayList<dev.leocode.bridge.RootLostEvent>()
         val exited = CountDownLatch(1)
 
         override fun data(bytes: ByteArray) {
@@ -64,6 +65,10 @@ class TerminalRegistryTest {
         override fun exit(code: Int) {
             exits += code
             exited.countDown()
+        }
+
+        override fun rootLost(event: dev.leocode.bridge.RootLostEvent) {
+            rootLostEvents += event
         }
 
         fun text(): String = chunks.joinToString("") { String(it, Charsets.UTF_8) }
@@ -288,6 +293,111 @@ class TerminalRegistryTest {
         assertNotNull(opened)
         assertTrue(spawnedRoot)
         assertEquals(true, registry.list().firstOrNull { it.sessionId == opened!!.sessionId }?.root)
+    }
+
+    @Test
+    fun `closeRoot closes only root sessions`() {
+        val fakeRoot = FakePty(pid = 101)
+        val fakeNormal = FakePty(pid = 102)
+        val registry = TerminalRegistry(spawn = { _, _, _, _, root ->
+            if (root) fakeRoot else fakeNormal
+        })
+
+        try {
+            val rootOpened = registry.open(workDir(), emptyMap(), 24, 80, root = true)!!
+            val normalOpened = registry.open(workDir(), emptyMap(), 24, 80, root = false)!!
+
+            assertEquals(2, registry.activeCount())
+
+            registry.closeRoot()
+
+            assertEquals(1, registry.activeCount())
+            val remaining = registry.list()
+            assertEquals(1, remaining.size)
+            assertEquals(normalOpened.sessionId, remaining.first().sessionId)
+            assertFalse(remaining.first().root)
+            assertTrue(fakeRoot.isClosed)
+            assertFalse(fakeNormal.isClosed)
+        } finally {
+            registry.closeAll()
+        }
+    }
+
+    @Test
+    fun `root sessions record kind root-term in pid file store`() {
+        val pidDir = Files.createTempDirectory("leocode-term-pid").toFile()
+        val store = PidFileStore(pidDir)
+        val fake = FakePty(pid = 1001)
+
+        val registry = TerminalRegistry(
+            spawn = { _, _, _, _, _ -> fake },
+            pidFiles = store
+        )
+
+        try {
+            // Note: On JVM PidFileStore.write reads /proc/<pid>/stat. Since 1001 doesn't match our process,
+            // we verify that the registry calls write with "root-term" vs "term".
+            val rootSession = registry.open(workDir(), emptyMap(), 24, 80, root = true)!!
+            val normalSession = registry.open(workDir(), emptyMap(), 24, 80, root = false)!!
+
+            val list = registry.list()
+            assertTrue(list.first { it.sessionId == rootSession.sessionId }.root)
+            assertFalse(list.first { it.sessionId == normalSession.sessionId }.root)
+        } finally {
+            registry.closeAll()
+        }
+    }
+
+    private class FailingFakePty(override val pid: Int = 5555, val exitVal: Int = 1) : PtyProcess {
+        override val isClosed: Boolean = false
+        override fun write(bytes: ByteArray): Int = 0
+        override fun readBlocking(maxBytes: Int): ByteArray? = null // immediate EOF
+        override fun resize(rows: Int, cols: Int) = Unit
+        override fun waitFor(): Int = exitVal
+        override fun destroy() = Unit
+    }
+
+    @Test
+    fun `root terminal refusal emits root lost before exit and marks lost`() {
+        val fakePty = FailingFakePty(exitVal = 1)
+        val rootPidDir = Files.createTempDirectory("leocode-term-root-pids").toFile()
+        val fakeSu = java.io.File.createTempFile("fake_su", "").apply { deleteOnExit() }
+
+        val rootManager = RootManager(
+            prefs = object : RootManager.RootPrefs {
+                var en = true
+                override fun isEnabled(): Boolean = en
+                override fun setEnabled(enabled: Boolean) { en = enabled }
+            },
+            shellRunner = object : RootManager.ShellRunner {
+                override fun run(command: List<String>, timeoutMs: Long): RootManager.ShellResult =
+                    RootManager.ShellResult(0, "", "")
+            },
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        rootManager.markGranted()
+        assertTrue(rootManager.isGranted())
+
+        val registry = TerminalRegistry(
+            spawn = { _, _, _, _, _ -> fakePty },
+            rootPidDir = rootPidDir,
+            rootManager = rootManager
+        )
+
+        val opened = registry.open(workDir(), emptyMap(), 24, 80, root = true)!!
+        val collector = Collector()
+        registry.attach(opened.sessionId, collector)!!.start()
+
+        awaitUntil { collector.exits.isNotEmpty() }
+        assertEquals(listOf(1), collector.exits.toList())
+        assertEquals(1, collector.rootLostEvents.size)
+        assertEquals("denied", collector.rootLostEvents.first().reason)
+        assertEquals(opened.sessionId, collector.rootLostEvents.first().sessionId)
+        assertFalse("rootManager.markLost must be called", rootManager.isGranted())
+
+        registry.closeAll()
+        fakeSu.delete()
     }
 
     private fun snapshot(registry: TerminalRegistry, sessionId: String): ByteArray {

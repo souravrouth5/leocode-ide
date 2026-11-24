@@ -133,7 +133,7 @@ class TermHandler(
             if (rootManager == null || !rootManager.isAvailable()) {
                 throw BridgeException(ErrorCode.E_ROOT_UNAVAILABLE, "root is not available")
             }
-            if (!rootManager.isEnabled()) {
+            if (!rootManager.canUseRoot()) {
                 throw BridgeException(ErrorCode.E_ROOT_DENIED, "root mode is not enabled")
             }
         }
@@ -168,6 +168,13 @@ class TermHandler(
             sink.event(
                 "term.exit",
                 json.encodeToJsonElement(TermExit.serializer(), TermExit(code))
+            )
+        }
+
+        override fun rootLost(event: RootLostEvent) {
+            sink.event(
+                "root.lost",
+                json.encodeToJsonElement(RootLostEvent.serializer(), event)
             )
         }
     }
