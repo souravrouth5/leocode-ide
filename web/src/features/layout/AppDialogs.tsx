@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
 import { PromptDialog } from "../../components/PromptDialog"
@@ -37,6 +37,10 @@ export function AppDialogs({ version }: { version: string }) {
   const recentErrors = useStore(errors, (state) => state.recent)
   const rootState = useStore(stores.root, (state) => state)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+
+  useEffect(() => {
+    stores.run.getState().bindRootStore?.(stores.root)
+  }, [stores.run, stores.root])
 
   const requestStoragePermission = () => {
     void files.getState().requestStoragePermission()
@@ -142,9 +146,11 @@ export function AppDialogs({ version }: { version: string }) {
           exitCode={runState?.exitCode ?? null}
           segments={runState?.segments ?? []}
           hint={runState?.hint}
+          rootLost={runState?.rootLost}
           onStop={() => run.getState().stop()}
           // Closing the sheet hides it; the process keeps running (W-12).
           onClose={() => run.getState().hide()}
+          onRetryRoot={() => void run.getState().runFile()}
         />
       </PaneBoundary>
 
@@ -186,7 +192,13 @@ export function AppDialogs({ version }: { version: string }) {
           rootEnabled={rootState.enabled}
           rootLoading={rootState.loading}
           onRequestRoot={() => stores.root.getState().openWarning()}
-          onDisableRoot={() => stores.root.getState().disableRoot()}
+          onDisableRoot={async () => {
+            try {
+              await stores.root.getState().disableRoot()
+            } catch (err) {
+              stores.errors.getState().report(err, { context: "Disable root" })
+            }
+          }}
         />
       </PaneBoundary>
 
@@ -197,8 +209,11 @@ export function AppDialogs({ version }: { version: string }) {
           onConfirm={async () => {
             try {
               await stores.root.getState().requestRoot()
-            } catch {
-              // handled by store
+            } catch (err) {
+              stores.errors.getState().report(err, {
+                context: "Request root",
+                retry: () => void stores.root.getState().requestRoot()
+              })
             }
           }}
           loading={rootState.loading}

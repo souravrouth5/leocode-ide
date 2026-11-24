@@ -4,6 +4,8 @@ import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { useStores } from "../../app/stores"
 import { AppError, type Bridge, type PythonStatus, type TerminalHandle } from "../../bridge"
+import type { StoreApi } from "zustand/vanilla"
+import type { RootState } from "../root/rootStore"
 import {
   clearSessionId,
   readSessionId,
@@ -25,6 +27,8 @@ export interface TerminalPaneProps {
   pythonStatus?: PythonStatus | null
   /** Optional callback when REPL is launched */
   onLaunchRepl?: (spec: PythonReplSpec) => void
+  /** Optional RootStore override */
+  rootStore?: StoreApi<RootState>
 }
 
 function palette(dark: boolean) {
@@ -97,14 +101,19 @@ export function TerminalPane({
   fontFamily = "'JetBrains Mono', monospace",
   onError,
   pythonStatus,
-  onLaunchRepl
+  onLaunchRepl,
+  rootStore: propRootStore
 }: TerminalPaneProps) {
   const stores = useOptionalStores()
-  const rootStoreState = useRootStoreState(stores)
+  const rootStore = propRootStore ?? stores?.root
+  const rootStoreState = useRootStoreState(rootStore ? { root: rootStore } as any : stores)
   const host = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const handleRef = useRef<TerminalHandle | null>(null)
+  const currentSessionIdRef = useRef<string | null>(null)
+  const isRootProcessAlive = useRef(false)
+  const [rootLostBanner, setRootLostBanner] = useState(false)
   const [status, setStatus] = useState<"starting" | "pty" | "fallback" | "closed">(
     "starting"
   )
@@ -189,6 +198,11 @@ export function TerminalPane({
         if (disposed) return
         term.write(`\r\n\x1b[90m[session ended, exit ${code}]\x1b[0m\r\n`)
         handleRef.current = null
+        currentSessionIdRef.current = null
+        if (isRootProcessAlive.current) {
+          isRootProcessAlive.current = false
+          rootStore?.getState().rootProcessEnded()
+        }
         clearSessionId()
         setExited(code)
         setStatus("closed")
@@ -213,12 +227,18 @@ export function TerminalPane({
           if (!attached.alive) {
             attached.handle.detach()
             handleRef.current = null
+            currentSessionIdRef.current = null
             clearSessionId()
             setExited(attached.exitCode)
             setStatus("closed")
             return true
           }
           handleRef.current = attached.handle
+          currentSessionIdRef.current = attached.handle.sessionId
+          if (isRootSession) {
+            isRootProcessAlive.current = true
+            rootStore?.getState().rootProcessStarted()
+          }
           setStatus("pty")
           attached.handle.resize(size.cols, size.rows)
           term.onData((data) => attached.handle.write(encoder.encode(data)))
@@ -248,8 +268,13 @@ export function TerminalPane({
         }
         if (handle) {
           handleRef.current = handle
+          currentSessionIdRef.current = handle.sessionId
           writeSessionId(handle.sessionId)
           if (!handle.alive) return
+          if (isRootSession) {
+            isRootProcessAlive.current = true
+            rootStore?.getState().rootProcessStarted()
+          }
           setStatus("pty")
           term.onData((data) => handle.write(encoder.encode(data)))
           term.write("\x1b[2J\x1b[H")
@@ -307,6 +332,11 @@ export function TerminalPane({
       disposed = true
       observer.disconnect()
       if (polling !== null) window.cancelAnimationFrame(polling)
+      if (isRootProcessAlive.current) {
+        isRootProcessAlive.current = false
+        rootStore?.getState().rootProcessEnded()
+      }
+      currentSessionIdRef.current = null
       handleRef.current?.detach()
       handleRef.current = null
       oscTitle.dispose()
@@ -353,6 +383,25 @@ export function TerminalPane({
     }, 60)
     return () => window.clearTimeout(timer)
   }, [active])
+
+  useEffect(() => {
+    const unsub = bridge.onRootLost?.((event) => {
+      if (event.sessionId && event.sessionId === currentSessionIdRef.current) {
+        if (isRootProcessAlive.current) {
+          isRootProcessAlive.current = false
+          rootStore?.getState().rootProcessEnded()
+        }
+        currentSessionIdRef.current = null
+        handleRef.current?.close()
+        handleRef.current = null
+        clearSessionId()
+        setExited(-1)
+        setStatus("closed")
+        setRootLostBanner(true)
+      }
+    })
+    return () => unsub?.()
+  }, [bridge, rootStore])
 
   const send = (text: string) => {
     const handle = handleRef.current
@@ -401,7 +450,7 @@ export function TerminalPane({
                 ? `exited${exited === null ? "" : " " + exited}`
                 : "starting"}
         </span>
-        {isRootSession && (
+        {isRootSession && status !== "closed" && (
           <span
             className="badge root-badge"
             title="Terminal running as superuser (root / UID 0)"
@@ -427,6 +476,11 @@ export function TerminalPane({
             style={isRootSession ? { background: "var(--color-danger, #ef4444)", color: "#fff", border: "none" } : undefined}
             title={isRootSession ? "Switch to standard user terminal" : "Launch root terminal session (UID 0)"}
             onClick={() => {
+              if (isRootProcessAlive.current) {
+                isRootProcessAlive.current = false
+                rootStore?.getState().rootProcessEnded()
+              }
+              currentSessionIdRef.current = null
               handleRef.current?.close()
               clearSessionId()
               setIsRootSession((prev) => !prev)
@@ -469,6 +523,57 @@ export function TerminalPane({
           </button>
         )}
       </div>
+
+      {rootLostBanner && (
+        <div
+          className="terminal-lost-banner"
+          role="alert"
+          style={{
+            padding: "8px 12px",
+            background: "var(--color-danger-subtle, rgba(239, 68, 68, 0.15))",
+            borderBottom: "1px solid var(--color-danger, #ef4444)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            fontSize: 12
+          }}
+        >
+          <span>Root access was refused. The root session ended.</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn tiny primary"
+              onClick={async () => {
+                try {
+                  const ok = await rootStore?.getState().requestRoot()
+                  if (ok) {
+                    setRootLostBanner(false)
+                    setExited(null)
+                    setStatus("starting")
+                    setGeneration((v) => v + 1)
+                  }
+                } catch {
+                  // error reporting handled
+                }
+              }}
+            >
+              Try again
+            </button>
+            <button
+              className="btn tiny"
+              onClick={() => {
+                setRootLostBanner(false)
+                setIsRootSession(false)
+                setExited(null)
+                setStatus("starting")
+                setGeneration((v) => v + 1)
+              }}
+            >
+              Open normal shell
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="terminal-host" ref={host} />
 

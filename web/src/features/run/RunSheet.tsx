@@ -32,10 +32,13 @@ export interface RunSheetProps {
   errorSummary?: ErrorSummary | null
   traceback?: ParsedTraceback | null
   workspaceRoot?: string
+  rootLost?: boolean
+  isRoot?: boolean
   onStop: () => void
   onClose: () => void
   onSendInput?: (text: string) => void
   onJumpToFile?: (file: string, line: number) => void
+  onRetryRoot?: () => void
 }
 
 export function formatDuration(ms: number): string {
@@ -51,6 +54,17 @@ function useOptionalStores() {
   }
 }
 
+function useRunStoreState(stores: ReturnType<typeof useOptionalStores>) {
+  const run = stores?.run
+  const [state, setState] = useState(() => run?.getState().run ?? null)
+  useEffect(() => {
+    if (!run) return
+    setState(run.getState().run)
+    return run.subscribe((next) => setState(next.run))
+  }, [run])
+  return state
+}
+
 export function RunSheet({
   open,
   title,
@@ -62,23 +76,33 @@ export function RunSheet({
   errorSummary: propErrorSummary,
   traceback: propTraceback,
   workspaceRoot,
+  rootLost: propRootLost,
+  isRoot: propIsRoot,
   onStop,
   onClose,
   onSendInput,
-  onJumpToFile
+  onJumpToFile,
+  onRetryRoot
 }: RunSheetProps) {
   const output = useRef<HTMLPreElement | null>(null)
   const [stdinText, setStdinText] = useState("")
   const stores = useOptionalStores()
+  const runState = useRunStoreState(stores)
+  const isRootLost = propRootLost !== undefined ? propRootLost : runState?.rootLost ?? false
+  const isRootActive =
+    running &&
+    (propIsRoot !== undefined
+      ? propIsRoot
+      : stores?.run
+        ? stores.run.getState().runAsRoot
+        : false)
 
-  const runStoreState = stores?.run ? stores.run.getState().run : null
-
-  const durationMs = propDurationMs !== undefined ? propDurationMs : runStoreState?.durationMs
-  const traceback = propTraceback !== undefined ? propTraceback : runStoreState?.traceback
+  const durationMs = propDurationMs !== undefined ? propDurationMs : runState?.durationMs
+  const traceback = propTraceback !== undefined ? propTraceback : runState?.traceback
   const errorSummary =
     propErrorSummary !== undefined
       ? propErrorSummary
-      : runStoreState?.errorSummary ??
+      : runState?.errorSummary ??
         traceback?.error ??
         (segments.length > 0 ? parseTraceback(segments.map((s) => s.text).join(""), workspaceRoot).error : null)
 
@@ -138,6 +162,23 @@ export function RunSheet({
       <div className="run">
         <div className="run-bar">
           <span className={"term-status" + (tone ? " " + tone : "")}>{status}</span>
+          {isRootActive && (
+            <span
+              className="badge root-badge"
+              title="Process running as superuser (root / UID 0)"
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                background: "var(--color-danger, #ef4444)",
+                color: "#ffffff",
+                padding: "2px 5px",
+                borderRadius: 3,
+                letterSpacing: 0.5
+              }}
+            >
+              # ROOT
+            </span>
+          )}
           <span className="run-note">
             {running
               ? "streaming output…"
@@ -149,6 +190,34 @@ export function RunSheet({
             <RunRootControls rootStore={stores.root} runStore={stores.run} running={running} />
           )}
         </div>
+
+        {isRootLost && (
+          <div
+            className="run-lost-banner"
+            role="alert"
+            style={{
+              padding: "8px 12px",
+              background: "var(--color-danger-subtle, rgba(239, 68, 68, 0.15))",
+              borderBottom: "1px solid var(--color-danger, #ef4444)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              fontSize: 12
+            }}
+          >
+            <span>Root access was refused. The process ended.</span>
+            <button
+              className="btn tiny primary"
+              onClick={() => {
+                if (onRetryRoot) onRetryRoot()
+                else void stores?.run.getState().runFile()
+              }}
+            >
+              Try again
+            </button>
+          </div>
+        )}
 
         {errorSummary && (
           <div className="run-error-summary" role="alert" data-testid="run-error-summary">

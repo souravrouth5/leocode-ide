@@ -230,9 +230,9 @@ export const ERROR_CATALOG: Record<ErrorCode, CatalogEntry> = {
     title: "Root access denied",
     explanation:
       "The root manager rejected the request. Grant access in the manager's Superuser screen, then try again.",
-    surface: "banner",
+    surface: "sheet",
     severity: "warning",
-    action: dismiss
+    action: retry
   },
   E_INTERNAL: {
     title: "Something went wrong",

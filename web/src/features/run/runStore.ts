@@ -4,6 +4,7 @@ import type { NotificationsState } from "../../notifications/notificationsStore"
 import type { EditorState } from "../editor/editorStore"
 import type { PythonState } from "../python/pythonStore"
 import type { LanguageState } from "../language/languageStore"
+import type { RootState } from "../root/rootStore"
 import { baseName, dirName, isDirty } from "../editor/model"
 import { editorCommand } from "../editor/commands"
 import {
@@ -27,6 +28,8 @@ export interface RunView {
   durationMs?: number | null
   errorSummary?: ErrorSummary | null
   traceback?: ParsedTraceback | null
+  jobId?: string | null
+  rootLost?: boolean
 }
 
 export interface RunState {
@@ -53,6 +56,8 @@ export interface RunState {
   sendInput(text: string): void
   /** Jump to file and line in the editor (Task 31). */
   jumpToFile(path: string, line?: number): Promise<void>
+  /** Bind the root store to coordinate live root process tracking. */
+  bindRootStore?(rootStore: StoreApi<RootState>): void
 }
 
 export type RunStore = StoreApi<RunState> & {
@@ -89,10 +94,13 @@ interface RunDeps {
   python: StoreApi<PythonState>
   language?: StoreApi<LanguageState>
   workspaceRoot?: string | (() => string | null)
+  root?: StoreApi<RootState>
 }
 
 export function createRunStore(deps: RunDeps): RunStore {
   const { bridge, editor, notifications, python, language } = deps
+  let boundRootStore: StoreApi<RootState> | null = deps.root ?? null
+  let runningRoot = false
   let handle: RunHandle | null = null
   let buffer: RunSegment[] = []
   let frame: number | null = null
@@ -108,6 +116,21 @@ export function createRunStore(deps: RunDeps): RunStore {
   }
 
   const store = createStore<RunState>((set, get) => {
+    bridge.onRootLost?.((event) => {
+      const current = get().run
+      if (!current) return
+      if (event.jobId && (event.jobId === current.jobId || runningRoot)) {
+        if (runningRoot) {
+          runningRoot = false
+          boundRootStore?.getState().rootProcessEnded()
+        }
+        set((state) => ({
+          ...state,
+          run: state.run ? { ...state.run, running: false, rootLost: true } : null
+        }))
+      }
+    })
+
     const flush = () => {
       frame = null
       const pending = buffer
@@ -158,6 +181,10 @@ export function createRunStore(deps: RunDeps): RunStore {
       activeRunId = null
       flush()
       handle = null
+      if (runningRoot) {
+        runningRoot = false
+        boundRootStore?.getState().rootProcessEnded()
+      }
       set((state) => {
         if (!state.run) return state
         const durationMs =
@@ -288,12 +315,17 @@ export function createRunStore(deps: RunDeps): RunStore {
             return
           }
 
+          const isRoot = get().runAsRoot
           const runId = ++runSeq
           activeRunId = runId
           handle = null
           buffer = []
           cancelFrame()
           const startedAt = Date.now()
+          if (isRoot) {
+            runningRoot = true
+            boundRootStore?.getState().rootProcessStarted()
+          }
           set({
             // The spawn is done: a second tap may reopen the sheet from here (W-14).
             starting: false,
@@ -307,7 +339,9 @@ export function createRunStore(deps: RunDeps): RunStore {
               startedAt,
               durationMs: null,
               errorSummary: null,
-              traceback: null
+              traceback: null,
+              jobId: null,
+              rootLost: false
             }
           })
 
@@ -323,8 +357,15 @@ export function createRunStore(deps: RunDeps): RunStore {
               queueFor(runId),
               (next) => {
                 // A handle from a run that is already over must not be installed.
-                if (activeRunId === runId) handle = next
-                else next.cancel()
+                if (activeRunId === runId) {
+                  handle = next
+                  set((state) => ({
+                    ...state,
+                    run: state.run ? { ...state.run, jobId: next.jobId ?? null } : null
+                  }))
+                } else {
+                  next.cancel()
+                }
               },
               runOptions
             )
@@ -353,6 +394,10 @@ export function createRunStore(deps: RunDeps): RunStore {
       },
 
       close() {
+        if (runningRoot) {
+          runningRoot = false
+          boundRootStore?.getState().rootProcessEnded()
+        }
         // "Stop all" / teardown keeps the old cancel-on-close behaviour.
         handle?.cancel()
         handle = null
@@ -360,6 +405,10 @@ export function createRunStore(deps: RunDeps): RunStore {
         cancelFrame()
         buffer = []
         set({ run: null, sheetOpen: false, starting: false })
+      },
+
+      bindRootStore(rootStore: StoreApi<RootState>) {
+        boundRootStore = rootStore
       },
 
       invalidatePythonProbe() {
