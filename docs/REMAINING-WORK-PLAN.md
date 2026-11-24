@@ -122,6 +122,9 @@ The docs currently disagree with each other. Fix them together so the next sessi
   "Both phones are unrooted"; Phase E list → `[-]` now, `[x]` after §2; Blocking facts and the
   Known-debt row "D2 has no `su`" → resolved with the date; Snapshot "Devices" is already right.
 - [ ] `README.md` status block: still says "Phase G (Python) next" and "Both are currently unrooted".
+- [ ] Test-count claims: `PROGRESS.md`/`HANDOFF.md` say "Android 465+ tests / 0 failures", but
+  `RootHandlerTest` failed 3/3 on that tree (`android.util.Log` not mocked; found in the B1 review,
+  fixed in B2). After B2, re-run the full suite and quote the real numbers.
 - [ ] `docs/LeoCode_Implementation_Plan_v9.md` items 10 and the D2 row ("Not yet rooted"): add a
   dated note that D2 is Magisk-rooted.
 - [ ] `docs/test-matrix.md`: D2 header "unrooted", the D2 root-status note, the Root-mode table

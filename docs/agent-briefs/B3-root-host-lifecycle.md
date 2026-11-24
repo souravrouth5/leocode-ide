@@ -40,6 +40,21 @@ under Open questions.
 
 ## Changes
 
+### 0. Carried over from the B1 review
+
+- **Liveness polling is expensive.** Every `su` call can show a Magisk toast and costs ~100 ms.
+  While stopping a root process, check `isRootPidAlive` at most every 200 ms and at most ~10 times
+  (2 s grace), never at the 25 ms `DESTROY_POLL_MS` used for normal PTYs.
+- **Refusal vs. failure.** The wrapper writes the pidfile before anything else, so a missing
+  pidfile + non-zero exit normally means `su` refused. Classify it as `denied` only when, in
+  addition, nothing was printed to stdout. If the pidfile is missing but output came back,
+  report a normal failed run (no `root.lost`, no `markLost`).
+- **Diagnostics wording** (`AppGraph.diagnostics()`): enabled + `isGranted()` → "root mode enabled
+  (granted)"; enabled + not yet verified → "root mode enabled (not verified this session)";
+  available → "su binary present (not enabled)"; else "not detected".
+- **RootHandler logger:** B2 adds a `log` lambda; pass
+  `{ android.util.Log.i("LeoCodeRoot", it) }` from `AppGraph`.
+
 ### 1. R-04 — track and kill the real root pid
 
 - Root pid files live in `<filesDir>/run/root/<id>.pid` (`id` = jobId or sessionId). `AppGraph`

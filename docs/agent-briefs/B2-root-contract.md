@@ -33,14 +33,19 @@ Do not touch `AppGraph.kt` (B3 wires the hook) or any other web file (B4).
      Document the two values in a KDoc.
    - No request DTO is needed for `root.disable` (`{}`); it replies with `RootStatusReply`.
 2. **RootHandler.kt**
+   - **Fix the red suite first (found in the B1 review).** `RootHandlerTest` fails 3/3 with
+     `Method i in android.util.Log not mocked` because `RootHandler` calls `android.util.Log.i`
+     directly. Remove the direct `Log` calls and inject `private val log: (String) -> Unit = {}`
+     the way `RuntimeHandler`/`PythonHandler` do. `AppGraph` keeps passing a real logger (B3
+     wires it; until then the default no-op is fine). Do **not** enable
+     `unitTests.isReturnDefaultValues`.
    - Constructor gains `private val onDisabled: () -> Unit = {}`.
    - `METHODS` += `"root.disable"`.
    - `root.disable` → `rootManager.setEnabled(false)`, then `runCatching { onDisabled() }` (a
      failing hook must not fail the reply, so log it), then reply with the fresh `status()`.
      Idempotent. Never runs `su`.
    - `root.request` unchanged.
-   - Lower the `root.status` log from a line per call to one line per state change (or `Log.d`). It
-     currently logs on every poll.
+   - Log `root.status` only when the state changes from the last reply, not on every poll.
 3. **Generated types.** Add any new descriptor to `BridgeTypesGenerator.kt` and run
    `./gradlew generateBridgeTypes`. The regenerated `web/src/bridge/types.gen.ts` is part of your
    change, and web `npm run typecheck` must still pass with it.
@@ -66,7 +71,7 @@ Do not touch `AppGraph.kt` (B3 wires the hook) or any other web file (B4).
 ## Gate
 
 ```bash
-./gradlew --no-daemon testDebugUnitTest lintDebug
+./gradlew --no-daemon testDebugUnitTest lintDebug    # FULL suite must be 0 failures
 ./gradlew --no-daemon generateBridgeTypes && git -C .. diff --stat -- web/src/bridge/types.gen.ts
 cd ../web && npm run typecheck
 ```
