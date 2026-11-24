@@ -151,6 +151,8 @@ class TerminalRegistry(
         return session.attach(listener, credit)
     }
 
+    fun has(id: String): Boolean = sessions.containsKey(id)
+
     fun list(): List<Info> = sessions.values.map { session ->
         session.info()
     }
@@ -246,7 +248,7 @@ class TerminalRegistry(
                 val appeared = (session.rootPid != null) || (pidFile?.exists() == true && RootManager.parseRootPidFile(runCatching { pidFile.readText() }.getOrDefault("")) != null)
                 if (appeared) {
                     rootManager.markGranted()
-                } else if (code != 0 && session.totalBytesReceived == 0L) {
+                } else if (code != 0) {
                     rootManager.markLost()
                     session.onRootLost(dev.leocode.bridge.RootLostEvent(sessionId = session.id, reason = "denied"))
                 }

@@ -16,6 +16,7 @@ import java.io.File
 class RootOrphanReaper(
     private val dir: File,
     private val rootManager: RootManager,
+    private val isActive: (id: String) -> Boolean = { false },
     private val sleep: (Long) -> Unit = { Thread.sleep(it) }
 ) {
 
@@ -40,6 +41,10 @@ class RootOrphanReaper(
         val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".pid") } ?: return 0
         var reaped = 0
         for (file in files) {
+            val id = file.name.removeSuffix(".pid")
+            if (isActive(id)) {
+                continue
+            }
             try {
                 val text = runCatching { file.readText() }.getOrNull()
                 val rootPid = text?.let { RootManager.parseRootPidFile(it) }

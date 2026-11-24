@@ -149,4 +149,44 @@ class RootOrphanReaperTest {
         assertFalse("shell should not be called for unparseable pidfile", shellCalled)
         assertFalse("unparseable file should be deleted", pidFile.exists())
     }
+
+    @Test
+    fun `active id is never signalled and its file is kept while stale id is reaped`() {
+        val dir = tempDir()
+        val activeFile = File(dir, "active-job.pid").apply { writeText("4242 777\n") }
+        val staleFile = File(dir, "stale-job.pid").apply { writeText("5353 888\n") }
+        val signals = mutableListOf<Pair<Int, Int>>()
+
+        val fakeSu = File.createTempFile("fake_su", "").apply { deleteOnExit() }
+        val manager = RootManager(
+            prefs = FakeRootPrefs(enabled = true),
+            shellRunner = FakeShellRunner { cmd ->
+                val cmdStr = cmd.joinToString(" ")
+                if (cmdStr.contains("cut -d' ' -f22")) {
+                    RootManager.ShellResult(0, "888\n", "")
+                } else if (cmdStr.contains("kill -15")) {
+                    signals += 5353 to 15
+                    RootManager.ShellResult(0, "", "")
+                } else {
+                    RootManager.ShellResult(0, "", "")
+                }
+            },
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+
+        val reaper = RootOrphanReaper(
+            dir = dir,
+            rootManager = manager,
+            isActive = { id -> id == "active-job" },
+            sleep = {}
+        )
+        val reaped = reaper.reapPending()
+
+        assertEquals(1, reaped)
+        assertEquals(listOf(5353 to 15), signals)
+        assertTrue("active pidfile must be kept", activeFile.exists())
+        assertFalse("stale pidfile must be deleted", staleFile.exists())
+    }
 }

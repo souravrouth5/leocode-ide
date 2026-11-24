@@ -326,6 +326,65 @@ class ProcessSupervisorTest {
     }
 
     @Test
+    fun `cancel immediately after start with delayed pidfile kills root pid and avoids client kill`() {
+        val fakeSu = File.createTempFile("fake_su_delayed", ".sh").apply {
+            // Emulates delayed pidfile appearance (~150ms)
+            writeText("#!/bin/sh\nsleep 0.15\nsh -c \"$2\"\nexit $?\n")
+            setExecutable(true)
+            deleteOnExit()
+        }
+        val killedPids = CopyOnWriteArrayList<Pair<Int, Int>>()
+        val rootPidDir = Files.createTempDirectory("leocode-root-pids").toFile()
+
+        val manager = RootManager(
+            prefs = FakeRootPrefs(true),
+            shellRunner = FakeShellRunner { cmd ->
+                val cmdStr = cmd.joinToString(" ")
+                if (cmdStr.contains("kill -")) {
+                    val sig = if (cmdStr.contains("-15")) 15 else 9
+                    val pid = cmd.last().toIntOrNull() ?: -1
+                    killedPids += pid to sig
+                    RootManager.ShellResult(0, "", "")
+                } else if (cmdStr.contains("cut -d' ' -f22")) {
+                    RootManager.ShellResult(0, "12345\n", "")
+                } else {
+                    RootManager.ShellResult(0, "", "")
+                }
+            },
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+
+        val supervisor = ProcessSupervisor(rootManager = manager, rootPidDir = rootPidDir)
+        val done = CountDownLatch(1)
+
+        try {
+            val handle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "sleep 10"),
+                    cwd = workDir(),
+                    timeoutMs = 30_000,
+                    root = true
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = { done.countDown() }
+            )
+
+            // Cancel immediately without waiting for background thread or pidfile
+            assertTrue(supervisor.cancel(handle.jobId))
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+
+            assertFalse("client pid should not have been signalled", killedPids.any { it.first == handle.pid })
+            assertTrue("real root process should have received SIGTERM", killedPids.any { it.first != handle.pid && it.second == 15 })
+        } finally {
+            supervisor.close()
+            fakeSu.delete()
+        }
+    }
+
+    @Test
     fun `root job whose pidfile never appears and exits non-zero emits root lost before exit and marks lost`() {
         val fakeSu = File.createTempFile("fake_su", ".sh").apply {
             writeText("#!/bin/sh\nexit 1\n")

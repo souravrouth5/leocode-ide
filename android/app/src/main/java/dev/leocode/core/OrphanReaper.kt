@@ -39,6 +39,7 @@ class OrphanReaper(
             }
             // Root orphans are handled lazily by RootOrphanReaper; normal reap cannot signal them (B3).
             if (record.kind == "root-proc" || record.kind == "root-term") {
+                file.delete()
                 continue
             }
             // `kill(-1)` and `kill(-ownPid)` are never valid (L-01).

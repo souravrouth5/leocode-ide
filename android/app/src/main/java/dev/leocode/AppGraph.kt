@@ -131,16 +131,20 @@ class AppGraph(private val app: Application) {
         override fun setEnabled(enabled: Boolean) {
             prefs.edit().putBoolean("enabled", enabled).apply()
             if (enabled) {
-                kotlin.concurrent.thread(isDaemon = true, name = "leocode-root-reaper-post-enable") {
-                    rootOrphanReaper.reapPending()
-                }
+                ensureRootOrphansReaped()
             }
         }
     }
 
     val rootManager: dev.leocode.core.RootManager = dev.leocode.core.RootManager(rootPrefs)
 
-    val rootOrphanReaper: dev.leocode.core.RootOrphanReaper = dev.leocode.core.RootOrphanReaper(rootPidDir, rootManager)
+    val rootOrphanReaper: dev.leocode.core.RootOrphanReaper by lazy {
+        dev.leocode.core.RootOrphanReaper(
+            dir = rootPidDir,
+            rootManager = rootManager,
+            isActive = { id -> terminals.has(id) || supervisor.has(id) }
+        )
+    }
 
     private val rootReaperRan = java.util.concurrent.atomic.AtomicBoolean(false)
 

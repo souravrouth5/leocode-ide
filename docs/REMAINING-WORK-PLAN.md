@@ -107,6 +107,9 @@ adb -s $S logcat -d -s LeoCodeRoot:I LeoCode:I
 | E-13 | `root.status` / diagnostics never prompt (R-02) | [ ] | n/a | Policy = prompt while enabled; open Diagnostics and Settings; no prompt |
 | E-14 | Phantom-process option (R-09) | [ ] or `[~]` | n/a | Apply, then `adb shell device_config get activity_manager max_phantom_processes` |
 | E-15 | Bridge timeouts hold while a Magisk prompt is pending (R-01) | [ ] | n/a | Leave the prompt untouched 40 s: UI stays responsive, request fails cleanly |
+| E-16 | Root kill reaches children | [ ] | n/a | Run as root `sleep 600 & sleep 601 & wait` → Stop → `su -c "ps -A -o PID,PGID,USER,NAME \| grep -E 'sleep 60[01]'"` empty |
+| E-17 | Early Stop doesn't leak (B3 F3) | [ ] | n/a | Stop within 0.5 s of starting a root `sleep 600`; leak check |
+| E-18 | Re-request root keeps open root shells (B3 F2) | [ ] | n/a | Root shell running `sleep 900`; trigger `root.request` again; the shell and the sleep survive |
 
 **Exit gate for Phase E:** E-01…E-13 PASS on the listed devices (E-14 PASS or written down as
 deferred), raw logs committed. Then Tasks 17–18 go to `[x]` and RELEASE-READINESS gate 22 goes to

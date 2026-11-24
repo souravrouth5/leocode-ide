@@ -124,7 +124,7 @@ class OrphanReaperTest {
     }
 
     @Test
-    fun `root kinds are skipped and their files kept`() {
+    fun `root kinds are deleted with no kill call`() {
         val store = tempStore()
         val rootProc = pidFile(store, "root-p", "1234 500 root-proc\n")
         val rootTerm = pidFile(store, "root-t", "5678 600 root-term\n")
@@ -145,8 +145,8 @@ class OrphanReaperTest {
         val killed = reaper.reap()
         assertEquals(1, killed)
         assertEquals(listOf(9999 to 15), signals)
-        assertTrue("root-proc file must be kept", rootProc.exists())
-        assertTrue("root-term file must be kept", rootTerm.exists())
+        assertFalse("root-proc file must be deleted", rootProc.exists())
+        assertFalse("root-term file must be deleted", rootTerm.exists())
         assertFalse("normal proc file must be deleted", normalProc.exists())
     }
 }

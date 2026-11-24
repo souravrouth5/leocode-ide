@@ -75,6 +75,7 @@ class PtySession private constructor(
     private val descriptor: ParcelFileDescriptor,
     override val pid: Int,
     val isRoot: Boolean = false,
+    private val awaitRootPid: (() -> RootPid?)? = null,
     private val onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
     private val isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
 ) : PtyProcess {
@@ -114,6 +115,7 @@ class PtySession private constructor(
                 rows,
                 cols,
                 isRoot = root,
+                awaitRootPid = awaitRootPid,
                 onKillRoot = onKillRoot,
                 isRootPidAlive = isRootPidAlive
             ) ?: return null
@@ -136,6 +138,7 @@ class PtySession private constructor(
             rows: Int,
             cols: Int,
             isRoot: Boolean = false,
+            awaitRootPid: (() -> RootPid?)? = null,
             onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
             isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
         ): PtySession? {
@@ -152,6 +155,7 @@ class PtySession private constructor(
                 descriptor,
                 result[0],
                 isRoot = isRoot,
+                awaitRootPid = awaitRootPid,
                 onKillRoot = onKillRoot,
                 isRootPidAlive = isRootPidAlive
             )
@@ -222,7 +226,13 @@ class PtySession private constructor(
         // ignores it (L-17). Called on the pump thread after waitFor() the pid is
         // already gone, so this normally returns immediately.
         if (isRoot) {
-            val rp = rootPid
+            var rp = rootPid
+            if (rp == null && awaitRootPid != null) {
+                rp = awaitRootPid.invoke()
+                if (rp != null) {
+                    rootPid = rp
+                }
+            }
             if (rp != null) {
                 onKillRoot?.invoke(rp.pid, OsConstants.SIGTERM)
                 var waited = 0L

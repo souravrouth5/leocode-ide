@@ -357,6 +357,65 @@ class TerminalRegistryTest {
         override fun destroy() = Unit
     }
 
+    private class OutputFailingFakePty(override val pid: Int = 5556, val exitVal: Int = 1) : PtyProcess {
+        private var emitted = false
+        override val isClosed: Boolean = false
+        override fun write(bytes: ByteArray): Int = 0
+        override fun readBlocking(maxBytes: Int): ByteArray? {
+            if (!emitted) {
+                emitted = true
+                return "Permission denied\r\n".toByteArray(Charsets.UTF_8)
+            }
+            return null
+        }
+        override fun resize(rows: Int, cols: Int) = Unit
+        override fun waitFor(): Int = exitVal
+        override fun destroy() = Unit
+    }
+
+    @Test
+    fun `root terminal refusal with output emits root lost before exit and marks lost`() {
+        val fakePty = OutputFailingFakePty(exitVal = 1)
+        val rootPidDir = Files.createTempDirectory("leocode-term-root-pids").toFile()
+        val fakeSu = java.io.File.createTempFile("fake_su", "").apply { deleteOnExit() }
+
+        val rootManager = RootManager(
+            prefs = object : RootManager.RootPrefs {
+                var en = true
+                override fun isEnabled(): Boolean = en
+                override fun setEnabled(enabled: Boolean) { en = enabled }
+            },
+            shellRunner = object : RootManager.ShellRunner {
+                override fun run(command: List<String>, timeoutMs: Long): RootManager.ShellResult =
+                    RootManager.ShellResult(0, "", "")
+            },
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        rootManager.markGranted()
+        assertTrue(rootManager.isGranted())
+
+        val registry = TerminalRegistry(
+            spawn = { _, _, _, _, _ -> fakePty },
+            rootPidDir = rootPidDir,
+            rootManager = rootManager
+        )
+
+        val opened = registry.open(workDir(), emptyMap(), 24, 80, root = true)!!
+        val collector = Collector()
+        registry.attach(opened.sessionId, collector)!!.start()
+
+        awaitUntil { collector.exits.isNotEmpty() }
+        assertEquals(listOf(1), collector.exits.toList())
+        assertEquals(1, collector.rootLostEvents.size)
+        assertEquals("denied", collector.rootLostEvents.first().reason)
+        assertEquals(opened.sessionId, collector.rootLostEvents.first().sessionId)
+        assertFalse("rootManager.markLost must be called even when Permission denied output was emitted", rootManager.isGranted())
+
+        registry.closeAll()
+        fakeSu.delete()
+    }
+
     @Test
     fun `root terminal refusal emits root lost before exit and marks lost`() {
         val fakePty = FailingFakePty(exitVal = 1)

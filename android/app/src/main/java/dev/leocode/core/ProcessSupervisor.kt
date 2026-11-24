@@ -183,6 +183,8 @@ class ProcessSupervisor(
 
     fun activeCount(): Int = jobs.size
 
+    fun has(id: String): Boolean = jobs.containsKey(id)
+
     private fun notifyCount() {
         runCatching { onCountChanged(jobs.size) }
     }
@@ -191,7 +193,13 @@ class ProcessSupervisor(
         if (!job.terminating.compareAndSet(false, true)) return
 
         if (job.root) {
-            val rp = job.rootPid
+            var rp = job.rootPid
+            if (rp == null && rootManager != null && job.rootPidFile != null) {
+                rp = rootManager.awaitRootPid(job.rootPidFile, timeoutMs = 2_000L)
+                if (rp != null) {
+                    job.rootPid = rp
+                }
+            }
             if (rp != null && rootManager != null) {
                 rootManager.kill(rp.pid, 15)
                 var waited = 0L
