@@ -20,6 +20,7 @@ import { resetOnboarding } from "../onboarding/onboarding"
 import { submitPrompt } from "../shell/promptActions"
 import { UpdatesCard } from "../update/UpdatesCard"
 import { RootWarningDialog } from "../root/RootWarningDialog"
+import { retryRoot } from "../root/retryRoot"
 
 /** All sheets/dialogs, wired to their stores. */
 export function AppDialogs({ version }: { version: string }) {
@@ -207,14 +208,7 @@ export function AppDialogs({ version }: { version: string }) {
           open={rootState.warningOpen}
           onClose={() => stores.root.getState().closeWarning()}
           onConfirm={async () => {
-            try {
-              await stores.root.getState().requestRoot()
-            } catch (err) {
-              stores.errors.getState().report(err, {
-                context: "Request root",
-                retry: () => void stores.root.getState().requestRoot()
-              })
-            }
+            await retryRoot(stores)
           }}
           loading={rootState.loading}
         />

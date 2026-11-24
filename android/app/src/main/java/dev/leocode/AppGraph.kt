@@ -174,7 +174,8 @@ class AppGraph(private val app: Application) {
                 cols = cols,
                 root = root,
                 suPath = rootManager.findSuBinary(),
-                onKillRoot = { pid, sig -> rootManager.kill(pid, sig) }
+                onKillRoot = { pid, sig -> rootManager.kill(pid, sig) },
+                onKillRootSession = { sid, sig -> rootManager.killSession(sid, sig) }
             )
         },
         pidFiles = pidFiles,
@@ -207,6 +208,7 @@ class AppGraph(private val app: Application) {
                     }
                 } else null,
                 onKillRoot = { pid, sig -> rootManager.kill(pid, sig) },
+                onKillRootSession = { sid, sig -> rootManager.killSession(sid, sig) },
                 isRootPidAlive = { pid, startTime ->
                     rootManager.isRootPidAlive(dev.leocode.core.RootManager.RootPid(pid, startTime))
                 }

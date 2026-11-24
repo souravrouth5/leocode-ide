@@ -13,6 +13,7 @@ import {
   writeSessionId
 } from "./session"
 import { getPythonReplSpec, launchReplSession, type PythonReplSpec } from "./repl"
+import { retryRoot } from "../root/retryRoot"
 
 export interface TerminalPaneProps {
   bridge: Bridge
@@ -544,16 +545,15 @@ export function TerminalPane({
             <button
               className="btn tiny primary"
               onClick={async () => {
-                try {
-                  const ok = await rootStore?.getState().requestRoot()
-                  if (ok) {
-                    setRootLostBanner(false)
-                    setExited(null)
-                    setStatus("starting")
-                    setGeneration((v) => v + 1)
-                  }
-                } catch {
-                  // error reporting handled
+                const root = rootStore ?? stores?.root
+                const errors = stores?.errors
+                if (!root || !errors) return
+                const ok = await retryRoot({ root, errors })
+                if (ok) {
+                  setRootLostBanner(false)
+                  setExited(null)
+                  setStatus("starting")
+                  setGeneration((v) => v + 1)
                 }
               }}
             >

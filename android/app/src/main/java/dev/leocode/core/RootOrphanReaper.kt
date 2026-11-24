@@ -49,11 +49,9 @@ class RootOrphanReaper(
                 val text = runCatching { file.readText() }.getOrNull()
                 val rootPid = text?.let { RootManager.parseRootPidFile(it) }
                 if (rootPid != null && rootManager.isRootPidAlive(rootPid)) {
-                    rootManager.kill(rootPid.pid, SIGTERM)
+                    rootManager.killSession(rootPid.pid, SIGTERM)
                     sleep(GRACE_MS)
-                    if (rootManager.isRootPidAlive(rootPid)) {
-                        rootManager.kill(rootPid.pid, SIGKILL)
-                    }
+                    rootManager.killSession(rootPid.pid, SIGKILL)
                     reaped++
                 }
             } finally {

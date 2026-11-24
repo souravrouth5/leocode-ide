@@ -71,13 +71,14 @@ interface PtyProcess {
     fun destroy()
 }
 
-class PtySession private constructor(
-    private val descriptor: ParcelFileDescriptor,
+class PtySession internal constructor(
+    private val descriptor: ParcelFileDescriptor?,
     override val pid: Int,
     val isRoot: Boolean = false,
     private val awaitRootPid: (() -> RootPid?)? = null,
     private val onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
-    private val isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
+    private val isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null,
+    private val onKillRootSession: ((sid: Int, signal: Int) -> Unit)? = null
 ) : PtyProcess {
     data class RootPid(val pid: Int, val startTime: Long)
 
@@ -85,6 +86,8 @@ class PtySession private constructor(
     var rootPid: RootPid? = null
 
     companion object {
+        private const val SIGTERM = 15
+        private const val SIGKILL = 9
         private const val DESTROY_GRACE_MS = 1_500L
         private const val DESTROY_POLL_MS = 25L
         private const val DESTROY_ROOT_GRACE_MS = 2_000L
@@ -101,7 +104,8 @@ class PtySession private constructor(
             rootCommand: String? = null,
             awaitRootPid: (() -> RootPid?)? = null,
             onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
-            isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
+            isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null,
+            onKillRootSession: ((sid: Int, signal: Int) -> Unit)? = null
         ): PtySession? {
             val cmd = if (root) {
                 rootCommand ?: "exec ${suPath ?: "/product/bin/su"}"
@@ -117,7 +121,8 @@ class PtySession private constructor(
                 isRoot = root,
                 awaitRootPid = awaitRootPid,
                 onKillRoot = onKillRoot,
-                isRootPidAlive = isRootPidAlive
+                isRootPidAlive = isRootPidAlive,
+                onKillRootSession = onKillRootSession
             ) ?: return null
 
             if (root && awaitRootPid != null) {
@@ -140,7 +145,8 @@ class PtySession private constructor(
             isRoot: Boolean = false,
             awaitRootPid: (() -> RootPid?)? = null,
             onKillRoot: ((pid: Int, signal: Int) -> Unit)? = null,
-            isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null
+            isRootPidAlive: ((pid: Int, startTime: Long) -> Boolean)? = null,
+            onKillRootSession: ((sid: Int, signal: Int) -> Unit)? = null
         ): PtySession? {
             if (!NativePty.available()) return null
             val pairs = env.map { (k, v) -> "$k=$v" }.toTypedArray()
@@ -157,12 +163,13 @@ class PtySession private constructor(
                 isRoot = isRoot,
                 awaitRootPid = awaitRootPid,
                 onKillRoot = onKillRoot,
-                isRootPidAlive = isRootPidAlive
+                isRootPidAlive = isRootPidAlive,
+                onKillRootSession = onKillRootSession
             )
         }
     }
 
-    private val fd: FileDescriptor = descriptor.fileDescriptor
+    private val fd: FileDescriptor? = descriptor?.fileDescriptor
 
     /** Set by [destroy]; write/resize/read become no-ops afterwards (Task 9). */
     @Volatile
@@ -173,8 +180,9 @@ class PtySession private constructor(
     override fun write(bytes: ByteArray): Int {
         if (closed) return -1
         if (bytes.isEmpty()) return 0
+        val targetFd = fd ?: return -1
         return try {
-            Os.write(fd, bytes, 0, bytes.size)
+            Os.write(targetFd, bytes, 0, bytes.size)
         } catch (e: ErrnoException) {
             -1
         }
@@ -187,9 +195,10 @@ class PtySession private constructor(
      */
     override fun readBlocking(maxBytes: Int): ByteArray? {
         if (closed || maxBytes <= 0) return null
+        val targetFd = fd ?: return null
         val buf = ByteArray(maxBytes)
         val n = try {
-            Os.read(fd, buf, 0, maxBytes)
+            Os.read(targetFd, buf, 0, maxBytes)
         } catch (e: ErrnoException) {
             return null
         }
@@ -213,8 +222,9 @@ class PtySession private constructor(
 
     override fun resize(rows: Int, cols: Int) {
         if (closed) return
+        val targetFd = descriptor?.fd ?: return
         // The fd can be closed between the flag check and the ioctl (L-18).
-        runCatching { NativePty.setWindowSize(descriptor.fd, rows, cols) }
+        runCatching { NativePty.setWindowSize(targetFd, rows, cols) }
     }
 
     override fun waitFor(): Int = NativePty.waitFor(pid)
@@ -234,7 +244,8 @@ class PtySession private constructor(
                 }
             }
             if (rp != null) {
-                onKillRoot?.invoke(rp.pid, OsConstants.SIGTERM)
+                val kill = onKillRootSession ?: onKillRoot
+                kill?.invoke(rp.pid, SIGTERM)
                 var waited = 0L
                 while (waited < DESTROY_ROOT_GRACE_MS && isRootPidAlive?.invoke(rp.pid, rp.startTime) == true) {
                     try {
@@ -245,14 +256,13 @@ class PtySession private constructor(
                     }
                     waited += DESTROY_ROOT_POLL_MS
                 }
-                if (isRootPidAlive?.invoke(rp.pid, rp.startTime) == true) {
-                    onKillRoot?.invoke(rp.pid, OsConstants.SIGKILL)
-                }
+                kill?.invoke(rp.pid, SIGKILL)
             } else {
                 runCatching {
                     android.util.Log.w("LeoCodePty", "Root pid unknown for pty session; falling back to client kill")
                 }
-                onKillRoot?.invoke(pid, OsConstants.SIGTERM)
+                val kill = onKillRootSession ?: onKillRoot
+                kill?.invoke(pid, SIGTERM)
                 var waited = 0L
                 while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
                     try {
@@ -264,11 +274,11 @@ class PtySession private constructor(
                     waited += DESTROY_POLL_MS
                 }
                 if (ProcessStartTime.read(pid) != null) {
-                    onKillRoot?.invoke(pid, OsConstants.SIGKILL)
+                    kill?.invoke(pid, SIGKILL)
                 }
             }
         } else {
-            NativePty.killGroup(pid, OsConstants.SIGTERM)
+            NativePty.killGroup(pid, SIGTERM)
             var waited = 0L
             while (waited < DESTROY_GRACE_MS && ProcessStartTime.read(pid) != null) {
                 try {
@@ -280,9 +290,9 @@ class PtySession private constructor(
                 waited += DESTROY_POLL_MS
             }
             if (ProcessStartTime.read(pid) != null) {
-                NativePty.killGroup(pid, OsConstants.SIGKILL)
+                NativePty.killGroup(pid, SIGKILL)
             }
         }
-        runCatching { descriptor.close() }
+        descriptor?.let { runCatching { it.close() } }
     }
 }

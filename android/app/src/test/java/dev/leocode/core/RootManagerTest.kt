@@ -183,6 +183,88 @@ class RootManagerTest {
     }
 
     @Test
+    fun `buildSessionKillCommand produces exact string and validates arguments`() {
+        val expected = "for p in /proc/[0-9]*; do s=\$(sed 's/.*) //' \"\$p/stat\" 2>/dev/null | cut -d' ' -f4); [ \"\$s\" = \"1234\" ] && kill -15 \"\${p#/proc/}\" 2>/dev/null; done; true"
+        val actual = RootManager.buildSessionKillCommand(1234, 15)
+        assertEquals(expected, actual)
+
+        // Validation guards: sid > 1, signal in 1..64
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            RootManager.buildSessionKillCommand(1, 15)
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            RootManager.buildSessionKillCommand(0, 15)
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            RootManager.buildSessionKillCommand(-5, 15)
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            RootManager.buildSessionKillCommand(1234, 0)
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            RootManager.buildSessionKillCommand(1234, 65)
+        }
+    }
+
+    @Test
+    fun `killSession makes no shell call when canUseRoot is false or sid le 1`() {
+        val tempSu = File.createTempFile("fake_su", "")
+        tempSu.deleteOnExit()
+
+        val runner = FakeShellRunner()
+        val disabledManager = RootManager(
+            prefs = FakeRootPrefs(enabled = false),
+            shellRunner = runner,
+            pathCandidates = listOf(tempSu.absolutePath),
+            pathEnv = ""
+        )
+        assertFalse(disabledManager.canUseRoot())
+        assertFalse(disabledManager.killSession(4567, 15))
+        assertTrue(runner.executedCommands.isEmpty())
+
+        val enabledManager = RootManager(
+            prefs = FakeRootPrefs(enabled = true),
+            shellRunner = runner,
+            pathCandidates = listOf(tempSu.absolutePath),
+            pathEnv = ""
+        )
+        enabledManager.markGranted()
+        assertTrue(enabledManager.canUseRoot())
+
+        assertFalse(enabledManager.killSession(1, 15))
+        assertFalse(enabledManager.killSession(0, 15))
+        assertFalse(enabledManager.killSession(-10, 15))
+        assertTrue(runner.executedCommands.isEmpty())
+        tempSu.delete()
+    }
+
+    @Test
+    fun `killSession with canUseRoot true makes exactly one su call`() {
+        val tempSu = File.createTempFile("fake_su", "")
+        tempSu.deleteOnExit()
+
+        val runner = FakeShellRunner()
+        val manager = RootManager(
+            prefs = FakeRootPrefs(enabled = true),
+            shellRunner = runner,
+            pathCandidates = listOf(tempSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+        assertTrue(manager.canUseRoot())
+
+        val ok = manager.killSession(4567, 9)
+        assertTrue(ok)
+        assertEquals(1, runner.executedCommands.size)
+        val expectedCmd = RootManager.buildSessionKillCommand(4567, 9)
+        assertEquals(
+            listOf(tempSu.absolutePath, "-c", expectedCmd),
+            runner.executedCommands.first()
+        )
+        tempSu.delete()
+    }
+
+    @Test
     fun `quoteArg handles spaces quotes dollars backticks newlines and empty`() {
         // Simple
         assertEquals("'hello'", RootManager.quoteArg("hello"))
@@ -507,6 +589,120 @@ class RootManagerTest {
         assertTrue(runner.commands.isEmpty())
 
         tempSu.delete()
+    }
+
+    @Test
+    fun `buildSessionKillCommand matches expected shell script`() {
+        val cmd = RootManager.buildSessionKillCommand(1234, 15)
+        assertEquals(
+            "for p in /proc/[0-9]*; do s=\$(sed 's/.*) //' \"\$p/stat\" 2>/dev/null | cut -d' ' -f4); [ \"\$s\" = \"1234\" ] && kill -15 \"\${p#/proc/}\" 2>/dev/null; done; true",
+            cmd
+        )
+    }
+
+    @Test
+    fun `killSession makes no shell call when sid is invalid or canUseRoot is false`() {
+        val fakeSu = File.createTempFile("fake_su", "").apply { deleteOnExit() }
+        val prefs = FakeRootPrefs(enabled = false)
+        val runner = FakeShellRunner()
+        val manager = RootManager(
+            prefs = prefs,
+            shellRunner = runner,
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        assertFalse(manager.killSession(1234, 15))
+        assertTrue(runner.executedCommands.isEmpty())
+
+        prefs.setEnabled(true)
+        manager.markGranted()
+        assertTrue(manager.canUseRoot())
+
+        assertFalse(manager.killSession(1, 15))
+        assertFalse(manager.killSession(0, 15))
+        assertFalse(manager.killSession(-1, 15))
+        assertFalse(manager.killSession(1234, 0))
+        assertFalse(manager.killSession(1234, 65))
+        assertTrue(runner.executedCommands.isEmpty())
+        fakeSu.delete()
+    }
+
+    @Test
+    fun `killSession issues exactly one su command with valid sid and signal`() {
+        val fakeSu = File.createTempFile("fake_su", "").apply { deleteOnExit() }
+        val prefs = FakeRootPrefs(enabled = true)
+        val runner = FakeShellRunner()
+        val manager = RootManager(
+            prefs = prefs,
+            shellRunner = runner,
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+        assertTrue(manager.canUseRoot())
+
+        val result = manager.killSession(4242, 15)
+        assertTrue(result)
+        assertEquals(1, runner.executedCommands.size)
+        assertEquals(
+            listOf(
+                fakeSu.absolutePath,
+                "-c",
+                "for p in /proc/[0-9]*; do s=\$(sed 's/.*) //' \"\$p/stat\" 2>/dev/null | cut -d' ' -f4); [ \"\$s\" = \"4242\" ] && kill -15 \"\${p#/proc/}\" 2>/dev/null; done; true"
+            ),
+            runner.executedCommands[0]
+        )
+        fakeSu.delete()
+    }
+
+    @Test
+    fun `PTY root destroy sends TERM session then polls then sends KILL session even if shell exited`() {
+        val signals = mutableListOf<Pair<Int, Int>>()
+        var pollCount = 0
+        var isAlive = true
+
+        val session = PtySession(
+            descriptor = null,
+            pid = 1111,
+            isRoot = true,
+            awaitRootPid = { PtySession.RootPid(2222, 1000L) },
+            onKillRootSession = { sid, sig -> signals += sid to sig },
+            isRootPidAlive = { _, _ ->
+                pollCount++
+                if (pollCount >= 2) {
+                    isAlive = false
+                }
+                isAlive
+            }
+        )
+
+        session.destroy()
+
+        assertEquals(listOf(2222 to 15, 2222 to 9), signals)
+        assertTrue("isRootPidAlive should have been polled", pollCount >= 2)
+    }
+
+    @Test
+    fun `PTY root destroy sends KILL session even if shell is already dead on first poll`() {
+        val signals = mutableListOf<Pair<Int, Int>>()
+        var pollCount = 0
+
+        val session = PtySession(
+            descriptor = null,
+            pid = 1111,
+            isRoot = true,
+            awaitRootPid = { PtySession.RootPid(3333, 1000L) },
+            onKillRootSession = { sid, sig -> signals += sid to sig },
+            isRootPidAlive = { _, _ ->
+                pollCount++
+                false
+            }
+        )
+
+        session.destroy()
+
+        assertEquals(listOf(3333 to 15, 3333 to 9), signals)
+        assertEquals(1, pollCount)
     }
 }
 

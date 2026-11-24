@@ -167,6 +167,9 @@ class RootOrphanReaperTest {
                 } else if (cmdStr.contains("kill -15")) {
                     signals += 5353 to 15
                     RootManager.ShellResult(0, "", "")
+                } else if (cmdStr.contains("kill -9")) {
+                    signals += 5353 to 9
+                    RootManager.ShellResult(0, "", "")
                 } else {
                     RootManager.ShellResult(0, "", "")
                 }
@@ -185,7 +188,7 @@ class RootOrphanReaperTest {
         val reaped = reaper.reapPending()
 
         assertEquals(1, reaped)
-        assertEquals(listOf(5353 to 15), signals)
+        assertEquals(listOf(5353 to 15, 5353 to 9), signals)
         assertTrue("active pidfile must be kept", activeFile.exists())
         assertFalse("stale pidfile must be deleted", staleFile.exists())
     }

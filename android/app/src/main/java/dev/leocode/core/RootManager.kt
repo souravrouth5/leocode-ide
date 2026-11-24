@@ -169,6 +169,18 @@ class RootManager(
             return "echo \"\$\$ \$(cut -d' ' -f22 /proc/\$\$/stat)\" > $quotedPidFile && chmod 0644 $quotedPidFile && exec /system/bin/sh -i"
         }
 
+        /**
+         * Builds a POSIX shell command that kills all processes in session [sid] with [signal].
+         *
+         * Scans /proc for processes (field 4 after comm in stat) so it does not depend on pkill and
+         * handles spaces or parentheses in comm properly.
+         */
+        fun buildSessionKillCommand(sid: Int, signal: Int): String {
+            require(sid > 1) { "sid must be > 1" }
+            require(signal in 1..64) { "signal must be between 1 and 64" }
+            return "for p in /proc/[0-9]*; do s=\$(sed 's/.*) //' \"\$p/stat\" 2>/dev/null | cut -d' ' -f4); [ \"\$s\" = \"$sid\" ] && kill -$signal \"\${p#/proc/}\" 2>/dev/null; done; true"
+        }
+
         /** Parses "<pid> <starttime>" → RootPid(pid, startTime) or null (missing/garbled/pid<=1). */
         fun parseRootPidFile(text: String): RootPid? {
             val trimmed = text.trim()
@@ -285,6 +297,20 @@ class RootManager(
         val suPath = findSuBinary() ?: return false
         val killCmd = "kill -$signal -$pid 2>/dev/null || kill -$signal $pid 2>/dev/null"
         val result = shellRunner.run(listOf(suPath, "-c", killCmd), timeoutMs = 2_000)
+        return result.exitCode == 0
+    }
+
+    /**
+     * Kills all processes in session [sid] using `su`.
+     *
+     * No-op if [sid] <= 1 or [canUseRoot] is false.
+     */
+    fun killSession(sid: Int, signal: Int): Boolean {
+        if (sid <= 1 || signal !in 1..64) return false
+        if (!canUseRoot()) return false
+        val suPath = findSuBinary() ?: return false
+        val cmd = buildSessionKillCommand(sid, signal)
+        val result = shellRunner.run(listOf(suPath, "-c", cmd), timeoutMs = 2_000)
         return result.exitCode == 0
     }
 

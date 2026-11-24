@@ -366,6 +366,7 @@ class TerminalRegistryTest {
                 emitted = true
                 return "Permission denied\r\n".toByteArray(Charsets.UTF_8)
             }
+            try { Thread.sleep(50) } catch (_: InterruptedException) {}
             return null
         }
         override fun resize(rows: Int, cols: Int) = Unit
