@@ -26,7 +26,18 @@ class TerminalRegistry(
         root: Boolean
     ) -> PtyProcess?,
     private val pidFiles: PidFileStore? = null,
-    private val onCountChanged: (Int) -> Unit = {}
+    private val onCountChanged: (Int) -> Unit = {},
+    private val rootPidDir: File? = null,
+    private val rootManager: RootManager? = null,
+    private val onBeforeRootSession: () -> Unit = {},
+    private val spawnWithId: ((
+        id: String,
+        cwd: String,
+        env: Map<String, String>,
+        rows: Int,
+        cols: Int,
+        root: Boolean
+    ) -> PtyProcess?)? = null
 ) {
 
     companion object {
@@ -75,6 +86,7 @@ class TerminalRegistry(
     interface Listener {
         fun data(bytes: ByteArray)
         fun exit(code: Int)
+        fun rootLost(event: dev.leocode.bridge.RootLostEvent) {}
     }
 
     /**
@@ -92,19 +104,37 @@ class TerminalRegistry(
 
     fun open(cwd: File, env: Map<String, String>, rows: Int, cols: Int, root: Boolean = false): Opened? {
         pruneExited()
-        val pty = spawn(
-            cwd.absolutePath,
-            env,
-            rows.coerceIn(1, MAX_DIMENSION),
-            cols.coerceIn(1, MAX_DIMENSION),
-            root
-        ) ?: return null
-
+        if (root) {
+            onBeforeRootSession()
+            rootPidDir?.mkdirs()
+        }
         val id = UUID.randomUUID().toString()
+        val clampedRows = rows.coerceIn(1, MAX_DIMENSION)
+        val clampedCols = cols.coerceIn(1, MAX_DIMENSION)
+        val pty = if (spawnWithId != null) {
+            spawnWithId.invoke(id, cwd.absolutePath, env, clampedRows, clampedCols, root)
+        } else {
+            spawn(cwd.absolutePath, env, clampedRows, clampedCols, root)
+        } ?: return null
+
         val title = if (root) "root" else titleFor(cwd)
         val session = Session(id, cwd.absolutePath, title, pty, root)
         sessions[id] = session
         pidFiles?.write(id, pty.pid, if (root) "root-term" else "term")
+
+        if (root && rootManager != null) {
+            val pidFile = rootPidDir?.let { File(it, "$id.pid") }
+            if (pidFile != null) {
+                thread(isDaemon = true, name = "leocode-term-rootpid-$id") {
+                    val rp = rootManager.awaitRootPid(pidFile)
+                    if (rp != null) {
+                        session.rootPid = rp
+                        rootManager.markGranted()
+                    }
+                }
+            }
+        }
+
         thread(isDaemon = true, name = "leocode-term-$id") {
             pump(session)
         }
@@ -138,8 +168,20 @@ class TerminalRegistry(
         val session = sessions.remove(sessionId) ?: return false
         session.close()
         pidFiles?.remove(sessionId)
+        if (session.root) {
+            rootPidDir?.let { File(it, "$sessionId.pid") }?.delete()
+        }
         notifyCount()
         return true
+    }
+
+    /** Closes only root sessions (through their root kill path). */
+    fun closeRoot() {
+        for ((id, session) in sessions) {
+            if (session.root) {
+                close(id)
+            }
+        }
     }
 
     /** Stop all sessions (the notification's Stop all action). */
@@ -199,10 +241,21 @@ class TerminalRegistry(
             }
         } finally {
             val code = runCatching { session.pty.waitFor() }.getOrDefault(-1)
+            val pidFile = if (session.root) rootPidDir?.let { File(it, "${session.id}.pid") } else null
+            if (session.root && rootManager != null) {
+                val appeared = (session.rootPid != null) || (pidFile?.exists() == true && RootManager.parseRootPidFile(runCatching { pidFile.readText() }.getOrDefault("")) != null)
+                if (appeared) {
+                    rootManager.markGranted()
+                } else if (code != 0 && session.totalBytesReceived == 0L) {
+                    rootManager.markLost()
+                    session.onRootLost(dev.leocode.bridge.RootLostEvent(sessionId = session.id, reason = "denied"))
+                }
+            }
             session.finish(code)
             // Close the master fd and signal any background members of the dead
             // shell's group, but keep the ring buffer for a reattach (L-05/L-13).
             runCatching { session.pty.destroy() }
+            pidFile?.delete()
             pidFiles?.remove(session.id)
             notifyCount()
         }
@@ -229,6 +282,13 @@ class TerminalRegistry(
     ) {
         private val ring = RingBuffer(SCROLLBACK_BYTES)
         private val lock = Object()
+
+        @Volatile
+        var rootPid: RootManager.RootPid? = null
+
+        @Volatile
+        var totalBytesReceived: Long = 0L
+            private set
 
         private var listener: Listener? = null
         private var credit = 0L
@@ -338,6 +398,7 @@ class TerminalRegistry(
 
         fun received(bytes: ByteArray) {
             synchronized(lock) {
+                totalBytesReceived += bytes.size
                 ring.write(bytes)
                 val target = listener
                 if (alive && target != null) {
@@ -351,6 +412,14 @@ class TerminalRegistry(
                     }
                 }
             }
+        }
+
+        fun onRootLost(event: dev.leocode.bridge.RootLostEvent) {
+            val target: Listener?
+            synchronized(lock) {
+                target = listener
+            }
+            target?.rootLost(event)
         }
 
         fun read(max: Int): ByteArray? = pty.readBlocking(max)

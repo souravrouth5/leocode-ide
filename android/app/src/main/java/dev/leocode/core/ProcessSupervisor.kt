@@ -21,7 +21,9 @@ class ProcessSupervisor(
     private val childEnv: Map<String, String> = emptyMap(),
     private val pidFiles: PidFileStore? = null,
     private val onCountChanged: (Int) -> Unit = {},
-    private val rootManager: RootManager? = null
+    private val rootManager: RootManager? = null,
+    private val rootPidDir: java.io.File? = null,
+    private val onBeforeRootJob: () -> Unit = {}
 ) {
 
     data class Spec(
@@ -40,9 +42,13 @@ class ProcessSupervisor(
         val process: Process,
         val pid: Int,
         val root: Boolean = false,
+        val rootPidFile: java.io.File? = null,
         val terminating: AtomicBoolean = AtomicBoolean(false),
         val exitOnce: AtomicBoolean = AtomicBoolean(false)
-    )
+    ) {
+        @Volatile
+        var rootPid: RootManager.RootPid? = null
+    }
 
     private val jobs = ConcurrentHashMap<String, Job>()
 
@@ -50,13 +56,22 @@ class ProcessSupervisor(
         spec: Spec,
         onStdout: (String) -> Unit,
         onStderr: (String) -> Unit,
-        onExit: (Int) -> Unit
+        onExit: (Int) -> Unit,
+        onRootLost: ((dev.leocode.bridge.RootLostEvent) -> Unit)? = null
     ): Handle {
         require(spec.argv.isNotEmpty()) { "argv is empty" }
 
+        val jobId = UUID.randomUUID().toString()
+        val rootPidFile = if (spec.root) {
+            onBeforeRootJob()
+            rootPidDir?.mkdirs()
+            rootPidDir?.let { java.io.File(it, "$jobId.pid") }
+                ?: java.io.File(System.getProperty("java.io.tmpdir"), "$jobId.pid")
+        } else null
+
         val command = if (spec.root) {
             val suPath = rootManager?.findSuBinary() ?: "su"
-            val shellCmd = RootManager.buildShellCommand(spec.argv, spec.cwd)
+            val shellCmd = RootManager.buildRootCommand(spec.argv, spec.cwd, rootPidFile!!)
             listOf(suPath, "-c", shellCmd)
         } else if (SETSID.canExecute()) {
             listOf(SETSID.path) + spec.argv
@@ -79,12 +94,21 @@ class ProcessSupervisor(
         // to block forever on an open pipe (B-07).
         runCatching { process.outputStream.close() }
         val pid = pidOf(process)
-        val jobId = UUID.randomUUID().toString()
-        val job = Job(jobId, process, pid, root = spec.root)
+        val job = Job(jobId, process, pid, root = spec.root, rootPidFile = rootPidFile)
         jobs[jobId] = job
         // A pidfile failure must not leave a running process without pumps (B-21).
         runCatching { pidFiles?.write(jobId, pid, if (spec.root) "root-proc" else "proc") }
         notifyCount()
+
+        if (spec.root && rootManager != null && rootPidFile != null) {
+            thread(isDaemon = true, name = "leocode-proc-rootpid-$jobId") {
+                val rp = rootManager.awaitRootPid(rootPidFile)
+                if (rp != null) {
+                    job.rootPid = rp
+                    rootManager.markGranted()
+                }
+            }
+        }
 
         val outPump = StreamPump(process.inputStream, spec.maxOutputBytes, onStdout)
         val errPump = StreamPump(process.errorStream, spec.maxOutputBytes, onStderr)
@@ -119,6 +143,20 @@ class ProcessSupervisor(
             pidFiles?.remove(jobId)
             notifyCount()
             val code = if (timedOut) -1 else runCatching { process.exitValue() }.getOrDefault(-1)
+
+            if (spec.root && rootManager != null && rootPidFile != null) {
+                val appeared = (job.rootPid != null) || (rootPidFile.exists() && RootManager.parseRootPidFile(runCatching { rootPidFile.readText() }.getOrDefault("")) != null)
+                if (appeared) {
+                    rootManager.markGranted()
+                } else if (code != 0 && outPump.bytesEmitted() == 0) {
+                    rootManager.markLost()
+                    runCatching {
+                        onRootLost?.invoke(dev.leocode.bridge.RootLostEvent(jobId = jobId, reason = "denied"))
+                    }
+                }
+                runCatching { rootPidFile.delete() }
+            }
+
             finish(job, code, onExit)
         }
 
@@ -130,6 +168,11 @@ class ProcessSupervisor(
         val job = jobs[jobId] ?: return false
         terminate(job)
         return true
+    }
+
+    /** Cancels all root jobs while leaving non-root jobs running. */
+    fun cancelRoot() {
+        jobs.values.filter { it.root }.forEach { terminate(it) }
     }
 
     fun close() {
@@ -147,10 +190,46 @@ class ProcessSupervisor(
     private fun terminate(job: Job) {
         if (!job.terminating.compareAndSet(false, true)) return
 
-        val native = job.pid > 0 && NativePty.available()
         if (job.root) {
-            rootManager?.kill(job.pid, 15)
-        } else if (native) {
+            val rp = job.rootPid
+            if (rp != null && rootManager != null) {
+                rootManager.kill(rp.pid, 15)
+                var waited = 0L
+                while (waited < 2_000L && rootManager.isRootPidAlive(rp)) {
+                    try {
+                        Thread.sleep(200L)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                    waited += 200L
+                }
+                if (rootManager.isRootPidAlive(rp)) {
+                    rootManager.kill(rp.pid, 9)
+                }
+                runCatching { job.process.destroyForcibly() }
+            } else {
+                runCatching {
+                    android.util.Log.w("LeoCodeProc", "Root pid unknown for job ${job.id}; falling back to client kill")
+                }
+                if (rootManager != null) {
+                    rootManager.kill(job.pid, 15)
+                } else {
+                    runCatching { job.process.destroy() }
+                }
+                val exited = runCatching { job.process.waitFor(2, TimeUnit.SECONDS) }.getOrDefault(false)
+                if (!exited) {
+                    if (rootManager != null) {
+                        rootManager.kill(job.pid, 9)
+                    }
+                    runCatching { job.process.destroyForcibly() }
+                }
+            }
+            return
+        }
+
+        val native = job.pid > 0 && NativePty.available()
+        if (native) {
             NativePty.killGroup(job.pid, 15)
         } else {
             runCatching { job.process.destroy() }
@@ -158,9 +237,7 @@ class ProcessSupervisor(
 
         val exited = runCatching { job.process.waitFor(2, TimeUnit.SECONDS) }.getOrDefault(false)
         if (!exited) {
-            if (job.root) {
-                rootManager?.kill(job.pid, 9)
-            } else if (native) {
+            if (native) {
                 NativePty.killGroup(job.pid, 9)
             }
             runCatching { job.process.destroyForcibly() }
@@ -204,6 +281,8 @@ class ProcessSupervisor(
     ) {
         private var total = 0
         private var truncated = false
+
+        fun bytesEmitted(): Int = total
 
         fun run() {
             val reader = InputStreamReader(stream, Charsets.UTF_8)

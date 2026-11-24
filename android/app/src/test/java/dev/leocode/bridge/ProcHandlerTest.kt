@@ -74,4 +74,90 @@ class ProcHandlerTest {
             supervisor.close()
         }
     }
+
+    private class FakeRootPrefs(private var enabled: Boolean = true) : dev.leocode.core.RootManager.RootPrefs {
+        override fun isEnabled(): Boolean = enabled
+        override fun setEnabled(enabled: Boolean) {
+            this.enabled = enabled
+        }
+    }
+
+    private class FakeShellRunner : dev.leocode.core.RootManager.ShellRunner {
+        override fun run(command: List<String>, timeoutMs: Long): dev.leocode.core.RootManager.ShellResult =
+            dev.leocode.core.RootManager.ShellResult(0, "", "")
+    }
+
+    @Test
+    fun `root run returns E_ROOT_UNAVAILABLE when root is not available`() {
+        val root = Files.createTempDirectory("leocode-proc-handler").toFile().also { it.deleteOnExit() }
+        val workspace = Workspace(root).apply { ensure() }
+        val supervisor = ProcessSupervisor()
+        val manager = dev.leocode.core.RootManager(
+            prefs = FakeRootPrefs(enabled = true),
+            shellRunner = FakeShellRunner(),
+            pathCandidates = emptyList(),
+            pathEnv = ""
+        )
+        val handler = ProcHandler(
+            workspace,
+            PathJail(workspaceRoot = workspace.workspacesRoot),
+            supervisor,
+            { workspace.defaultWorkspace },
+            rootManager = manager
+        )
+
+        try {
+            handler.handle(
+                "proc.run",
+                Json.encodeToJsonElement(ProcRunRequest.serializer(), ProcRunRequest(
+                    argv = listOf("echo", "hi"),
+                    cwd = ".",
+                    root = true
+                )).jsonObject
+            )
+            org.junit.Assert.fail("expected E_ROOT_UNAVAILABLE")
+        } catch (e: BridgeException) {
+            assertEquals(ErrorCode.E_ROOT_UNAVAILABLE, e.errorCode)
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `root run returns E_ROOT_DENIED when canUseRoot is false`() {
+        val root = Files.createTempDirectory("leocode-proc-handler").toFile().also { it.deleteOnExit() }
+        val workspace = Workspace(root).apply { ensure() }
+        val supervisor = ProcessSupervisor()
+        val fakeSu = File.createTempFile("fake_su", "").apply { deleteOnExit() }
+        val manager = dev.leocode.core.RootManager(
+            prefs = FakeRootPrefs(enabled = false),
+            shellRunner = FakeShellRunner(),
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        val handler = ProcHandler(
+            workspace,
+            PathJail(workspaceRoot = workspace.workspacesRoot),
+            supervisor,
+            { workspace.defaultWorkspace },
+            rootManager = manager
+        )
+
+        try {
+            handler.handle(
+                "proc.run",
+                Json.encodeToJsonElement(ProcRunRequest.serializer(), ProcRunRequest(
+                    argv = listOf("echo", "hi"),
+                    cwd = ".",
+                    root = true
+                )).jsonObject
+            )
+            org.junit.Assert.fail("expected E_ROOT_DENIED")
+        } catch (e: BridgeException) {
+            assertEquals(ErrorCode.E_ROOT_DENIED, e.errorCode)
+        } finally {
+            supervisor.close()
+            fakeSu.delete()
+        }
+    }
 }

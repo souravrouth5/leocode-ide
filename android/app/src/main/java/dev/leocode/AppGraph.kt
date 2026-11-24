@@ -123,21 +123,42 @@ class AppGraph(private val app: Application) {
     @Volatile
     var onFirstSession: (() -> Unit)? = null
 
-    val rootPrefs = object : dev.leocode.core.RootManager.RootPrefs {
+    val rootPidDir: File = File(app.filesDir, "run/root").apply { mkdirs() }
+
+    val rootPrefs: dev.leocode.core.RootManager.RootPrefs = object : dev.leocode.core.RootManager.RootPrefs {
         private val prefs = app.getSharedPreferences("leocode_root", android.content.Context.MODE_PRIVATE)
         override fun isEnabled(): Boolean = prefs.getBoolean("enabled", false)
         override fun setEnabled(enabled: Boolean) {
             prefs.edit().putBoolean("enabled", enabled).apply()
+            if (enabled) {
+                kotlin.concurrent.thread(isDaemon = true, name = "leocode-root-reaper-post-enable") {
+                    rootOrphanReaper.reapPending()
+                }
+            }
         }
     }
 
-    val rootManager = dev.leocode.core.RootManager(rootPrefs)
+    val rootManager: dev.leocode.core.RootManager = dev.leocode.core.RootManager(rootPrefs)
+
+    val rootOrphanReaper: dev.leocode.core.RootOrphanReaper = dev.leocode.core.RootOrphanReaper(rootPidDir, rootManager)
+
+    private val rootReaperRan = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun ensureRootOrphansReaped() {
+        if (rootReaperRan.compareAndSet(false, true)) {
+            kotlin.concurrent.thread(isDaemon = true, name = "leocode-root-reaper") {
+                rootOrphanReaper.reapPending()
+            }
+        }
+    }
 
     private val supervisor = ProcessSupervisor(
         childEnv = childEnv,
         pidFiles = pidFiles,
         onCountChanged = { sessionCountChanged() },
-        rootManager = rootManager
+        rootManager = rootManager,
+        rootPidDir = rootPidDir,
+        onBeforeRootJob = { ensureRootOrphansReaped() }
     )
 
     private val terminals = TerminalRegistry(
@@ -153,7 +174,40 @@ class AppGraph(private val app: Application) {
             )
         },
         pidFiles = pidFiles,
-        onCountChanged = { sessionCountChanged() }
+        onCountChanged = { sessionCountChanged() },
+        rootPidDir = rootPidDir,
+        rootManager = rootManager,
+        onBeforeRootSession = { ensureRootOrphansReaped() },
+        spawnWithId = { id, cwd, env, rows, cols, root ->
+            val pidFile = File(rootPidDir, "$id.pid")
+            val rootCommand = if (root) {
+                val suPath = rootManager.findSuBinary() ?: "/product/bin/su"
+                val shellScript = dev.leocode.core.RootManager.buildRootShell(pidFile)
+                val quoted = dev.leocode.core.RootManager.quoteArg(shellScript)
+                "exec $suPath -c $quoted"
+            } else null
+
+            dev.leocode.core.PtySession.openShell(
+                cwd = cwd,
+                env = env,
+                rows = rows,
+                cols = cols,
+                root = root,
+                suPath = rootManager.findSuBinary(),
+                rootCommand = rootCommand,
+                awaitRootPid = if (root) {
+                    {
+                        rootManager.awaitRootPid(pidFile)?.let {
+                            dev.leocode.core.PtySession.RootPid(it.pid, it.startTime)
+                        }
+                    }
+                } else null,
+                onKillRoot = { pid, sig -> rootManager.kill(pid, sig) },
+                isRootPidAlive = { pid, startTime ->
+                    rootManager.isRootPidAlive(dev.leocode.core.RootManager.RootPid(pid, startTime))
+                }
+            )
+        }
     )
 
     // Phase F: tokens and SSH private keys are sealed with a Keystore key. The
@@ -192,7 +246,15 @@ class AppGraph(private val app: Application) {
 
     private val activeRoot: () -> File = { workspaceStore.activeDirectory() }
 
-    private val rootHandler = dev.leocode.bridge.RootHandler(rootManager, json)
+    private val rootHandler = dev.leocode.bridge.RootHandler(
+        rootManager,
+        json,
+        onDisabled = {
+            terminals.closeRoot()
+            supervisor.cancelRoot()
+        },
+        log = { android.util.Log.i("LeoCodeRoot", it) }
+    )
     private val procHandler = ProcHandler(workspace, jail, supervisor, activeRoot, json, rootManager)
     private val terminalHandler = TermHandler(workspace, jail, childEnv, terminals, json, rootManager)
     private val runtimeHandler = RuntimeHandler(
@@ -298,7 +360,7 @@ class AppGraph(private val app: Application) {
             CrashStore.peek(app),
             rootStatus = when {
                 rootManager.isEnabled() && rootManager.isGranted() -> "root mode enabled (granted)"
-                rootManager.isEnabled() -> "root mode enabled (grant pending/denied)"
+                rootManager.isEnabled() -> "root mode enabled (not verified this session)"
                 rootManager.isAvailable() -> "su binary present (not enabled)"
                 else -> "not detected"
             }

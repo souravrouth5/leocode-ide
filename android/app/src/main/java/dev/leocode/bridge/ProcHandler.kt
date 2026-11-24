@@ -60,7 +60,7 @@ class ProcHandler(
             if (rootManager == null || !rootManager.isAvailable()) {
                 throw BridgeException(ErrorCode.E_ROOT_UNAVAILABLE, "root is not available")
             }
-            if (!rootManager.isEnabled()) {
+            if (!rootManager.canUseRoot()) {
                 throw BridgeException(ErrorCode.E_ROOT_DENIED, "root mode is not enabled")
             }
         }
@@ -84,6 +84,12 @@ class ProcHandler(
                     sink.event(
                         "proc.exit",
                         json.encodeToJsonElement(ProcExit.serializer(), ProcExit(code))
+                    )
+                },
+                onRootLost = { event ->
+                    sink.event(
+                        "root.lost",
+                        json.encodeToJsonElement(RootLostEvent.serializer(), event)
                     )
                 }
             )

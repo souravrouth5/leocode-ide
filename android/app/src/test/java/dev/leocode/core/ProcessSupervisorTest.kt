@@ -240,4 +240,281 @@ class ProcessSupervisorTest {
             supervisor.close()
         }
     }
+
+    private class FakeRootPrefs(private var enabled: Boolean = true) : RootManager.RootPrefs {
+        override fun isEnabled(): Boolean = enabled
+        override fun setEnabled(enabled: Boolean) {
+            this.enabled = enabled
+        }
+    }
+
+    private class FakeShellRunner(
+        val onRun: (command: List<String>) -> RootManager.ShellResult = { RootManager.ShellResult(0, "", "") }
+    ) : RootManager.ShellRunner {
+        override fun run(command: List<String>, timeoutMs: Long): RootManager.ShellResult = onRun(command)
+    }
+
+    @Test
+    fun `root cancel kills the recorded root pid and never calls client kill when pid is known`() {
+        val fakeSu = File.createTempFile("fake_su_daemon", ".sh").apply {
+            // Emulates su/magiskd spawning the target command as a separate child process
+            writeText("#!/bin/sh\nsh -c \"$2\"\nexit $?\n")
+            setExecutable(true)
+            deleteOnExit()
+        }
+        val killedPids = CopyOnWriteArrayList<Pair<Int, Int>>()
+        val rootPidDir = Files.createTempDirectory("leocode-root-pids").toFile()
+        var aliveChecks = 0
+
+        val manager = RootManager(
+            prefs = FakeRootPrefs(true),
+            shellRunner = FakeShellRunner { cmd ->
+                val cmdStr = cmd.joinToString(" ")
+                if (cmdStr.contains("kill -")) {
+                    val sig = if (cmdStr.contains("kill -15")) 15 else 9
+                    val pidRegex = Regex("kill -\\d+ -?(\\d+)")
+                    val m = pidRegex.find(cmdStr)
+                    val pid = m?.groupValues?.get(1)?.toIntOrNull() ?: -1
+                    killedPids += pid to sig
+                    RootManager.ShellResult(0, "", "")
+                } else if (cmdStr.contains("cut -d' ' -f22")) {
+                    aliveChecks++
+                    // First check returns alive, then after kill returns dead
+                    if (aliveChecks <= 1) RootManager.ShellResult(0, "123\n", "") else RootManager.ShellResult(1, "", "")
+                } else {
+                    RootManager.ShellResult(0, "", "")
+                }
+            },
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+
+        val supervisor = ProcessSupervisor(rootManager = manager, rootPidDir = rootPidDir)
+        val done = CountDownLatch(1)
+
+        try {
+            val handle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "sleep 10"),
+                    cwd = workDir(),
+                    timeoutMs = 30_000,
+                    root = true
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = { done.countDown() }
+            )
+
+            val rootPidFile = File(rootPidDir, "${handle.jobId}.pid")
+            val rootPid = manager.awaitRootPid(rootPidFile, timeoutMs = 3_000)
+            assertTrue("root pidfile did not appear", rootPid != null)
+            assertTrue("root pid should be distinct from client pid", rootPid!!.pid != handle.pid)
+            // Allow supervisor's background reader thread to record job.rootPid
+            Thread.sleep(150)
+
+            assertTrue(supervisor.cancel(handle.jobId))
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+
+            // Verified: root cancel killed the real root pid, not the client pid
+            assertTrue("expected killedPids to contain ${rootPid.pid}", killedPids.any { it.first == rootPid.pid && it.second == 15 })
+            assertFalse("client pid should not have been signalled", killedPids.any { it.first == handle.pid })
+        } finally {
+            supervisor.close()
+            fakeSu.delete()
+        }
+    }
+
+    @Test
+    fun `root job whose pidfile never appears and exits non-zero emits root lost before exit and marks lost`() {
+        val fakeSu = File.createTempFile("fake_su", ".sh").apply {
+            writeText("#!/bin/sh\nexit 1\n")
+            setExecutable(true)
+            deleteOnExit()
+        }
+        val rootPidDir = Files.createTempDirectory("leocode-root-pids").toFile()
+        val manager = RootManager(
+            prefs = FakeRootPrefs(true),
+            shellRunner = FakeShellRunner(),
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+        assertTrue(manager.isGranted())
+
+        val supervisor = ProcessSupervisor(rootManager = manager, rootPidDir = rootPidDir)
+        val events = CopyOnWriteArrayList<String>()
+        val done = CountDownLatch(1)
+        var lostJobId: String? = null
+        var lostReason: String? = null
+
+        try {
+            val handle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("echo", "test"),
+                    cwd = workDir(),
+                    timeoutMs = 5_000,
+                    root = true
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = {
+                    events += "exit:$it"
+                    done.countDown()
+                },
+                onRootLost = {
+                    events += "lost:${it.jobId}"
+                    lostJobId = it.jobId
+                    lostReason = it.reason
+                }
+            )
+
+            assertTrue("job did not exit", done.await(5, TimeUnit.SECONDS))
+            assertEquals(listOf("lost:${handle.jobId}", "exit:1"), events.toList())
+            assertEquals(handle.jobId, lostJobId)
+            assertEquals("denied", lostReason)
+            assertFalse("markLost must have been called", manager.isGranted())
+        } finally {
+            supervisor.close()
+            fakeSu.delete()
+        }
+    }
+
+    @Test
+    fun `pidfile that appears marks root granted`() {
+        val rootPidDir = Files.createTempDirectory("leocode-root-pids").toFile()
+        val manager = RootManager(
+            prefs = FakeRootPrefs(true),
+            shellRunner = FakeShellRunner(),
+            pathCandidates = listOf(sh.absolutePath),
+            pathEnv = ""
+        )
+        // grant is not yet verified
+        assertFalse(manager.isGranted())
+
+        val supervisor = ProcessSupervisor(rootManager = manager, rootPidDir = rootPidDir)
+        val done = CountDownLatch(1)
+
+        try {
+            supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "echo hello"),
+                    cwd = workDir(),
+                    timeoutMs = 5_000,
+                    root = true
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = { done.countDown() }
+            )
+
+            assertTrue("job did not finish", done.await(5, TimeUnit.SECONDS))
+            assertTrue("markGranted should be called when pidfile appeared", manager.isGranted())
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `cancelRoot leaves non-root jobs running`() {
+        val rootPidDir = Files.createTempDirectory("leocode-root-pids").toFile()
+        val manager = RootManager(
+            prefs = FakeRootPrefs(true),
+            shellRunner = FakeShellRunner(),
+            pathCandidates = listOf(sh.absolutePath),
+            pathEnv = ""
+        )
+        val supervisor = ProcessSupervisor(rootManager = manager, rootPidDir = rootPidDir)
+        val rootDone = CountDownLatch(1)
+        val nonRootDone = CountDownLatch(1)
+
+        try {
+            val rootHandle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "sleep 10"),
+                    cwd = workDir(),
+                    timeoutMs = 30_000,
+                    root = true
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = { rootDone.countDown() }
+            )
+
+            val nonRootHandle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "sleep 10"),
+                    cwd = workDir(),
+                    timeoutMs = 30_000,
+                    root = false
+                ),
+                onStdout = {},
+                onStderr = {},
+                onExit = { nonRootDone.countDown() }
+            )
+
+            // Cancel only root jobs
+            supervisor.cancelRoot()
+
+            assertTrue("root job should terminate", rootDone.await(5, TimeUnit.SECONDS))
+            assertFalse("non-root job should still be running", nonRootDone.await(200, TimeUnit.MILLISECONDS))
+            assertEquals(1, supervisor.activeCount())
+
+            // Clean up non-root job
+            supervisor.cancel(nonRootHandle.jobId)
+            assertTrue("non-root job should terminate on cancel", nonRootDone.await(5, TimeUnit.SECONDS))
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `missing pidfile with stdout output is normal failed run without root lost`() {
+        val fakeSu = File.createTempFile("fake_su_err", ".sh").apply {
+            writeText("#!/bin/sh\necho 'some error output'\nexit 1\n")
+            setExecutable(true)
+            deleteOnExit()
+        }
+        val rootPidDir = Files.createTempDirectory("leocode-root-pids").toFile()
+        val manager = RootManager(
+            prefs = FakeRootPrefs(true),
+            shellRunner = FakeShellRunner(),
+            pathCandidates = listOf(fakeSu.absolutePath),
+            pathEnv = ""
+        )
+        manager.markGranted()
+
+        val supervisor = ProcessSupervisor(rootManager = manager, rootPidDir = rootPidDir)
+        val events = CopyOnWriteArrayList<String>()
+        val done = CountDownLatch(1)
+
+        try {
+            supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("echo", "test"),
+                    cwd = workDir(),
+                    timeoutMs = 5_000,
+                    root = true
+                ),
+                onStdout = { events += "stdout:$it" },
+                onStderr = {},
+                onExit = {
+                    events += "exit:$it"
+                    done.countDown()
+                },
+                onRootLost = {
+                    events += "lost:${it.jobId}"
+                }
+            )
+
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+            assertTrue(events.any { it.startsWith("stdout:") })
+            assertTrue(events.contains("exit:1"))
+            assertFalse("root.lost must not be emitted when stdout produced output", events.any { it.startsWith("lost:") })
+            assertTrue("markLost must not be called when stdout produced output", manager.isGranted())
+        } finally {
+            supervisor.close()
+            fakeSu.delete()
+        }
+    }
 }
