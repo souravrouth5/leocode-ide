@@ -1,0 +1,110 @@
+# LeoCode M1 Redo Device Verification Raw Log — D1 (11f98015)
+Date: 2026-11-24 / 2026-11-25
+Device: D1 11f98015 (Xiaomi Redmi Note 7S, Android 9 / SDK 28)
+APK: dist/release/leocode-1011.apk (0.1.0-rc11, versionCode 1011)
+
+## Step 0: Git & Package Triage + Cleanup
+$ git branch --show-current; git log --oneline -3; git status --short
+feat/phase-g
+2f4e4a0 (HEAD -> feat/phase-g, origin/feat/phase-g) docs: append review fixes D1–D5 to B7.md and track B7-review.md
+8bcd255 docs: B7 accuracy fixes (readiness summary, gates 10/11/13/19/20, kill mechanism)
+237881d docs: close Phase E (Tasks 17–18) with device evidence
+ M docs/agent-briefs/README.md
+?? docs/agent-briefs/M1-redo-D1.md
+?? docs/agent-briefs/reports/M1-D1-review.md
+?? docs/agent-briefs/reports/M1-D1.md
+?? docs/device-reports/20261124-225656-smoke-11f98015.txt
+?? docs/device-reports/20261124-225711-smoke-11f98015.txt
+?? docs/device-reports/20261124-task31-33-D1-11f98015.txt
+?? docs/device-reports/20261124-task31-33-D1/
+
+$ adb -s 11f98015 shell dumpsys package dev.leocode | grep -E "versionCode|firstInstallTime|lastUpdateTime"
+    versionCode=1011 minSdk=28 targetSdk=28
+    firstInstallTime=2026-11-22 17:08:16
+    lastUpdateTime=2026-11-24 22:57:39
+
+$ adb -s 192.168.29.118:40249 shell dumpsys package dev.leocode | grep -E "versionCode|firstInstallTime|lastUpdateTime"
+    versionCode=1011 minSdk=28 targetSdk=28
+    lastUpdateTime=2026-11-24 20:28:59
+      firstInstallTime=2026-11-22 17:43:50
+
+(Note: D2 192.168.29.118:40249 was unreachable when resuming on 2026-11-25.)
+
+D1 requirements.txt restored via Editor -> Reload from disk -> Confirm Reload:
+- Text restored to `# Add project dependencies here`, status `Reloaded from disk`, no draft banner.
+
+D1 Settings > About > Diagnostics:
+- Runtimes: python 3.14.10 (versionCode 31410), installed=false healthy=false
+- WebView: com.android.chrome 137.0.7151.115
+
+## Step 1: Install Python Runtime on D1
+$ adb -s 11f98015 logcat -G 16M
+$ adb -s 11f98015 logcat -c
+$ adb -s 11f98015 shell am start -n dev.leocode/.MainActivity
+Starting: Intent { cmp=dev.leocode/.MainActivity }
+
+$ adb -s 11f98015 shell ping -c 1 -W 2 1.1.1.1
+PING 1.1.1.1 (1.1.1.1) 56(84) bytes of data.
+64 bytes from 1.1.1.1: icmp_seq=1 ttl=51 time=34.1 ms
+--- 1.1.1.1 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+
+(Direct internet available on D1; Runtimes > Python 3 > Install > Install Python 3.14.10 completed:
+STATUS: INSTALLED, Python 3.14.10 + pip 26.2.2, Terminal aliases: python, pip.
+Screenshots: step1-installing.png, step1-installed-details.png, step1-installed-healthy.png)
+
+## Step 2: Push Test Files and Import Folder
+$ mkdir -p /tmp/m1
+$ printf 'x = input()\nprint("Got: " + x)\n' > /tmp/m1/stdin_test.py
+$ printf 'def f():\n    return 1 / 0\n\nprint(f())\n' > /tmp/m1/zero.py
+$ printf 'import unknown_package_xyz\n' > /tmp/m1/missing.py
+$ adb -s 11f98015 shell mkdir -p /sdcard/Download/m1
+$ adb -s 11f98015 push /tmp/m1/stdin_test.py /tmp/m1/zero.py /tmp/m1/missing.py /sdcard/Download/m1/
+/tmp/m1/stdin_test.py: 1 file pushed, 0 skipped. 0.2 MB/s (31 bytes in 0.000s)
+/tmp/m1/zero.py: 1 file pushed, 0 skipped. 0.7 MB/s (38 bytes in 0.000s)
+/tmp/m1/missing.py: 1 file pushed, 0 skipped. 0.6 MB/s (27 bytes in 0.000s)
+3 files pushed, 0 skipped. 0.0 MB/s (96 bytes in 0.130s)
+
+$ adb -s 11f98015 shell ls -la /sdcard/Download/m1/
+total 20
+drwxrwx--x 2 root sdcard_rw 4096 2026-11-25 13:11 .
+drwxrwx--x 9 root sdcard_rw 4096 2026-11-25 13:11 ..
+-rw-rw---- 1 root sdcard_rw   27 2026-11-25 13:11 missing.py
+-rw-rw---- 1 root sdcard_rw   31 2026-11-25 13:11 stdin_test.py
+-rw-rw---- 1 root sdcard_rw   38 2026-11-25 13:11 zero.py
+
+Settings > About > Backup & Import > Import folder... -> user picked Download/m1 -> Explorer shows workspace > m1 with missing.py (27 B), stdin_test.py (31 B), zero.py (38 B) (step2-explorer.png).
+
+## Step 3: Task 31-33 Verification Commands & Observations
+- T31-1 / T31-2 (`stdin_test.py`):
+  Trusted project & venv creation. RunSheet immediately exited:
+  `FINISHED IN 316 MS (EXIT 1)` with `EOFError: EOF when reading a line` at `x = input()`.
+  (`ProcessSupervisor.kt:95` closes child stdin immediately via `process.outputStream.close()`, so stdin row cannot be used.)
+- T31-3 (`zero.py`):
+  RunSheet shows `FINISHED IN 321 MS (EXIT 1)`, error card `ZeroDivisionError: Division by Zero`, and traceback.
+  Tapping `line 2` `(400, 1720)` did NOT jump to editor line 2 (`T31-3-jump.png`) because Python reports `/data/data/dev.leocode/...` while `workspaceRoot` is `/data/user/0/dev.leocode/...`.
+- T31-4 (`missing.py`):
+  RunSheet shows `FINISHED IN 306 MS (EXIT 1)`, error card `ModuleNotFoundError: Module "unknown_package_xyz" Not Found`, `Suggestion: pip install unknown_package_xyz` (`T31-4.png`).
+- T32-1 (`Terminal > Python REPL`):
+  Shows Python 3.14.10 banner and `>>> ` prompt (`T32-1.png`).
+- T32-2 (`1+1` in REPL):
+  `$ adb -s 11f98015 shell input text '1+1'` + `input keyevent 66` -> IME duplicated `+11`, REPL printed `>>> 1+1+11` -> `13` (`T32-2.png`).
+- T32-3 (`^D` exit):
+  Tapped `^D` `(445, 1805)` -> REPL exited back to shell prompt `:/data/data/dev.leocode/files/workspaces/default/m1 $` (`T32-3.png`).
+- T33-1 (`t.py` indent/dedent):
+  `$ adb -s 11f98015 shell 'input text "def%sf():"'` + `keyevent 66` -> line 2 indented 4 spaces (`T33-1-indent.png`).
+  `$ adb -s 11f98015 shell 'input text "return%s1"'` + `keyevent 66` + `input text 'x'` -> line 3 remained indented 4 spaces under `return 1` (`T33-1-dedent.png`).
+- T33-2 (snippets in empty `t.py`):
+  Tapped `def`, `class`, `main`, `for`, `try` -> all 5 inserted (`T33-2.png`).
+- T33-4 (`Runtimes > Compatibility`):
+  Opened `Python Compatibility Matrix` sheet showing `Python Runtime Baseline` (`T33-4.png`) and `Tested Packages (9 of 9)` (`T33-4-packages.png`).
+
+## Step 4: Logcat
+$ adb -s 11f98015 logcat -d | grep -E "LeoCode|chromium|Console" > docs/device-reports/20261125-task31-33-D1-logcat.txt
+$ wc -l docs/device-reports/20261125-task31-33-D1-logcat.txt
+134 docs/device-reports/20261125-task31-33-D1-logcat.txt
+
+Real LeoCode lines from `20261125-task31-33-D1-logcat.txt`:
+11-25 13:03:52.380  3939  3939 I LeoCodeSecrets: strongBox=false
+11-25 13:03:53.144  3939  3939 D LeoCodeWeb: The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)
+11-25 13:03:53.899  3939  4119 I LeoCodeRoot: root.status => available=false, granted=false, enabled=false, su=null

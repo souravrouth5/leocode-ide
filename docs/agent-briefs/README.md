@@ -96,6 +96,12 @@ Phone tests are **not** part of a brief. The owner runs them after all the brief
 
 ## Report
 
+**Evidence rule (added after M-1, 2026-11-24):** a row is PASS only if its evidence (a screenshot,
+raw command output or a logcat line) visibly shows the claimed state. Paste only output that was
+really produced. If you can't get the evidence, report FAIL or BLOCKED. A PASS whose evidence shows
+something else counts as fabricated, and the whole report is rejected. Unit tests never count as
+device evidence.
+
 Finish every brief by writing `docs/agent-briefs/reports/<brief-id>.md`:
 
 ```markdown
