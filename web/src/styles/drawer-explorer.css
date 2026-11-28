@@ -34,6 +34,10 @@
   transform: translateX(-100%);
   transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 12px 0 32px rgba(0, 0, 0, 0.3);
+  /* The drawer is fixed to the viewport, so it has to keep its header below
+     the status bar and its footer above the navigation bar itself. */
+  padding-top: var(--inset-top);
+  padding-bottom: var(--inset-bottom);
 }
 
 .sidebar.is-open {

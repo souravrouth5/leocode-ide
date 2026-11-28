@@ -191,7 +191,7 @@ export function SettingsDialog({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Settings">
+    <Sheet open={open} onClose={onClose} title="Settings" className="settings-sheet">
       <div className="settings-container">
         <div className="settings-nav-tabs">
           <button

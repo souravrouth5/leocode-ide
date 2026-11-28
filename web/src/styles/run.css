@@ -7,6 +7,7 @@
   border-radius: 8px;
   display: grid;
   place-items: center;
+  padding: 0;
   color: #10b981;
   background: rgba(16, 185, 129, 0.14);
   border: 1px solid rgba(16, 185, 129, 0.35);
@@ -22,7 +23,10 @@
   transform: scale(0.94);
 }
 
-.run {
+/* Run sheet container. Keep this class distinct from the header's `.run`
+   button: sharing the name applied the sheet's horizontal padding to the
+   button and pushed the play glyph against its right edge. */
+.run-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;

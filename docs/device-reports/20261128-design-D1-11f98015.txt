@@ -1,0 +1,69 @@
+Design-fix verification — rc14
+================================
+
+Date: 2026-11-28
+Build: dist/release/leocode-1014.apk (0.1.0-rc14, versionCode 1014)
+sha256: 3f57a5a284c98fb54f025251f967841d610ed5663507b3ac93faea866d86d6d2
+size: 18942499 bytes
+
+D1: 11f98015 (Redmi Note 7S, Android 9 / SDK 28, 1080x2340)
+D2: 10.8.0.52:40061 (POCO F1, Android 15, 1080x2246)
+
+Install
+-------
+$ adb -s 11f98015 install -r dist/release/leocode-1014.apk
+Performing Streamed Install
+Success
+
+$ adb -s 10.8.0.52:40061 install -r dist/release/leocode-1014.apk
+Performing Streamed Install
+Success
+
+$ adb -s 11f98015 shell dumpsys package dev.leocode | grep version
+    versionCode=1014 minSdk=28 targetSdk=28
+    versionName=0.1.0-rc14
+
+$ adb -s 10.8.0.52:40061 shell dumpsys package dev.leocode | grep version
+    versionCode=1014 minSdk=28 targetSdk=28
+    versionName=0.1.0-rc14
+
+Observations
+------------
+1. Header Run button (D1, D2): the green button shows the play triangle centred
+   in the circle. Headless-Firefox measurement against the shipped CSS:
+     run   top=8.5  h=32.0  left=1000.0  w=32.0   (centre x = 1016.0)
+     svg   top=17.0 h=15.0  left=1008.5  w=15.0   (centre x = 1016.0)
+     run padding = 0px
+   Screenshots: 20261128-design-D1-run-btn.png, 20261128-design-D2-run-btn.png
+
+2. Sidebar drawer (D1, D2): the "LeoCode IDE" header sits below the status bar
+   and the Settings / Terminal / Runtimes footer sits above the navigation bar.
+   D2's footer was previously clipped at the bottom edge; it is now fully
+   visible. Screenshots: 20261128-design-D1-drawer.png,
+   20261128-design-D2-drawer.png
+
+3. Settings sheet (D1, D2): the sheet keeps a fixed 86% height. All five tabs
+   (Editor, Appearance, Git, About, Advanced) render at the same sheet top and
+   the same tab-strip position; switching from a short tab (Advanced) to a long
+   tab (About) does not resize the sheet.
+   Headless-Firefox measurement (900px viewport):
+     sheet top=126.0 h=774.0
+     tabs  top=173.8 h=46.0      (identical with 668px and 3074px of content)
+     panel top=231.8 h=668.3, scrollHeight 668 / 3074
+   On device, swiping inside About scrolls only the panel: the tab strip stays
+   pinned while the content moves. Screenshots:
+     20261128-design-D1-settings-editor.png
+     20261128-design-D1-settings-advanced.png
+     20261128-design-D1-settings-scrolled.png
+     20261128-design-D2-settings-advanced.png
+     20261128-design-D2-settings-scrolled.png
+
+4. Run sheet (D1): the `.run` -> `.run-panel` rename did not change the sheet
+   layout; "Run · t.py" shows the status pill, the not-saved note and the Close
+   button with the intended 16px horizontal padding.
+   Screenshot: 20261128-design-D1-runsheet.png
+
+Logcat
+------
+$ adb -s 11f98015 logcat -d -t 400 | grep -iE "leocode|chromium.*console|AndroidRuntime|FATAL"
+(no output)

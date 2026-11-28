@@ -170,7 +170,7 @@ export function RunSheet({
 
   return (
     <Sheet open={open} onClose={onClose} title={`Run · ${title}`}>
-      <div className="run">
+      <div className="run-panel">
         <div className="run-bar">
           <span className={"term-status" + (tone ? " " + tone : "")}>{status}</span>
           {isRootActive && (

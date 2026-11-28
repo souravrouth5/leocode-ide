@@ -38,6 +38,18 @@ product bug; it re-ran as `1+1` → `2` with key events. The D2 spot check also 
 `docs/device-reports/20261128-fix-D1-*`, `docs/device-reports/20261128-fix-D2-*` and
 [`docs/agent-briefs/reports/M1-D1-fix.md`](docs/agent-briefs/reports/M1-D1-fix.md).
 
+### UI design fixes (2026-11-28)
+
+Three device-reported layout defects are fixed in `0.1.0-rc14` (`versionCode 1014`) and verified
+on D1 and D2: the sidebar drawer now pads by the safe-area insets so its header/footer clear the
+system bars; the Run sheet container was renamed `.run-panel` so it no longer leaks its
+`padding: 0 16px` into the header's `icon-btn run` button (the play glyph is centred); and the
+Settings sheet has a fixed `86%` height with a pinned tab strip, so every tab is the same height
+and only the panel scrolls. A static CSS regression guard lives in
+`web/src/features/layout/chromeLayout.test.ts`. Evidence:
+[`docs/agent-briefs/reports/design-fixes.md`](docs/agent-briefs/reports/design-fixes.md) and
+`docs/device-reports/20261128-design-*`.
+
 ### Review fixes (Phase B/C analysis, 2026-11-14)
 
 The read-only review produced 105 findings. The crash/data-loss/contract/concurrency batches and the
