@@ -1,4 +1,4 @@
-# M1 fix pass — Tasks 31–33 re-verified on D1
+# M1 fix pass — Tasks 31–33 re-verified on D1 (spot-checked on D2)
 
 - **Date:** 2026-11-28
 - **Device:** D1 (`11f98015`, Xiaomi Redmi Note 7S, Android 9 / SDK 28, 1080x2340)
@@ -60,10 +60,21 @@ No `Uncaught`/console errors were logged for the app.
 
 ## D2 (POCO F1) spot check
 
-- rc13 installed; `versionCode=1013` / `0.1.0-rc13` confirmed.
-- Python 3.14.10 was **not installed** on D2 (the runtime files were missing), so it was
-  re-installed from Runtimes; `Installed`, `python`/`pip` aliases present.
-- The stdin/traceback/REPL spot checks could not be completed: D2's Wi-Fi ADB address
-  changed three times during the pass (10.7.0.189 → 10.0.0.117 → 10.8.0.247) and each
-  drop killed the connection mid-run. **D2 spot check: BLOCKED (transport), not a product
-  result.** D1 is the device named in the brief and is fully re-verified above.
+rc13 installed on D2; `versionCode=1013` / `0.1.0-rc13` confirmed. Python 3.14.10 was missing
+from the earlier D2 install and was re-installed from Runtimes first. The Wi-Fi ADB address
+changed during the pass (`10.8.0.247:40061` → `10.8.0.62:40061`); the session was reconnected
+and the checks finished. Raw log:
+[`docs/device-reports/20261128-fix-D2.txt`](../../device-reports/20261128-fix-D2.txt).
+
+| Row | Result | Evidence | What the screenshot shows |
+|---|---|---|---|
+| T31-1/T31-2 | **PASS** | [`T31-1-stdin-rc13.png`](../../device-reports/20261128-fix-D2-T31-1-stdin-rc13.png) | `d2stdin.py` accepted `D2Code`; `FINISHED IN 110.1 S (EXIT 0)`; output `D2Code` / `D2Code`. |
+| T31-3 | **PASS** | [`T31-3-card-rc13.png`](../../device-reports/20261128-fix-D2-T31-3-card-rc13.png), [`T31-3-jump-rc13.png`](../../device-reports/20261128-fix-D2-T31-3-jump-rc13.png) | Styled `ZeroDivisionError` card with linked `/data/user/0/...` frames; tapping the line-2 frame opens `zero.py` with the cursor on line 2. |
+| T32-1/T32-2 | **PASS** | [`T32-2-repl-rc13.png`](../../device-reports/20261128-fix-D2-T32-2-repl-rc13.png) | Python 3.14.10 banner, `>>> 1+1` → `2`. |
+| T32-3 | **PASS** | [`T32-3-exit-rc13.png`](../../device-reports/20261128-fix-D2-T32-3-exit-rc13.png) | `^D` returns to the shell prompt. |
+| T33-1 | **PASS** | [`T33-1-indent-rc13.png`](../../device-reports/20261128-fix-D2-T33-1-indent-rc13.png), [`T33-1-dedent-rc13.png`](../../device-reports/20261128-fix-D2-T33-1-dedent-rc13.png) | `def f():` → `    return 1`; Enter puts line 3 at column 0. |
+| T33-2 | **PASS** | [`T33-2-snippets-rc13.png`](../../device-reports/20261128-fix-D2-T33-2-snippets-rc13.png) | `def class if __name__ == "__main__":` / `    for try:` inserted from the snippet row. |
+| T33-4 | **PASS** | [`T33-4-baseline-rc13.png`](../../device-reports/20261128-fix-D2-T33-4-baseline-rc13.png), [`T33-4-packages-rc13.png`](../../device-reports/20261128-fix-D2-T33-4-packages-rc13.png) | `Python Compatibility Matrix`, runtime baseline and the package table with PASS/UNTESTED/UNSUPPORTED badges. |
+
+D2 logcat after a clean start contains only `LeoCodeSecrets`, the informational `LeoCodeWeb`
+CSP line and `LeoCodeRoot` status; no `Uncaught`/console errors.

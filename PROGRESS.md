@@ -33,8 +33,9 @@ T33-1 (dedent after `return`). All four are fixed and re-verified on D1 with
 canonicalize the `/data/user/<uid>/` ↔ `/data/data/` aliases before workspace matching; and the
 custom Python indent service now outranks `@codemirror/lang-python` (`Prec.high`) and handles
 `context.simulatedBreak`. T32-2's `1+1+11` was an `adb shell input text` IME artifact, not a
-product bug; it re-ran as `1+1` → `2` with key events. Evidence:
-`docs/device-reports/20261128-fix-D1-*` and
+product bug; it re-ran as `1+1` → `2` with key events. The D2 spot check also passed on rc13
+(stdin, traceback card + jump, REPL, indent/dedent, snippets, compatibility sheet). Evidence:
+`docs/device-reports/20261128-fix-D1-*`, `docs/device-reports/20261128-fix-D2-*` and
 [`docs/agent-briefs/reports/M1-D1-fix.md`](docs/agent-briefs/reports/M1-D1-fix.md).
 
 ### Review fixes (Phase B/C analysis, 2026-11-14)

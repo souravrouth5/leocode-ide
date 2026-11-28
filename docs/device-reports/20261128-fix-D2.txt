@@ -1,0 +1,171 @@
+# Fix-pass device log — D2 (POCO F1), 2026-11-28
+
+Build: `dist/release/leocode-1013.apk` (`0.1.0-rc13`, `versionCode 1013`)
+SHA-256: `b1f8715e49e8394f0651dc44cf28170ba44f756a7f7547dfa85559681dd4e90e`
+Device: Xiaomi POCO F1 (`beryllium`), LineageOS (Android 9 / SDK 28), 1080x2246
+ADB over Wi-Fi; the address changed during the pass (`10.8.0.247:40061` → `10.8.0.62:40061`).
+
+This is a spot check of the four fixes; D1 is the device named in the brief and carries the
+full row-by-row pass. D2 was checked on stdin, traceback card + jump, REPL and Python editing.
+
+## Package check
+
+```console
+$ adb -s 10.8.0.62:40061 shell dumpsys package dev.leocode | grep -E "versionCode|versionName"
+    versionCode=1013 minSdk=28 targetSdk=28
+    versionName=0.1.0-rc13
+```
+
+Python 3.14.10 had to be re-installed from Runtimes on D2 (the runtime files were missing from
+the earlier install); the Runtimes tab then showed `Python 3` / `Installed`, `requirements.txt`
+/ `installed`, `Terminal aliases python, pip`, and the compatibility sheet.
+
+## T31-1 / T31-2 — interactive stdin
+
+`d2stdin.py` (`x = input()` / `print(x)`), Run, typed `D2Code` in the stdin row, Enter.
+
+```console
+$ adb -s 10.8.0.62:40061 shell input tap 927 150      # Run
+$ adb -s 10.8.0.62:40061 shell input tap 828 2139     # Trust and continue
+$ adb -s 10.8.0.62:40061 shell input tap 446 1887     # stdin field
+$ adb -s 10.8.0.62:40061 shell "input text 'D2Code'"
+$ adb -s 10.8.0.62:40061 shell input keyevent 66      # submit
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T31-1-stdin-rc13.png
+(no output)
+```
+
+Observed in `20261128-fix-D2-T31-1-stdin-rc13.png`:
+
+```text
+Run · d2stdin.py
+FINISHED IN 110.1 S (EXIT 0)
+D2Code
+D2Code
+```
+
+## T31-3 — traceback card and frame jump
+
+`zero.py` (`def f(): return 1 / 0` / `print(f())`), Run, then tap the line-2 frame.
+
+```console
+$ adb -s 10.8.0.62:40061 shell input tap 927 150      # Run
+$ adb -s 10.8.0.62:40061 shell input tap 828 2139     # Trust and continue
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T31-3-card-rc13.png
+$ adb -s 10.8.0.62:40061 shell input tap 540 1608     # line-2 frame
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T31-3-jump-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+Run · zero.py
+FINISHED IN 330 MS (EXIT 1)
+ZeroDivisionError  Division by Zero
+A number was divided by zero. Ensure the divisor is checked before dividing.
+Traceback (most recent call last):
+  File "/data/user/0/dev.leocode/files/workspaces/default/zero.py", line 3, in <module>
+  File "/data/user/0/dev.leocode/files/workspaces/default/zero.py", line 2, in f
+ZeroDivisionError: division by zero
+```
+
+The path is a link; tapping the line-2 frame closes the sheet and leaves the cursor on line 2
+of `zero.py` (the `return 1 / 0` line).
+
+## T32-1 / T32-2 / T32-3 — Python REPL
+
+Terminal › Python REPL. `1+1` sent as key events to avoid the `input text` IME duplication.
+
+```console
+$ adb -s 10.8.0.62:40061 shell input tap 784 283      # Python REPL
+$ adb -s 10.8.0.62:40061 shell input keyevent 8       # 1
+$ adb -s 10.8.0.62:40061 shell input keyevent 81      # +
+$ adb -s 10.8.0.62:40061 shell input keyevent 8       # 1
+$ adb -s 10.8.0.62:40061 shell input keyevent 66      # Enter
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T32-2-repl-rc13.png
+$ adb -s 10.8.0.62:40061 shell input tap 475 1094     # ^D
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T32-3-exit-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+Python 3.14.10 (tags/v3.14.10:b703b2c, Oct 25 2026, 17:17:21) [Clang 18.0.4 ...] on android
+>>> 1+1
+2
+>>> :/data/user/0/dev.leocode/files/workspaces/default $
+```
+
+## T33-1 — indent and dedent
+
+New empty `t.py`. `def f():` + Enter, then `return 1`.
+
+```console
+$ adb -s 10.8.0.62:40061 shell "input text 'def%sf():'"
+$ adb -s 10.8.0.62:40061 shell input keyevent 66
+$ adb -s 10.8.0.62:40061 shell "input text 'return%s1'"
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T33-1-indent-rc13.png
+$ adb -s 10.8.0.62:40061 shell input keyevent 66
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T33-1-dedent-rc13.png
+(no output)
+```
+
+Observed: line 2 `    return 1` (4 spaces); Enter puts line 3 at column 0.
+
+## T33-2 — snippet buttons
+
+Toolbar swiped left to the snippet row, then `def`, `class`, `main`, `for`, `try` tapped.
+
+```console
+$ adb -s 10.8.0.62:40061 shell input swipe 900 1134 120 1134 400
+$ adb -s 10.8.0.62:40061 shell input tap 230 1145     # def
+$ adb -s 10.8.0.62:40061 shell input tap 387 1145     # class
+$ adb -s 10.8.0.62:40061 shell input tap 549 1145     # main
+$ adb -s 10.8.0.62:40061 shell input tap 704 1145     # for
+$ adb -s 10.8.0.62:40061 shell input tap 831 1145     # try
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T33-2-snippets-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+def class if __name__ == "__main__":
+    for try:
+```
+
+## T33-4 — compatibility sheet
+
+Runtimes › Compatibility.
+
+```console
+$ adb -s 10.8.0.62:40061 shell input tap 972 2180     # Runtimes
+$ adb -s 10.8.0.62:40061 shell input tap 906 1127     # Compatibility
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T33-4-baseline-rc13.png
+$ adb -s 10.8.0.62:40061 shell input swipe 540 1700 540 600 400
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T33-4-packages-bottom-rc13.png
+$ adb -s 10.8.0.62:40061 shell input swipe 540 800 540 1500 400
+$ adb -s 10.8.0.62:40061 exec-out screencap -p > docs/device-reports/20261128-fix-D2-T33-4-packages-rc13.png
+(no output)
+```
+
+Observed: `Python Compatibility Matrix` with `Python Runtime Baseline` (CPython 3.14.10,
+`ensurepip (26.2.2 observed on D1 and D2)`, `certifi`) and the package table
+(`requests`, `flask`, `rich`, `pygments`, `markupsafe`, `charset-normalizer`, `ujson`, `numpy`,
+`cryptography`) with PASS/UNTESTED/UNSUPPORTED badges plus the mobile-limitations note.
+
+## Logcat
+
+```console
+$ adb -s 10.8.0.62:40061 logcat -c
+$ adb -s 10.8.0.62:40061 shell am force-stop dev.leocode
+$ adb -s 10.8.0.62:40061 shell am start -W -n dev.leocode/.MainActivity
+$ adb -s 10.8.0.62:40061 logcat -d | grep -E "LeoCode|Console" > docs/device-reports/20261128-fix-D2-logcat.txt
+$ cat docs/device-reports/20261128-fix-D2-logcat.txt
+11-28 14:32:56.471  6672  6672 I LeoCodeSecrets: strongBox=false
+11-28 14:32:56.649  6672  6672 D LeoCodeWeb: The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)
+11-28 14:32:56.798  6672 18278 I LeoCodeRoot: root.status => available=true, granted=false, enabled=true, su=/product/bin/su
+```
+
+No `Uncaught` / console error lines for the app.

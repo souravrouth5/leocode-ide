@@ -1,0 +1,3 @@
+11-28 14:32:56.471  6672  6672 I LeoCodeSecrets: strongBox=false
+11-28 14:32:56.649  6672  6672 D LeoCodeWeb: The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)
+11-28 14:32:56.798  6672 18278 I LeoCodeRoot: root.status => available=true, granted=false, enabled=true, su=/product/bin/su
