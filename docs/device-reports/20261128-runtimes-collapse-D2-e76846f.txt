@@ -1,0 +1,47 @@
+Runtimes "This project's Python" collapse — rc15
+================================================
+
+Date: 2026-11-28
+Build: dist/release/leocode-1015.apk (0.1.0-rc15, versionCode 1015)
+sha256: 671285c8a266ebfa0f4bc8cf98c7436619debe862556b016dc1dc878cfa2fca3
+size: 18942912 bytes
+
+Device: D2 `e76846f` (POCO F1, Android 15 / SDK 35, 1080x2246). D1 was offline
+for this run.
+
+Install
+-------
+$ adb -s e76846f install -r dist/release/leocode-1015.apk
+Performing Streamed Install
+Success
+
+$ adb -s e76846f shell dumpsys package dev.leocode | grep version
+    versionCode=1015 minSdk=28 targetSdk=28
+    versionName=0.1.0-rc15
+
+Sequence
+--------
+1. Cleared the WebView Local Storage directory to prove the fresh-install
+   default, then completed the onboarding pages.
+2. Opened Runtimes: the panel is expanded by default and shows the heading,
+   description, four status rows and the action buttons.
+   Screenshot: 20261128-runtimes-collapse-D2-expanded.png
+3. Tapped the chevron: the panel collapses to a 68px row showing
+   "runtime ready · .venv ready"; the Runtime Environments section and the
+   Python 3 card move up by ~243px.
+   Screenshot: 20261128-runtimes-collapse-D2-collapsed.png
+4. Force-stopped and relaunched the app, then opened Runtimes: the panel is
+   still collapsed, so `leocode.pythonProjectCollapsed` persisted.
+   Screenshot: 20261128-runtimes-collapse-D2-persisted.png
+
+Headless-Firefox measurement against the shipped bundle CSS:
+    expanded  top=16.0  h=311.2
+    collapsed top=351.2 h=68.0
+    cards     top=443.2 h=135.2
+The collapse saves 243.2px of vertical space.
+
+Logcat
+------
+$ adb -s e76846f logcat -d -t 500 | grep -iE "leocode|chromium.*console|AndroidRuntime|FATAL"
+Only benign framework lines (python3 SELinux execute grants, ProfileInstaller,
+ART dex loading); no LeoCode console errors or crashes.

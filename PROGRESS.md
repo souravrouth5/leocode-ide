@@ -50,6 +50,12 @@ and only the panel scrolls. A static CSS regression guard lives in
 [`docs/agent-briefs/reports/design-fixes.md`](docs/agent-briefs/reports/design-fixes.md) and
 `docs/device-reports/20261128-design-*`.
 
+The Runtimes view's "This project's Python" panel is now collapsible (`0.1.0-rc15`,
+`versionCode 1015`). Its header has a chevron toggle with `aria-expanded`/`aria-controls`; the
+collapsed state is persisted under `leocode.pythonProjectCollapsed` and shows a one-line summary
+("runtime ready · .venv ready"), freeing the screen for the runtime cards below. See
+[`docs/agent-briefs/reports/runtimes-collapse.md`](docs/agent-briefs/reports/runtimes-collapse.md).
+
 ### Review fixes (Phase B/C analysis, 2026-11-14)
 
 The read-only review produced 105 findings. The crash/data-loss/contract/concurrency batches and the

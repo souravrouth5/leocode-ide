@@ -170,4 +170,24 @@ describe("PythonProjectPanel integration", () => {
     const readmeContent = await bridge.read("README.md")
     expect(readmeContent).toContain("# Python Project")
   })
+
+  it("collapses and expands the project panel", () => {
+    localStorage.clear()
+    const bridge = new MockBridge()
+    const stores = createAppStores(bridge)
+
+    render(
+      <StoresProvider stores={stores}>
+        <PythonProjectPanel />
+      </StoresProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse This project's Python" }))
+    expect(screen.queryByRole("button", { name: "Compatibility" })).toBeNull()
+    expect(localStorage.getItem("leocode.pythonProjectCollapsed")).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand This project's Python" }))
+    expect(screen.getByRole("button", { name: "Compatibility" })).toBeTruthy()
+    expect(localStorage.getItem("leocode.pythonProjectCollapsed")).toBe("false")
+  })
 })

@@ -1,10 +1,21 @@
 import { useEffect, useState } from "react"
 import { useStore } from "zustand"
 import { useStores } from "../../app/stores"
+import { ChevronRightIcon, ChevronUpIcon } from "../../components/Icons"
 import { WORKSPACE_SWITCHED_EVENT } from "../workspace/workspaceEvents"
 import { classifyPipError, isPipFailure } from "./pipClassifier"
 import { createPythonProjectTemplate } from "./pythonTemplate"
 import { CompatibilityView } from "./CompatibilityView"
+
+const COLLAPSE_KEY = "leocode.pythonProjectCollapsed"
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "true"
+  } catch {
+    return false
+  }
+}
 
 /**
  * The active project's Python environment (Task 26).
@@ -20,6 +31,19 @@ export function PythonProjectPanel() {
   const log = useStore(python, (state) => state.installLog)
   const [showCompatibility, setShowCompatibility] = useState(false)
   const [creatingTemplate, setCreatingTemplate] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(COLLAPSE_KEY, String(next))
+      } catch {
+        // Persistence is best-effort; the panel still collapses this session.
+      }
+      return next
+    })
+  }
 
   const handleCreateTemplate = async () => {
     setCreatingTemplate(true)
@@ -68,141 +92,168 @@ export function PythonProjectPanel() {
       ? classifyPipError(log)
       : null
 
-  return (
-    <section className="env-section python-project" aria-labelledby="python-project-title">
-      <h2 className="env-heading" id="python-project-title">
-        This project's Python
-      </h2>
-      <p className="env-sub">
-        Scripts run with the project's <code>.venv</code> when it exists, otherwise with the
-        bundled runtime.
-      </p>
+  const summary = status
+    ? `${status.runtimeInstalled ? "runtime ready" : "runtime missing"} · ${
+        status.venvExists ? ".venv ready" : "no .venv"
+      }`
+    : "loading…"
 
-      <div className="python-status">
-        <div>
-          <span className="python-label">Runtime</span>
-          <span className="python-value">
-            {status?.runtimeInstalled
-              ? status.runtimePython ?? "installed"
-              : "not installed"}
-          </span>
+  return (
+    <section
+      className={"env-section python-project" + (collapsed ? " is-collapsed" : "")}
+      aria-labelledby="python-project-title"
+    >
+      <div className="python-project-head">
+        <div className="python-project-title-group">
+          <h2 className="env-heading" id="python-project-title">
+            This project's Python
+          </h2>
+          {collapsed && <span className="python-project-summary">{summary}</span>}
         </div>
-        <div>
-          <span className="python-label">Environment</span>
-          <span className="python-value">
-            {status?.venvExists ? status.venvPython ?? ".venv" : "not created"}
-          </span>
-        </div>
-        <div>
-          <span className="python-label">requirements.txt</span>
-          <span className="python-value">{requirements}</span>
-        </div>
-        <div>
-          <span className="python-label">Terminal aliases</span>
-          <span className="python-value">{status?.aliasesReady ? "python, pip" : "missing"}</span>
-        </div>
+        <button
+          type="button"
+          className="python-project-toggle"
+          aria-expanded={!collapsed}
+          aria-controls="python-project-body"
+          aria-label={collapsed ? "Expand This project's Python" : "Collapse This project's Python"}
+          onClick={toggleCollapsed}
+        >
+          {collapsed ? <ChevronRightIcon size={16} /> : <ChevronUpIcon size={16} />}
+        </button>
       </div>
 
-      <div className="runtime-card-actions">
-        {status?.venvExists ? (
+      <div className="python-project-body" id="python-project-body" hidden={collapsed}>
+        <p className="env-sub">
+          Scripts run with the project's <code>.venv</code> when it exists, otherwise with the
+          bundled runtime.
+        </p>
+
+        <div className="python-status">
+          <div>
+            <span className="python-label">Runtime</span>
+            <span className="python-value">
+              {status?.runtimeInstalled
+                ? status.runtimePython ?? "installed"
+                : "not installed"}
+            </span>
+          </div>
+          <div>
+            <span className="python-label">Environment</span>
+            <span className="python-value">
+              {status?.venvExists ? status.venvPython ?? ".venv" : "not created"}
+            </span>
+          </div>
+          <div>
+            <span className="python-label">requirements.txt</span>
+            <span className="python-value">{requirements}</span>
+          </div>
+          <div>
+            <span className="python-label">Terminal aliases</span>
+            <span className="python-value">{status?.aliasesReady ? "python, pip" : "missing"}</span>
+          </div>
+        </div>
+
+        <div className="runtime-card-actions">
+          {status?.venvExists ? (
+            <button
+              className="btn ghost small"
+              disabled={busy}
+              onClick={() => void python.getState().removeVenv()}
+            >
+              Remove environment
+            </button>
+          ) : (
+            <button
+              className="btn primary small"
+              disabled={busy || !status?.runtimeInstalled}
+              onClick={() => {
+                void python.getState().ensureVenv()
+              }}
+            >
+              Create environment
+            </button>
+          )}
+          <button
+            className="btn small"
+            disabled={busy || !status?.requirementsExists || !status?.venvExists}
+            onClick={() => {
+              void python.getState().installRequirements()
+            }}
+          >
+            Install requirements
+          </button>
+          <button
+            className="btn ghost small"
+            disabled={busy || creatingTemplate}
+            onClick={() => void handleCreateTemplate()}
+          >
+            {creatingTemplate ? "Creating..." : "Create Python project"}
+          </button>
+          <button
+            className="btn ghost small"
+            onClick={() => setShowCompatibility(true)}
+          >
+            Compatibility
+          </button>
           <button
             className="btn ghost small"
             disabled={busy}
-            onClick={() => void python.getState().removeVenv()}
-          >
-            Remove environment
-          </button>
-        ) : (
-          <button
-            className="btn primary small"
-            disabled={busy || !status?.runtimeInstalled}
             onClick={() => {
-              void python.getState().ensureVenv()
+              void python.getState().refresh().then(() => {
+                if (!python.getState().status) {
+                  notifications.getState().enqueue({
+                    kind: "warning",
+                    message: "Could not read the Python status",
+                    durationMs: 4_000
+                  })
+                }
+              })
             }}
           >
-            Create environment
+            Refresh
           </button>
-        )}
-        <button
-          className="btn small"
-          disabled={busy || !status?.requirementsExists || !status?.venvExists}
-          onClick={() => {
-            void python.getState().installRequirements()
-          }}
-        >
-          Install requirements
-        </button>
-        <button
-          className="btn ghost small"
-          disabled={busy || creatingTemplate}
-          onClick={() => void handleCreateTemplate()}
-        >
-          {creatingTemplate ? "Creating..." : "Create Python project"}
-        </button>
-        <button
-          className="btn ghost small"
-          onClick={() => setShowCompatibility(true)}
-        >
-          Compatibility
-        </button>
-        <button
-          className="btn ghost small"
-          disabled={busy}
-          onClick={() => {
-            void python.getState().refresh().then(() => {
-              if (!python.getState().status) {
-                notifications.getState().enqueue({
-                  kind: "warning",
-                  message: "Could not read the Python status",
-                  durationMs: 4_000
-                })
-              }
-            })
-          }}
-        >
-          Refresh
-        </button>
-      </div>
-
-      {classification && (
-        <div
-          className="pip-error-summary"
-          role="alert"
-          aria-label="Package installation failure explanation"
-          style={{
-            margin: "12px 0 0",
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid var(--danger, #ef4444)",
-            background: "rgba(239, 68, 68, 0.08)",
-            fontSize: "13px",
-            lineHeight: "1.4"
-          }}
-        >
-          <div style={{ fontWeight: 600, color: "var(--danger, #ef4444)", marginBottom: "4px" }}>
-            Installation failed: {classification.kind.replace(/_/g, " ")}
-          </div>
-          <p style={{ margin: "4px 0", color: "var(--foreground, inherit)" }}>
-            {classification.explanation}
-          </p>
-          {classification.package && (
-            <p style={{ margin: "4px 0", color: "var(--muted, #888)" }}>
-              Package: <code>{classification.package}</code>
-            </p>
-          )}
-          {classification.suggestedAction && (
-            <p style={{ margin: "6px 0 0", color: "var(--foreground, inherit)" }}>
-              💡 {classification.suggestedAction}
-            </p>
-          )}
         </div>
-      )}
 
-      {log.length > 0 && (
-        <pre className="python-log" aria-label="pip output">
-          {log.join("\n")}
-        </pre>
-      )}
+        {classification && (
+          <div
+            className="pip-error-summary"
+            role="alert"
+            aria-label="Package installation failure explanation"
+            style={{
+              margin: "12px 0 0",
+              padding: "12px",
+              borderRadius: "8px",
+              border: "1px solid var(--danger, #ef4444)",
+              background: "rgba(239, 68, 68, 0.08)",
+              fontSize: "13px",
+              lineHeight: "1.4"
+            }}
+          >
+            <div style={{ fontWeight: 600, color: "var(--danger, #ef4444)", marginBottom: "4px" }}>
+              Installation failed: {classification.kind.replace(/_/g, " ")}
+            </div>
+            <p style={{ margin: "4px 0", color: "var(--foreground, inherit)" }}>
+              {classification.explanation}
+            </p>
+            {classification.package && (
+              <p style={{ margin: "4px 0", color: "var(--muted, #888)" }}>
+                Package: <code>{classification.package}</code>
+              </p>
+            )}
+            {classification.suggestedAction && (
+              <p style={{ margin: "6px 0 0", color: "var(--foreground, inherit)" }}>
+                💡 {classification.suggestedAction}
+              </p>
+            )}
+          </div>
+        )}
+
+        {log.length > 0 && (
+          <pre className="python-log" aria-label="pip output">
+            {log.join("\n")}
+          </pre>
+        )}
+      </div>
 
       {showCompatibility && (
         <CompatibilityView

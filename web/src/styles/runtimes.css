@@ -483,6 +483,57 @@
 
 
 /* Task 26: the active project's Python environment. */
+.python-project-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.python-project-title-group {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.python-project-title-group .env-heading {
+  margin: 0;
+}
+
+.python-project-summary {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.python-project-toggle {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.python-project-toggle:active {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.python-project-body .env-sub {
+  margin-top: 8px;
+}
+
 .python-status {
   display: grid;
   gap: 8px;
