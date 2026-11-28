@@ -71,7 +71,7 @@ Any request can be cancelled with an `AbortSignal` → `E_CANCELLED`.
 
 | Class | Methods | Default |
 |---|---|---|
-| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `root.status`, `root.disable`, `draft.list/read`, `workspace.list`, `git.status/diff/log/branch.list/remote.list`, `ssh.keys.list`, `ssh.hostkey.list`, `secrets.token.list` | 10 s |
+| Fast | `app.*`, `fs.list/read/stat/mkdir/rename/delete`, `term.write/resize/ack`, `proc.stdin`, `root.status`, `root.disable`, `draft.list/read`, `workspace.list`, `git.status/diff/log/branch.list/remote.list`, `ssh.keys.list`, `ssh.hostkey.list`, `secrets.token.list` | 10 s |
 | Write | `fs.write`, `workspace.*`, `draft.save/delete`, `git.init/add/reset/commit/branch.create/branch.delete/checkout/remote.set/remote.remove/conflict/resolve`, `ssh.keys.generate/import/delete`, `ssh.hostkey.delete`, `secrets.token.set/delete` | 20 s |
 | User-wait | `saf.*`, `storage.requestPermission`, `root.request`, `ssh.hostkey.answer` | none (user-driven; cancellable) |
 | Long, streamed | `proc.run` | reply on start within 10 s; then events, no overall timeout |
@@ -173,7 +173,8 @@ has a UI catalog entry (`web/src/errors/catalog.ts`, Task 12).
 | `term.resize` | `{ sessionId, cols, rows }` → `{ ok }` | live | SIGWINCH |
 | `term.ack` | `{ sessionId, bytes }` → `{ ok }` | live (Task 6) | Backpressure credit; 256 KB window |
 | `term.close` | `{ sessionId }` → `{ closed }` | live | Kills the process group (via `su` for root sessions) |
-| `proc.run` | `{ cwd, argv[], env?, timeoutMs?, root? }` → `{ jobId, pid }` | live (`root` Task 18) | Events `proc.stdout/stderr/exit`; env keys allowlisted; no timeout by default |
+| `proc.run` | `{ cwd, argv[], env?, timeoutMs?, root?, stdin? }` → `{ jobId, pid }` | live (`root` Task 18, `stdin` 2026-11-25) | Events `proc.stdout/stderr/exit`; env keys allowlisted; no timeout by default. `stdin: false` (default) closes the child's stdin at once so `cat`/`input()` cannot block forever; `stdin: true` keeps the pipe open for `proc.stdin` |
+| `proc.stdin` | `{ jobId, data }` → `{ written }` | live (2026-11-25) | UTF-8 text to a job started with `stdin: true`; `written: false` when the job is gone or the pipe is closed. The reply waits for the child to read (pipe backpressure), so the client timeout still applies |
 | `proc.cancel` | `{ jobId }` → `{}` | live (grace period Task 6) | SIGTERM → 2 s → SIGKILL on the group |
 | `root.status` | `{}` → `{ available, granted, enabled }` | live (Task 17) | Never prompts |
 | `root.request` | `{}` → `{ granted }` | live (Task 17) | User-wait; `E_ROOT_UNAVAILABLE` / `E_ROOT_DENIED` |

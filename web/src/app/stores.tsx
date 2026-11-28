@@ -91,7 +91,17 @@ export function createAppStores(bridge: Bridge): AppStores {
   const language = createLanguageStore(bridge)
   void language.getState().refresh()
   const python = createPythonStore({ bridge, dialogs, notifications, errors })
-  const run = createRunStore({ bridge, editor, notifications, python, language })
+  const run = createRunStore({
+    bridge,
+    editor,
+    notifications,
+    python,
+    language,
+    workspaceRoot: () => {
+      const ws = workspace?.getState()
+      return ws?.workspaces.find((w) => w.id === ws.activeId)?.path ?? null
+    }
+  })
   workspace = createWorkspaceStore({
     bridge,
     files,

@@ -32,7 +32,8 @@ class ProcessSupervisor(
         val env: Map<String, String> = emptyMap(),
         val timeoutMs: Long = 30_000,
         val maxOutputBytes: Int = 1 shl 20,
-        val root: Boolean = false
+        val root: Boolean = false,
+        val stdin: Boolean = false
     )
 
     data class Handle(val jobId: String, val pid: Int)
@@ -43,6 +44,7 @@ class ProcessSupervisor(
         val pid: Int,
         val root: Boolean = false,
         val rootPidFile: java.io.File? = null,
+        val stdinLock: Any = Any(),
         val terminating: AtomicBoolean = AtomicBoolean(false),
         val exitOnce: AtomicBoolean = AtomicBoolean(false)
     ) {
@@ -90,9 +92,11 @@ class ProcessSupervisor(
         environment["PWD"] = spec.cwd.absolutePath
 
         val process = builder.start()
-        // Close the child's stdin at once: `cat`, `python -` and `input()` used
-        // to block forever on an open pipe (B-07).
-        runCatching { process.outputStream.close() }
+        // Close the child's stdin at once unless interactive stdin was requested:
+        // `cat`, `python -` and `input()` otherwise block forever on an open pipe (B-07).
+        if (!spec.stdin) {
+            runCatching { process.outputStream.close() }
+        }
         val pid = pidOf(process)
         val job = Job(jobId, process, pid, root = spec.root, rootPidFile = rootPidFile)
         jobs[jobId] = job
@@ -139,6 +143,7 @@ class ProcessSupervisor(
 
             joinQuietly(outThread)
             joinQuietly(errThread)
+            runCatching { process.outputStream.close() }
             jobs.remove(jobId)
             pidFiles?.remove(jobId)
             notifyCount()
@@ -161,6 +166,19 @@ class ProcessSupervisor(
         }
 
         return Handle(jobId, pid)
+    }
+
+    /** Writes UTF-8 text to a running job's stdin pipe if it was started with `stdin = true`. */
+    fun writeStdin(jobId: String, data: String): Boolean {
+        val job = jobs[jobId] ?: return false
+        return synchronized(job.stdinLock) {
+            runCatching {
+                val out = job.process.outputStream
+                out.write(data.toByteArray(Charsets.UTF_8))
+                out.flush()
+                true
+            }.getOrDefault(false)
+        }
     }
 
     /** SIGTERM the group, wait up to 2 s, then SIGKILL. */

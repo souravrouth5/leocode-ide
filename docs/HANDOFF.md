@@ -1,4 +1,4 @@
-# Handoff — LeoCode state after Phase E (Root Mode) and Tasks 30–33 (updated 2026-11-23)
+# Handoff — LeoCode state after Phase E (Root Mode) and Tasks 30–33 (updated 2026-11-28)
 
 Written for whoever picks this up next. It records what is done, what is open, how to reproduce the
 verification, and the traps that cost time. The task tracker (`PROGRESS.md`) and the device reports
@@ -11,11 +11,11 @@ Tasks 17–18, and Phase G Python Tasks 30–33) are completed, tested, and devi
 
 | Item | State |
 |---|---|
-| Branch | `phase-e-root`, commit `a955836` |
+| Branch | `feat/phase-g`; M-1 fix pass committed on top of `bdd5ece` |
 | Phase E (Tasks 17–18) | **Done and device-verified on D2 (Magisk 31.1) and D1 (rc10/rc11, 2026-11-24).** Rebuilt and hardened in B1–B6: safe stream timeouts/cancellation, zero-prompt cached `root.status`, `root.lost` events + refusal banners, real root pid tracking + session kill via `su`, explicit `root.disable`, lazy `RootOrphanReaper`, phantom-process option. Evidence: [`docs/device-reports/20261124-phaseE-D2-e76846f.txt`](device-reports/20261124-phaseE-D2-e76846f.txt), [`docs/device-reports/20261124-phaseE-D1-11f98015.txt`](device-reports/20261124-phaseE-D1-11f98015.txt), [`reports/B6.md`](agent-briefs/reports/B6.md), [`reports/B6-followup.md`](agent-briefs/reports/B6-followup.md). |
-| Tasks 30–33 | **Done and device-verified on D2.** LanguageProvider registry, Python runner with stdin & duration, tappable stack tracebacks, pip classifier, interactive Python REPL in Terminal, Python indentation extension in CodeMirror, Python snippets, project templates (`main.py`, `requirements.txt`, `.gitignore`, `README.md`), in-app Python Compatibility Matrix sheet. |
-| Working tree | Release build `dist/release/leocode-1011.apk` (v0.1.0-rc11, versionCode 1011) built, minified and installed on D2 (`e76846f`). |
-| Gates | Android 520 unit tests (0 failures, 1 skipped), `lintDebug`; web 62 test files / 498 tests, typecheck, lint, build clean. |
+| Tasks 30–33 | **Done and device-verified on D2 and D1.** LanguageProvider registry, Python runner with stdin & duration, tappable stack tracebacks, pip classifier, interactive Python REPL in Terminal, Python indentation extension in CodeMirror, Python snippets, project templates (`main.py`, `requirements.txt`, `.gitignore`, `README.md`), in-app Python Compatibility Matrix sheet. **M-1 D1 parity closed 2026-11-28 on rc13**: interactive stdin (`proc.stdin`), tappable traceback frames and Python dedent re-verified on the oldest WebView; see [`agent-briefs/reports/M1-D1-fix.md`](agent-briefs/reports/M1-D1-fix.md). |
+| Working tree | Release build `dist/release/leocode-1013.apk` (v0.1.0-rc13, versionCode 1013) built, minified, signed and installed on D1 (`11f98015`) and D2 (POCO F1). |
+| Gates | Android 523 unit tests (0 failures, 1 skipped), `lintDebug`; web 63 test files / 504 tests, typecheck, lint, build clean. |
 | Devices | D1 (Redmi Note 7S, Android 9 / API 28, unrooted reference); D2 `e76846f` (POCO F1, LineageOS / Android 15 / API 35, Magisk 31.1 rooted, superuser access verified). |
 
 ## What Phase E (Tasks 17 & 18) added
@@ -242,7 +242,7 @@ adb -s <serial> shell run-as dev.leocode dd \
 
 ## What to do next
 
-See [`docs/REMAINING-WORK-PLAN.md`](REMAINING-WORK-PLAN.md) §5 for the remaining execution plan (Phase E root device passes on D1 and D2, doc reconciliation, and remaining Phase G items).
+See [`docs/REMAINING-WORK-PLAN.md`](REMAINING-WORK-PLAN.md) §5 for the remaining execution plan. M-1 is closed (2026-11-28); next are the §4.2 triage decisions and the 0.1 picks, the owner actions M-2…M-4, then **M-5 merge + CI** and **M-6 `v0.1.0`**.
 
 ## Traps that cost time (read before debugging a "network" failure)
 
@@ -259,6 +259,9 @@ See [`docs/REMAINING-WORK-PLAN.md`](REMAINING-WORK-PLAN.md) §5 for the remainin
    `workflow_dispatch`; dispatch it by hand for `feat/phase-g`.
 6. **The GitHub PAT is still plaintext in `.git/config`.** Rotate it and move it to a credential
    helper; do not print remotes in shared output.
+7. **`adb shell input text` duplicates characters in the WebView IME** (`1+1` became `1+1+11` on
+   D1). For the terminal, send key events (`input keyevent 8`, `81`, `8`) and screenshot the field
+   before pressing Enter. In the editor, verify the inserted text before pressing Enter too.
 
 ## Honest caveats
 

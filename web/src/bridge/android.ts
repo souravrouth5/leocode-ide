@@ -708,7 +708,13 @@ export class AndroidBridge implements Bridge {
 
     const { id, result } = this.send<{ jobId: string }>(
       "proc.run",
-      { argv, cwd, env: options?.env ?? {}, root: options?.root ?? false },
+      {
+        argv,
+        cwd,
+        env: options?.env ?? {},
+        root: options?.root ?? false,
+        stdin: options?.stdin ?? false
+      },
       (event, payload) => {
         if (event === "proc.stdout") onEvent({ stream: "stdout", data: payload.data })
         else if (event === "proc.stderr") onEvent({ stream: "stderr", data: payload.data })
@@ -730,6 +736,11 @@ export class AndroidBridge implements Bridge {
 
     onStart?.({
       jobId: reply.jobId,
+      write: (data: string) => {
+        void this.request("proc.stdin", { jobId: reply.jobId, data }).catch(() => {
+          // Process may have exited before stdin arrived.
+        })
+      },
       cancel: () => {
         void this.request("proc.cancel", { jobId: reply.jobId }).catch((error: unknown) => {
           // Best effort: the exit event is authoritative, but a failure to stop

@@ -150,7 +150,7 @@ The docs currently disagree with each other. Fix them together so the next sessi
 
 | # | Item | Owner | Notes |
 |---|---|---|---|
-| M-1 | **D1 parity for Tasks 31–33** | dev | Only D2 is evidenced for the run sheet (stdin, tracebacks, summaries), the Python indent extension/snippets, the template and the compatibility sheet. Task 32 on D1 ran build 1006. D1's WebView is Chrome 80, the oldest target, so CodeMirror extensions are most at risk there. Re-run on the release-candidate APK and commit a text log. |
+| M-1 | **D1 parity for Tasks 31–33** | dev | **Done 2026-11-28 on `0.1.0-rc13` (`versionCode 1013`).** The rc11 redo failed T31-1/T31-2 (stdin), T31-3 (frame jump) and T33-1 (dedent); all four are fixed and re-verified on D1, and the remaining rows were re-captured on rc13. Fixes: opt-in `stdin` on `proc.run` plus `proc.stdin`, `/data/user/<uid>/` ↔ `/data/data/` canonicalization for tracebacks, and `Prec.high` on the Python indent service with `simulatedBreak`. Evidence: `docs/device-reports/20261128-fix-D1-*`, [`reports/M1-D1-fix.md`](agent-briefs/reports/M1-D1-fix.md). |
 | M-2 | **Offline backup of release keys** | owner | `~/.config/leocode/release.jks`, `release.properties`, `release-signing.pem`. The keystore is permanent: the updater compares signer sets. |
 | M-3 | **Task 24 signed Python runtime release** | owner | Create the protected `python-runtime` environment + `RUNTIME_SIGNING_KEY`, dispatch CI, confirm the release page lists tarball/manifest/sig/wheel/`SHA256SUMS`. Task 24 stays `[-]` until then. |
 | M-4 | **Rotate the GitHub PAT** stored in plaintext in `.git/config` | owner | Move it to a credential helper; the repo is public now. |
@@ -171,7 +171,10 @@ Nothing here blocks 0.1 by itself, but each item needs a decision recorded in `P
   (draft recovery on device, 20 000-file import cap rollback, PD-19).
 - **Deliberately partial:** PD-20 async `workspace.ensure()`, PD-25 host-side cancel for `saf.*` → `[~]` 0.2.
 - **D1 startup error:** `Cannot read properties of null (reading 'style')` twice on Chrome 80. It's
-  harmless today, but chase it during M-1 with the WebView console attached.
+  harmless today, but chase it during M-1 with the WebView console attached. *M-1 update
+  (2026-11-28):* not reproduced on rc13; the logcat capture has no `Uncaught` line, only the
+  informational CSP message. Keep the item open until the release build is run with the WebView
+  console attached.
 - **Gate 9, instrumented tests (`androidTest` absent):** every device-only defect (Phase F ×5,
   Task 28 API 28 signer, Task 26 cwd) slipped past the JVM tests. *Recommendation:* a minimal
   `androidTest` set for 0.1 (SecretStore Keystore round-trip, MINA SHA-256 provider, `RootManager`
@@ -192,7 +195,7 @@ GPL view, root file browsing (D-011 reopen trigger), Android 10–14 hardware (D
 2. [x] **§1 host + web fixes** in parallel worktrees, then merge and run the gates — *done in B2–B5, follow-up B6*.
 3. [x] **§2 device pass** on D2 (rooted) and D1 (unrooted), with raw logs committed. Run it twice on D2 — *done (rc10/rc11)*.
 4. [x] **§3 doc reconciliation** → Phase E `[x]`, gate 22 PASS — *done in B7*.
-5. **M-1 D1 parity** for Tasks 31–33, plus the D1 startup error.
+5. [x] **M-1 D1 parity** for Tasks 31–33 — *done 2026-11-28 on rc13; the D1 startup error was not reproduced and stays open for the release build*.
 6. **§4.2 triage** decisions written into `PROGRESS.md`; fix the 0.1 picks.
 7. **Owner actions M-2, M-3, M-4** (can run in parallel with 1–6).
 8. **M-5 merge + CI green**, then **M-6 `v0.1.0`** and the in-app update on both phones.

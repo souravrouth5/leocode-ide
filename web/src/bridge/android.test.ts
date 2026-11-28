@@ -157,6 +157,25 @@ describe("AndroidBridge transport (Task 11)", () => {
     expect(channel.sent.some((message) => message.method === "proc.cancel")).toBe(true)
   })
 
+  it("posts proc.stdin for handle.write", async () => {
+    const channel = new FakeChannel()
+    const bridge = new AndroidBridge(channel)
+
+    let handle: { write?: (data: string) => void; cancel: () => void } | null = null
+    const pending = bridge.run(["sleep", "10"], ".", () => {}, (next) => {
+      handle = next
+    })
+    channel.reply(0, { jobId: "job-1" })
+    await vi.advanceTimersByTimeAsync(5)
+
+    handle!.write?.("LeoCode\n")
+    const stdin = channel.sent.find((message) => message.method === "proc.stdin")
+    expect(stdin?.payload).toEqual({ jobId: "job-1", data: "LeoCode\n" })
+
+    channel.emit(0, "proc.exit", { code: 0 })
+    await expect(pending).resolves.toBe(0)
+  })
+
   it("closes an orphan PTY whose open reply arrives after the timeout", async () => {
     const channel = new FakeChannel()
     const bridge = new AndroidBridge(channel)

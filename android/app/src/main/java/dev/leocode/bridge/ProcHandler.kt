@@ -11,7 +11,7 @@ import java.io.Closeable
 import java.io.File
 
 /**
- * `proc.run` and `proc.cancel`, `docs/bridge-contract.md`.
+ * `proc.run`, `proc.stdin` and `proc.cancel`, `docs/bridge-contract.md`.
  *
  * Paths go through [PathJail]; child environments go through [ChildEnv]. Output
  * and the final exit event are streamed through the request [StreamSink].
@@ -26,7 +26,7 @@ class ProcHandler(
 ) : StreamingBridgeHandler, Closeable {
 
     companion object {
-        val METHODS = setOf("proc.run", "proc.cancel")
+        val METHODS = setOf("proc.run", "proc.stdin", "proc.cancel")
         // No default timeout: a Run action may legitimately be a long server.
         private const val DEFAULT_TIMEOUT_MS = 0L
     }
@@ -39,6 +39,7 @@ class ProcHandler(
     override fun handle(method: String, payload: JsonObject, sink: StreamSink): JsonElement =
         when (method) {
             "proc.run" -> run(payload, sink)
+            "proc.stdin" -> stdin(payload)
             "proc.cancel" -> cancel(payload)
             else -> throw BridgeException(ErrorCode.E_UNKNOWN_METHOD, "unknown method: $method")
         }
@@ -70,7 +71,8 @@ class ProcHandler(
             cwd = cwd,
             env = ChildEnv.build(emptyMap(), request.env),
             timeoutMs = request.timeoutMs?.takeIf { it > 0 } ?: DEFAULT_TIMEOUT_MS,
-            root = request.root
+            root = request.root,
+            stdin = request.stdin
         )
 
         val handle = try {
@@ -100,6 +102,16 @@ class ProcHandler(
         return json.encodeToJsonElement(
             ProcRunReply.serializer(),
             ProcRunReply(handle.jobId, handle.pid)
+        )
+    }
+
+    private fun stdin(payload: JsonObject): JsonElement {
+        val request = json.decodePayload(ProcStdinRequest.serializer(), payload, "proc.stdin")
+        val jobId = request.jobId
+            ?: throw BridgeException(ErrorCode.E_BAD_ENVELOPE, "jobId is required")
+        return json.encodeToJsonElement(
+            ProcStdinReply.serializer(),
+            ProcStdinReply(supervisor.writeStdin(jobId, request.data))
         )
     }
 

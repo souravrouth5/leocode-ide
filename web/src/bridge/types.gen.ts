@@ -259,11 +259,21 @@ export interface ProcRunRequest {
   env?: Record<string, string>
   timeoutMs?: number | null
   root?: boolean
+  stdin?: boolean
 }
 
 export interface ProcRunReply {
   jobId: string
   pid: number
+}
+
+export interface ProcStdinRequest {
+  jobId?: string | null
+  data?: string
+}
+
+export interface ProcStdinReply {
+  written: boolean
 }
 
 export interface ProcCancelRequest {

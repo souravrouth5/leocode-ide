@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { EditorState } from "@codemirror/state"
-import { getIndentation, indentUnit } from "@codemirror/language"
+import { getIndentation, IndentContext, indentUnit } from "@codemirror/language"
+import { python } from "@codemirror/lang-python"
 import {
   CURRENT_LINE_DEDENT_RE,
   DEDENT_KEYWORDS_RE,
@@ -324,6 +325,31 @@ describe("Python Indentation & Tab Size (Task 33)", () => {
 
       const indent = getIndentation(state, doc.length)
       expect(indent).toBe(4)
+    })
+
+    it("dedents after return 1 even when paired with @codemirror/lang-python", () => {
+      const doc = "def f():\n    return 1\n"
+      const state = EditorState.create({
+        doc,
+        extensions: [python(), pythonIndentExtension({ tabSize: 4 })]
+      })
+
+      const indent = getIndentation(state, doc.length)
+      expect(indent).toBe(0)
+    })
+
+    it("dedents on simulatedBreak (Enter at end of return 1)", () => {
+      const doc = "def f():\n    return 1"
+      const state = EditorState.create({
+        doc,
+        extensions: [python(), pythonIndentExtension({ tabSize: 4 })]
+      })
+
+      const indent = getIndentation(
+        new IndentContext(state, { simulateBreak: doc.length }),
+        doc.length
+      )
+      expect(indent).toBe(0)
     })
 
     it("exports accessory snippets for python mobile keyboard row", () => {

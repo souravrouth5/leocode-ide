@@ -56,6 +56,8 @@ object BridgeTypesGenerator {
         "SearchCancelReply" to SearchCancelReply.serializer().descriptor,
         "ProcRunRequest" to ProcRunRequest.serializer().descriptor,
         "ProcRunReply" to ProcRunReply.serializer().descriptor,
+        "ProcStdinRequest" to ProcStdinRequest.serializer().descriptor,
+        "ProcStdinReply" to ProcStdinReply.serializer().descriptor,
         "ProcCancelRequest" to ProcCancelRequest.serializer().descriptor,
         "ProcCancelReply" to ProcCancelReply.serializer().descriptor,
         "ProcOutput" to ProcOutput.serializer().descriptor,

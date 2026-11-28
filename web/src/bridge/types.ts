@@ -101,6 +101,8 @@ export type AppInfo = Omit<GeneratedAppInfo, "mode" | "theme"> & {
 export interface RunHandle {
   /** Ask the host to kill the process group. */
   cancel: () => void
+  /** Send UTF-8 text to the child's stdin pipe when started with `stdin: true`. */
+  write?: (data: string) => void
   jobId?: string
 }
 
@@ -287,10 +289,11 @@ export type PythonRequirementsResult = GeneratedPythonRequirementsReply
 
 export type { LanguageDescriptor, LanguageListReply, LanguagePlanRequest, LanguagePlanReply }
 
-/** `proc.run` environment overrides (allowlisted host-side) and root mode. */
+/** `proc.run` environment overrides (allowlisted host-side), root mode, and interactive stdin. */
 export interface RunOptions extends RequestOptions {
   env?: Record<string, string>
   root?: boolean
+  stdin?: boolean
 }
 
 // -------------------------------------------------------- Root (Tasks 17–18)

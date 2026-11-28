@@ -55,6 +55,13 @@ describe("traceback parser and error summarizer (Task 31)", () => {
       expect(toWorkspacePath("/data/user/0/dev.leocode/files/usr/lib/python3.11/os.py", root)).toBeNull()
       expect(toWorkspacePath("../outside.py")).toBeNull()
     })
+
+    it("matches /data/data/<pkg> traceback paths against /data/user/0/<pkg> workspaceRoot", () => {
+      const root = "/data/user/0/dev.leocode/files/workspaces/default"
+      const pyFile = "/data/data/dev.leocode/files/workspaces/default/m1/zero.py"
+      expect(isInsideWorkspace(pyFile, root)).toBe(true)
+      expect(toWorkspacePath(pyFile, root)).toBe("m1/zero.py")
+    })
   })
 
   describe("error summarization", () => {

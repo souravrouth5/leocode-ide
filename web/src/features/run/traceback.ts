@@ -49,6 +49,14 @@ export interface TracebackOptions {
 }
 
 /**
+ * Normalize Android app-private path aliases (`/data/user/<uid>/<pkg>` and `/data/data/<pkg>`)
+ * so Python tracebacks match `AppInfo.workspaceRoot` regardless of which alias Python reports.
+ */
+function canonicalizeAndroidAppPath(path: string): string {
+  return path.replace(/^\/data\/user\/\d+\//, "/data/data/")
+}
+
+/**
  * Determine whether a file path points to a file inside the workspace root.
  * Excludes system libraries, runtime internals (/system/, /data/.../usr/lib/python...),
  * and external or escaping paths.
@@ -79,9 +87,12 @@ export function isInsideWorkspace(filePath: string, workspaceRoot?: string): boo
   }
 
   if (workspaceRoot) {
-    const root = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "")
+    const canonPath = canonicalizeAndroidAppPath(normalized)
+    const canonRoot = canonicalizeAndroidAppPath(
+      workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "")
+    )
     if (normalized.startsWith("/")) {
-      return normalized === root || normalized.startsWith(root + "/")
+      return canonPath === canonRoot || canonPath.startsWith(canonRoot + "/")
     }
     // Relative path with workspaceRoot provided
     return !normalized.startsWith("../") && depth >= 0
@@ -115,10 +126,13 @@ export function toWorkspacePath(filePath: string, workspaceRoot?: string): strin
 
   const normalized = filePath.replace(/\\/g, "/").trim()
   if (workspaceRoot) {
-    const root = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "")
-    if (normalized === root) return "."
-    if (normalized.startsWith(root + "/")) {
-      return normalized.slice(root.length + 1)
+    const canonPath = canonicalizeAndroidAppPath(normalized)
+    const canonRoot = canonicalizeAndroidAppPath(
+      workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "")
+    )
+    if (canonPath === canonRoot) return "."
+    if (canonPath.startsWith(canonRoot + "/")) {
+      return canonPath.slice(canonRoot.length + 1)
     }
   }
 

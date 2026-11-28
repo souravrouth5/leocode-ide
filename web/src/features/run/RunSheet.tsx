@@ -88,6 +88,11 @@ export function RunSheet({
   const [stdinText, setStdinText] = useState("")
   const stores = useOptionalStores()
   const runState = useRunStoreState(stores)
+  const wsState = stores?.workspace?.getState()
+  const effectiveWorkspaceRoot =
+    workspaceRoot ??
+    wsState?.workspaces.find((w) => w.id === wsState.activeId)?.path ??
+    undefined
   const isRootLost = propRootLost !== undefined ? propRootLost : runState?.rootLost ?? false
   const isRootActive =
     running &&
@@ -104,7 +109,9 @@ export function RunSheet({
       ? propErrorSummary
       : runState?.errorSummary ??
         traceback?.error ??
-        (segments.length > 0 ? parseTraceback(segments.map((s) => s.text).join(""), workspaceRoot).error : null)
+        (segments.length > 0
+          ? parseTraceback(segments.map((s) => s.text).join(""), effectiveWorkspaceRoot).error
+          : null)
 
   useEffect(() => {
     const node = output.current
@@ -141,7 +148,11 @@ export function RunSheet({
       onJumpToFile(file, line)
       return
     }
-    if (stores?.editor) {
+    if (stores?.run) {
+      void stores.run.getState().jumpToFile(file, line)
+      stores.run.getState().hide()
+      stores.shell?.getState().go("editor")
+    } else if (stores?.editor) {
       void stores.editor.getState().openFile(file)
       stores.shell?.getState().go("editor")
       editorCommand("gotoLine", line)
@@ -222,7 +233,7 @@ export function RunSheet({
         {errorSummary && (
           <div className="run-error-summary" role="alert" data-testid="run-error-summary">
             <div className="run-error-header">
-              <span className="run-error-badge">{errorSummary.type}</span>
+              <span className="run-error-badge">{errorSummary.type}</span>{" "}
               <strong className="run-error-title">{errorSummary.title}</strong>
             </div>
             <p className="run-error-desc">{errorSummary.description}</p>
@@ -240,7 +251,7 @@ export function RunSheet({
             {segments.length === 0 && running ? "…" : null}
             {segments.map((segment, segIdx) => (
               <span key={segIdx} className={segment.stream}>
-                {renderSegmentText(segment.text, workspaceRoot, handleJump)}
+                {renderSegmentText(segment.text, effectiveWorkspaceRoot, handleJump)}
               </span>
             ))}
           </pre>
@@ -339,7 +350,7 @@ function renderSegmentText(
   const lines = text.split("\n")
   return lines.map((line, idx) => {
     const isLast = idx === lines.length - 1
-    const frameMatch = line.match(/^(\s*File ")([^"]+)((?:", line )(\d+)((?:, in .*)?))$/)
+    const frameMatch = line.match(/^(\s*File ")([^"]+)(",\s*line\s*)(\d+)((?:,\s*in .*)?)$/)
     if (frameMatch) {
       const [, prefix, file, middle, lineStr, suffix] = frameMatch
       const lineNum = parseInt(lineStr, 10)

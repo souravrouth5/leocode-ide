@@ -1,4 +1,4 @@
-import { EditorState, type Extension } from "@codemirror/state"
+import { EditorState, Prec, type Extension } from "@codemirror/state"
 import {
   IndentContext,
   indentService,
@@ -245,6 +245,16 @@ export function pythonIndentService(
   context: IndentContext,
   pos: number
 ): number | null | undefined {
+  if (context.simulatedBreak != null) {
+    const line = context.state.doc.lineAt(pos)
+    const offsetInLine = Math.max(0, Math.min(line.text.length, pos - line.from))
+    const allLines = context.state.doc.toString().split("\n")
+    const lineIdx = line.number - 1
+    const before = line.text.slice(0, offsetInLine)
+    const after = line.text.slice(offsetInLine)
+    allLines.splice(lineIdx, 1, before, after)
+    return calculatePythonIndent(allLines, lineIdx + 1, 4)
+  }
   return calculatePythonIndent(context.state, pos, 4)
 }
 
@@ -286,7 +296,8 @@ export function pythonIndentExtension(options?: {
   return [
     indentUnit.of(indentSpaces),
     EditorState.tabSize.of(tabSize),
-    indentService.of(pythonIndentService),
+    // Must outrank @codemirror/lang-python's built-in indentService so dedent rules run.
+    Prec.high(indentService.of(pythonIndentService)),
     pythonLanguage.data.of({
       closeBrackets: {
         brackets: ["(", "[", "{", "'", '"', "'''", '"""'],

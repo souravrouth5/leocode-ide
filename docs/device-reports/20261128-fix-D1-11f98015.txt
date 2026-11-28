@@ -1,0 +1,183 @@
+# Fix-pass device log — D1 (`11f98015`), 2026-11-28
+
+Build: `dist/release/leocode-1013.apk` (`0.1.0-rc13`, `versionCode 1013`)
+SHA-256: `b1f8715e49e8394f0651dc44cf28170ba44f756a7f7547dfa85559681dd4e90e`
+Size: `18942467` bytes
+Device: Xiaomi Redmi Note 7S, Android 9 / SDK 28, 1080x2340
+
+## Install and package check
+
+```console
+$ adb -s 11f98015 install -r dist/release/leocode-1013.apk
+Performing Streamed Install
+Success
+
+$ adb -s 11f98015 shell dumpsys package dev.leocode | grep -E "versionCode|versionName|lastUpdateTime"
+    versionCode=1013 minSdk=28 targetSdk=28
+    versionName=0.1.0-rc13
+    lastUpdateTime=2026-11-28 12:41:07
+
+$ sha256sum dist/release/leocode-1013.apk
+b1f8715e49e8394f0651dc44cf28170ba44f756a7f7547dfa85559681dd4e90e  dist/release/leocode-1013.apk
+
+$ stat -c '%s' dist/release/leocode-1013.apk
+18942467
+```
+
+## T31-1 / T31-2 — interactive stdin
+
+Workspace `m1` → `stdin_test.py` (`x = input()` / `print("Got: " + x)`), Run.
+
+```console
+$ adb -s 11f98015 shell input tap 903 170          # Run
+$ adb -s 11f98015 shell input tap 307 1844         # stdin field
+$ adb -s 11f98015 shell "input text 'LeoCode'"
+$ adb -s 11f98015 shell input keyevent 66          # Enter submits the form
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T31-1-stdin-rc13.png
+(no output)
+```
+
+Observed in `20261128-fix-D1-T31-1-stdin-rc13.png`:
+
+```text
+FINISHED IN 28.1 S (EXIT 0)
+LeoCode
+Got: LeoCode
+```
+
+## T31-3 — traceback frame jump
+
+Workspace `m1` → `zero.py`, Run, then tap the `zero.py` frame.
+
+```console
+$ adb -s 11f98015 shell input tap 733 293          # zero.py tab
+$ adb -s 11f98015 shell input tap 903 170          # Run
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T31-3-card-styled.png
+$ adb -s 11f98015 shell input tap 586 1612         # tap the "line 2" frame
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T31-3-jump-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+FINISHED IN 565 MS (EXIT 1)
+ZeroDivisionError  Division by Zero
+  File "/data/data/dev.leocode/files/workspaces/default/m1/zero.py", line 2, in f
+```
+
+After the tap the editor opens `m1/zero.py` with line 2 highlighted.
+
+## T32-1 / T32-2 / T32-3 — Python REPL
+
+Terminal › Python REPL. `1+1` was sent as key events to avoid the `input text`
+IME duplication (`KEYCODE_1`, `KEYCODE_PLUS`, `KEYCODE_1`).
+
+```console
+$ adb -s 11f98015 shell input keyevent 8    # 1
+$ adb -s 11f98015 shell input keyevent 81   # +
+$ adb -s 11f98015 shell input keyevent 8    # 1
+$ adb -s 11f98015 shell input keyevent 66   # Enter
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T32-2-repl.png
+(no output)
+
+$ adb -s 11f98015 shell input tap 470 1092  # ^D
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T32-3-exit-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+Python 3.14.10 (tags/v3.14.10:b703b2c, ...) ...
+>>> 1+1
+2
+>>> :/data/data/dev.leocode/files/workspaces/default $
+```
+
+## T31-4 — missing module card
+
+```console
+$ adb -s 11f98015 shell input tap 475 264   # missing.py tab
+$ adb -s 11f98015 shell input tap 903 170   # Run
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T31-4-missing-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+FINISHED IN 382 MS (EXIT 1)
+ModuleNotFoundError  Module "unknown_package_xyz" Not Found
+Suggestion: pip install unknown_package_xyz
+```
+
+## T33-1 — indent and dedent
+
+Empty `t.py`. `def f():` + Enter, then `return 1` + Enter.
+
+```console
+$ adb -s 11f98015 shell "input text 'def%sf():'"
+$ adb -s 11f98015 shell input keyevent 66
+$ adb -s 11f98015 shell "input text 'return%s1'"
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T33-1-indent-rc13.png
+$ adb -s 11f98015 shell input keyevent 66
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T33-1-dedent-rc13.png
+(no output)
+```
+
+Observed: line 2 `    return 1` (4 spaces), line 3 cursor at column 0.
+
+## T33-2 — snippet buttons
+
+Toolbar scrolled to the snippet row, then `def`, `class`, `main`, `for`, `try` tapped.
+
+```console
+$ adb -s 11f98015 shell input swipe 900 1264 150 1264 400
+$ adb -s 11f98015 shell input tap 279 1211   # def
+$ adb -s 11f98015 shell input tap 405 1211   # class
+$ adb -s 11f98015 shell input tap 593 1211   # main
+$ adb -s 11f98015 shell input tap 747 1211   # for
+$ adb -s 11f98015 shell input tap 884 1211   # try
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T33-2-snippets-rc13.png
+(no output)
+```
+
+Observed:
+
+```text
+def class if __name__ == "__main__":
+    for try:
+```
+
+## T33-4 — compatibility sheet
+
+Runtimes › Compatibility, then scrolled to the package list.
+
+```console
+$ adb -s 11f98015 shell input tap 912 1052
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T33-4-baseline-rc13.png
+$ adb -s 11f98015 shell input swipe 540 1700 540 700 400
+$ adb -s 11f98015 exec-out screencap -p > docs/device-reports/20261128-fix-D1-T33-4-packages-rc13.png
+(no output)
+```
+
+Observed: `Python Compatibility Matrix` with `Python Runtime Baseline` and
+`Tested Packages (9 of 9)`.
+
+## Logcat
+
+```console
+$ adb -s 11f98015 logcat -d | grep -E "LeoCode|chromium|Console" > docs/device-reports/20261128-fix-D1-11f98015-logcat.txt
+$ wc -l docs/device-reports/20261128-fix-D1-11f98015-logcat.txt
+1261 docs/device-reports/20261128-fix-D1-11f98015-logcat.txt
+```
+
+Only LeoCodeWeb lines in the capture (one per app start):
+
+```text
+11-28 12:11:16.820  8119  8119 D LeoCodeWeb: The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)
+11-28 12:41:25.471 11426 11426 D LeoCodeWeb: The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.  (https://appassets.androidplatform.net/assets/web/index.html?mode=system&theme=dark:14)
+```
+
+No `Uncaught` / console error lines for the app were logged.

@@ -11,6 +11,7 @@ import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class ProcessSupervisorTest {
 
@@ -211,6 +212,37 @@ class ProcessSupervisorTest {
 
             assertTrue("stdin stayed open", done.await(5, TimeUnit.SECONDS))
             assertTrue(out.toString().contains("eof"))
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `writes stdin to a running job when stdin is enabled`() {
+        val out = StringBuffer()
+        val done = CountDownLatch(1)
+        val exitCode = AtomicInteger(-1)
+        val supervisor = ProcessSupervisor()
+        try {
+            val handle = supervisor.start(
+                ProcessSupervisor.Spec(
+                    argv = listOf("/bin/sh", "-c", "IFS= read -r line && printf 'Got:%s' \"\$line\""),
+                    cwd = workDir(),
+                    timeoutMs = 5_000,
+                    stdin = true
+                ),
+                onStdout = { out.append(it) },
+                onStderr = {},
+                onExit = { code ->
+                    exitCode.set(code)
+                    done.countDown()
+                }
+            )
+
+            assertTrue(supervisor.writeStdin(handle.jobId, "LeoCode\n"))
+            assertTrue("process did not finish", done.await(5, TimeUnit.SECONDS))
+            assertEquals(0, exitCode.get())
+            assertEquals("Got:LeoCode", out.toString())
         } finally {
             supervisor.close()
         }

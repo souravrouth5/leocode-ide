@@ -75,6 +75,90 @@ class ProcHandlerTest {
         }
     }
 
+    @Test
+    fun `proc stdin writes to a job started with stdin enabled`() {
+        val root = Files.createTempDirectory("leocode-proc-handler").toFile()
+            .also { it.deleteOnExit() }
+        val workspace = Workspace(root).apply { ensure() }
+        val supervisor = ProcessSupervisor()
+        val handler = ProcHandler(
+            workspace,
+            PathJail(workspaceRoot = workspace.workspacesRoot),
+            supervisor,
+            { workspace.defaultWorkspace }
+        )
+
+        val output = StringBuffer()
+        val done = CountDownLatch(1)
+        val sink = object : StreamSink {
+            override fun event(name: String, payload: kotlinx.serialization.json.JsonElement) {
+                if (name == "proc.exit") done.countDown()
+            }
+
+            override fun text(name: String, text: String) {
+                if (name == "proc.stdout") output.append(text)
+            }
+
+            override fun bytes(name: String, bytes: ByteArray) = Unit
+        }
+
+        try {
+            val reply = handler.handle(
+                "proc.run",
+                Json.encodeToJsonElement(ProcRunRequest.serializer(), ProcRunRequest(
+                    argv = listOf("/bin/sh", "-c", "IFS= read -r line && printf 'Got:%s' \"\$line\""),
+                    cwd = ".",
+                    stdin = true
+                )).jsonObject,
+                sink
+            )
+            val jobId = reply.jsonObject["jobId"]!!.toString().trim('"')
+
+            val written = handler.handle(
+                "proc.stdin",
+                Json.encodeToJsonElement(ProcStdinRequest.serializer(), ProcStdinRequest(
+                    jobId = jobId,
+                    data = "LeoCode\n"
+                )).jsonObject
+            )
+            assertEquals(
+                true,
+                written.jsonObject["written"]!!.toString().toBoolean()
+            )
+            assertTrue("process did not exit", done.await(5, TimeUnit.SECONDS))
+            assertEquals("Got:LeoCode", output.toString())
+        } finally {
+            supervisor.close()
+        }
+    }
+
+    @Test
+    fun `proc stdin reports false for an unknown job`() {
+        val root = Files.createTempDirectory("leocode-proc-handler").toFile()
+            .also { it.deleteOnExit() }
+        val workspace = Workspace(root).apply { ensure() }
+        val supervisor = ProcessSupervisor()
+        val handler = ProcHandler(
+            workspace,
+            PathJail(workspaceRoot = workspace.workspacesRoot),
+            supervisor,
+            { workspace.defaultWorkspace }
+        )
+
+        try {
+            val reply = handler.handle(
+                "proc.stdin",
+                Json.encodeToJsonElement(ProcStdinRequest.serializer(), ProcStdinRequest(
+                    jobId = "missing",
+                    data = "x\n"
+                )).jsonObject
+            )
+            assertEquals(false, reply.jsonObject["written"]!!.toString().toBoolean())
+        } finally {
+            supervisor.close()
+        }
+    }
+
     private class FakeRootPrefs(private var enabled: Boolean = true) : dev.leocode.core.RootManager.RootPrefs {
         override fun isEnabled(): Boolean = enabled
         override fun setEnabled(enabled: Boolean) {

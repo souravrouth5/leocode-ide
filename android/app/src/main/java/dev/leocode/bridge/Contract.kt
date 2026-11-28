@@ -272,11 +272,18 @@ data class ProcRunRequest(
     val cwd: String? = null,
     val env: Map<String, String> = emptyMap(),
     val timeoutMs: Long? = null,
-    val root: Boolean = false
+    val root: Boolean = false,
+    val stdin: Boolean = false
 )
 
 @Serializable
 data class ProcRunReply(val jobId: String, val pid: Int)
+
+@Serializable
+data class ProcStdinRequest(val jobId: String? = null, val data: String = "")
+
+@Serializable
+data class ProcStdinReply(val written: Boolean)
 
 @Serializable
 data class ProcCancelRequest(val jobId: String? = null)

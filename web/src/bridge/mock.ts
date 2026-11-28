@@ -1632,7 +1632,13 @@ export class MockBridge implements Bridge {
     if (_options?.root && !this.rootEnabled) {
       throw new BridgeError("E_ROOT_DENIED", "root mode is not enabled")
     }
-    onStart?.({ jobId: "mock-job-1", cancel: () => {} })
+    onStart?.({
+      jobId: "mock-job-1",
+      cancel: () => {},
+      // The mock runtime exits immediately and never reads stdin; the run store
+      // echoes the sent line into the sheet, which is what dev mode shows.
+      write: () => {}
+    })
     const emit = (data: string, stream: ProcessEvent["stream"] = "stdout") =>
       onEvent({ stream, data })
 

@@ -349,7 +349,8 @@ export function createRunStore(deps: RunDeps): RunStore {
           try {
             const runOptions = {
               ...(plan?.env ? { env: plan.env } : {}),
-              root: get().runAsRoot
+              root: get().runAsRoot,
+              stdin: true
             }
             const code = await bridge.run(
               argv,
@@ -421,9 +422,7 @@ export function createRunStore(deps: RunDeps): RunStore {
         const current = get().run
         if (!current || !current.running) return
         const line = text.endsWith("\n") ? text : text + "\n"
-        if (handle && typeof (handle as any).write === "function") {
-          (handle as any).write(line)
-        }
+        handle?.write?.(line)
         buffer.push({ stream: "stdout", text: line })
         flush()
       },
